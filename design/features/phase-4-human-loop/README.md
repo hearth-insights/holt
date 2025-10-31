@@ -13,25 +13,17 @@
 
 📋 **See [MILESTONES.md](./MILESTONES.md)** for the complete breakdown of 4 implementable milestones, including M4.3 (Instance Destruction).
 
-## **Key Features for This Phase**
+## Key Features for This Phase
 
-1. **Question-Answer System**
-   - Question artefact escalation
-   - Human interaction via CLI commands
-   - Answer artefact creation and workflow unblocking
-   - Scriptable Q&A interface
+1.  **Advanced Question/Answer System**: Enabling both Agent-to-Human and Agent-to-Agent question-and-answer workflows.
 
-2. **Monitoring and Health Checks**
-   - Health check endpoints for all components
-   - Structured logging and observability
-   - Performance monitoring and metrics
-   - Operational debugging tools
+2.  **Interactive Debugging & Control**: Allowing human operators to set "breakpoints" in a workflow to pause, inspect, and manually intervene.
 
-3. **Production Readiness**
-   - Comprehensive error handling
-   - Graceful degradation and recovery
-   - Resource management and limits
-   - Security and privilege controls
+3.  **Production-Grade State Management**: Implementing persistent data storage for Holt instances, and a `holt destroy` command for permanent cleanup.
+
+4.  **The Holt Development Lifecycle Demo**: A powerful "dogfooding" demo where Holt agents are used to build a new feature for Holt itself.
+
+5.  **Production Documentation**: Comprehensive guides and runbooks for all new Phase 4 features.
 
 ## **Implementation Constraints**
 
