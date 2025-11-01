@@ -15,39 +15,55 @@
 Phase 4 focuses on adding sophisticated human-in-the-loop interaction, production-level data management, and proving the power of the platform by using it to develop itself.
 
 ### **M4.1: Advanced Question/Answer System**
-**Status**: Not Started
+**Status**: Design Complete
 **Dependencies**: Phase 3 completion
 
 **Goal**: Enable agents to ask clarifying questions to other agents or escalate to a human when necessary.
 
 **Scope**:
-- **Agent-to-Agent Questions**: Implement a mechanism for an agent working on a claim to create a `Question` artefact that is directed at the `produced_by_role` of a source artefact. The target agent can then produce an `Answer` artefact, unblocking the original claim.
+- **Agent-to-Agent Questions**: Implement a mechanism for an agent working on a claim to create a `Question` artefact that is directed at the `produced_by_role` of a source artefact. The target agent can then produce a new version of the questioned artefact, triggering the M3.3 automated feedback loop.
 - **Agent-to-Human Escalation**: If a question cannot be answered by another agent (or is directed to a `user` role), it should be escalated to the human operator.
 - **CLI Tooling**: Implement `holt questions [--wait]` and `holt answer <question-id> "response"`.
-- **Orchestrator Logic**: The orchestrator must manage the new `Question`/`Answer` state, pausing and unblocking claims as appropriate.
+- **Orchestrator Logic**: The orchestrator treats Questions as "late review feedback" that terminates the original claim and creates a `pending_assignment` claim for the original author to produce a clearer version.
+- **Iteration Limits**: Questions reuse `orchestrator.max_review_iterations` to prevent infinite Q&A loops.
 
-**Design Document**: TBD
+**Design Document**: [M4.1-advanced-question-answer-system.md](./M4.1-advanced-question-answer-system.md)
 
 ---
 
 ### **M4.2: Interactive Debugging & Control**
-**Status**: Not Started
-**Dependencies**: M4.1
+**Status**: Design Complete
+**Dependencies**: Phase 3 completion
 
-**Goal**: Allow a human operator to proactively intercept a workflow at critical points for inspection and manual intervention.
+**Goal**: Provide a traditional, breakpoint-based interactive debugger that allows human operators to attach to a running Holt instance, pause workflows at specific conditions, inspect state, and manually intervene.
 
 **Scope**:
-- **Breakpoint System**: Introduce a new configuration section in `holt.yml` or a CLI command that allows a user to set "breakpoints" that trigger on the creation of artefacts with a specific `type` (e.g., `CodeCommit`).
-- **Workflow Pause**: When a breakpoint is hit, the orchestrator will pause all new claim grants for that workflow thread.
-- **Manual Intervention**: While paused, the human operator can use the CLI to inspect the state and manually create a `Review` artefact (approving or rejecting the work), forcing the system down a specific path.
-- **Resume Workflow**: A new CLI command to `resume` a paused workflow.
+- **`holt debug` Command**: A new top-level command that attaches to a running instance and starts an interactive debugging session with a `(holt-debug)` prompt.
+- **Ephemeral Breakpoints**: Breakpoints are session-specific and exist only while the debugger is connected. When the debugger disconnects (gracefully or via crash), all breakpoints are automatically cleared and workflows resume.
+- **Interactive Session Commands**: Support for traditional debugger commands:
+  - `continue` (c) - Resume workflow until next breakpoint
+  - `next` (n) - Single-step through orchestrator events
+  - `break` (b) - Set breakpoint with glob patterns (e.g., `artefact.type=*Spec`, `claim.status=pending_review`)
+  - `print` (p) - Inspect artefacts
+  - `reviews` - List pending review claims
+  - `review <claim-id> [--approve|--reject]` - Manually approve/reject reviews
+  - `breakpoints` (bp) - List active breakpoints
+  - `clear <id>` - Remove breakpoint
+  - `exit` - Disconnect and clear all breakpoints
+- **Pub/Sub Communication**: CLI and Orchestrator communicate via Redis Pub/Sub channels (`debug:command` and `debug:event`).
+- **Orchestrator Pause Logic**: The orchestrator's main event loop checks for breakpoints before processing each event and blocks when paused, waiting for continue/step commands.
+- **Context-Aware Manual Review**: The `review` command only works when paused on a `claim.status=pending_review` breakpoint, preventing mistakes.
+- **Safety Features**:
+  - Session heartbeat with 30-second TTL (auto-resume if debugger crashes)
+  - Single active session only (prevent conflicting commands)
+  - All manual interventions create proper Review artefacts for audit trail
 
-**Design Document**: TBD
+**Design Document**: [M4.2-interactive-debugging-control.md](./M4.2-interactive-debugging-control.md)
 
 ---
 
 ### **M4.3: Context Caching**
-**Status**: Not Started
+**Status**: Design Complete (Approved)
 **Dependencies**: None
 
 **Goal**: Enable agents to perform an expensive, one-time context discovery and then cache that context on the Blackboard for efficient reuse across all subsequent runs and rework cycles for that thread of work.
@@ -57,8 +73,10 @@ Phase 4 focuses on adding sophisticated human-in-the-loop interaction, productio
 - **Knowledge Artefact**: The pup will process the `checkpoints` array to create special `Knowledge` artefacts on the Blackboard, linked to the current work thread's `logical_id`.
 - **Pup Logic**: The pup's context assembly logic will be enhanced to find these `Knowledge` artefacts and automatically inject their content into the agent's context on subsequent runs.
 - **Agent Logic**: The pup will provide a `context_is_declared` flag to the agent, allowing the agent's tool script to know whether it needs to perform its one-time discovery logic or if the context has already been cached.
+- **Global Knowledge Index**: A Redis hash maps globally unique knowledge names to version threads, preventing naming collisions.
+- **CLI Provisioning**: New `holt provision` command for manually creating Knowledge artefacts from files, URLs, or commands.
 
-**Design Document**: TBD
+**Design Document**: [M4.3-context-caching.md](./M4.3-context-caching.md)
 
 ---
 
