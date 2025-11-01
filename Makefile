@@ -116,6 +116,11 @@ test-all: test test-pup test-integration test-e2e
 	@echo "  E2E tests:         ✓"
 	@echo ""
 
+# Run all tests and show only the failures
+test-failed:
+	@echo "Running all tests and filtering for failures..."
+	@$(MAKE) test-all 2>&1 | ./tools/filter-test-failures.sh || true
+
 # Build the holt binary
 build:
 	@echo "Building holt CLI..."
