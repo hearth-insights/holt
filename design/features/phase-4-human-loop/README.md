@@ -19,11 +19,13 @@
 
 2.  **Interactive Debugging & Control**: Allowing human operators to set "breakpoints" in a workflow to pause, inspect, and manually intervene.
 
-3.  **Production-Grade State Management**: Implementing persistent data storage for Holt instances, and a `holt destroy` command for permanent cleanup.
+3.  **Context Caching**: A powerful mechanism for agents to dynamically discover and cache large, reusable context for a specific thread of work.
 
-4.  **The Holt Development Lifecycle Demo**: A powerful "dogfooding" demo where Holt agents are used to build a new feature for Holt itself.
+4.  **Production-Grade State Management**: Implementing persistent data storage for Holt instances, and a `holt destroy` command for permanent cleanup.
 
-5.  **Production Documentation**: Comprehensive guides and runbooks for all new Phase 4 features.
+5.  **The Holt Development Lifecycle Demo**: A powerful "dogfooding" demo where Holt agents are used to build a new feature for Holt itself.
+
+6.  **Production Documentation**: Comprehensive guides and runbooks for all new Phase 4 features.
 
 ## **Implementation Constraints**
 

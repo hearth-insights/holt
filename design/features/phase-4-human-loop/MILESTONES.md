@@ -46,7 +46,23 @@ Phase 4 focuses on adding sophisticated human-in-the-loop interaction, productio
 
 ---
 
-### **M4.3: Production-Grade State Management**
+### **M4.3: Context Caching**
+**Status**: Not Started
+**Dependencies**: None
+
+**Goal**: Enable agents to perform an expensive, one-time context discovery and then cache that context on the Blackboard for efficient reuse across all subsequent runs and rework cycles for that thread of work.
+
+**Scope**:
+- **Checkpoint Side-Effect**: Enhance the agent tool's output contract to include an optional `checkpoints` array. This allows an agent to produce its main work artefact and checkpoint its context in a single turn.
+- **Knowledge Artefact**: The pup will process the `checkpoints` array to create special `Knowledge` artefacts on the Blackboard, linked to the current work thread's `logical_id`.
+- **Pup Logic**: The pup's context assembly logic will be enhanced to find these `Knowledge` artefacts and automatically inject their content into the agent's context on subsequent runs.
+- **Agent Logic**: The pup will provide a `context_is_declared` flag to the agent, allowing the agent's tool script to know whether it needs to perform its one-time discovery logic or if the context has already been cached.
+
+**Design Document**: TBD
+
+---
+
+### **M4.4: Production-Grade State Management**
 **Status**: Not Started
 **Dependencies**: None
 
@@ -62,9 +78,9 @@ Phase 4 focuses on adding sophisticated human-in-the-loop interaction, productio
 
 ---
 
-### **M4.4: The Holt Development Lifecycle Demo**
+### **M4.5: The Holt Development Lifecycle Demo**
 **Status**: Not Started
-**Dependencies**: M4.1, M4.2, M4.3
+**Dependencies**: M4.1, M4.2, M4.3, M4.4
 
 **Goal**: Create the ultimate "dogfooding" demo, showcasing a team of Holt agents building a new feature for Holt itself.
 
@@ -72,7 +88,7 @@ Phase 4 focuses on adding sophisticated human-in-the-loop interaction, productio
 - **Demo Scenario**: The goal will be to "add a new `holt stats` command that shows the number of artefacts and claims".
 - **New Agents**: Create a clan of agents for the demo:
     - `designer-agent`: Creates a feature design document.
-    - `go-coder-agent`: Implements the Go code for the CLI command and tests.
+    - `go-coder-agent`: Implements the Go code for the CLI command and tests. It will use the new Context Caching feature to load relevant design docs.
     - `reviewer-agent`: Reviews code and design documents.
     - `test-runner-agent`: A tool-based agent that runs `make test` and reports results.
 - **Workflow**: The demo will showcase the full lifecycle: design -> review -> implementation -> testing -> human approval, including the potential for agent-to-agent questions and human breakpoints.
@@ -81,14 +97,14 @@ Phase 4 focuses on adding sophisticated human-in-the-loop interaction, productio
 
 ---
 
-### **M4.5: Production Documentation**
+### **M4.6: Production Documentation**
 **Status**: Not Started
 **Dependencies**: All other M4 milestones.
 
 **Goal**: Document all new Phase 4 features for end-users.
 
 **Scope**:
-- Create user guides for the Q&A system and interactive debugging features.
+- Create user guides for the Q&A system, interactive debugging, and context caching features.
 - Document the new persistent state model and the `holt down` vs. `holt destroy` behavior.
 - Create a new "How-To" guide walking through the new `holt-development-lifecycle-demo`.
 - Update all relevant sections of the `README.md`, `QUICK_REFERENCE.md`, etc.
