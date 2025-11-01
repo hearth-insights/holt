@@ -883,3 +883,16 @@ func (c *Client) ZRem(ctx context.Context, key string, members ...string) error 
 func IsNotFound(err error) bool {
 	return errors.Is(err, redis.Nil)
 }
+
+// GetRedisClient returns the underlying Redis client for advanced operations.
+// M4.1: Used by CLI commands to scan for artefacts (e.g., holt questions).
+// Warning: This exposes the raw Redis client - use carefully to avoid breaking instance namespacing.
+func (c *Client) GetRedisClient() *redis.Client {
+	return c.rdb
+}
+
+// GetInstanceName returns the instance name this client is scoped to.
+// M4.1: Used by CLI commands for key pattern construction.
+func (c *Client) GetInstanceName() string {
+	return c.instanceName
+}

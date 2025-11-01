@@ -250,13 +250,29 @@ The pup validates commit hashes exist before creating artefacts, ensuring integr
 
 ### Human-in-the-Loop
 
-Holt is designed for human oversight:
+Holt is designed for human oversight with first-class Question/Answer support (M4.1):
 
-- **Question artefacts**: Agents can ask humans for guidance (Phase 4)
-- **Review phase**: Humans or review agents can provide feedback before execution (Phase 3)
-- **Complete audit trail**: Every decision is traceable for compliance
-- **Manual intervention**: Humans can inspect state and intervene at any point
+- **Question artefacts**: Agents can ask for clarification when encountering ambiguous requirements. Questions trigger the M3.3 automated feedback loop, terminating the questioning agent's claim and assigning rework to the original author.
+- **Review phase**: Humans or review agents provide feedback before execution (M3.3)
+- **Complete audit trail**: Every question and answer is captured as immutable artefacts, creating a full compliance history
+- **Manual intervention**: Humans can inspect state and intervene at any point via CLI
+
+**Example Q&A Flow**:
+```bash
+# Agent encounters ambiguous requirement and produces Question artefact
+# Orchestrator emits HUMAN_INPUT_REQUIRED workflow event
+
+# Human checks for questions
+holt questions
+
+# Human provides clarified requirements
+holt answer abc-123 "Build REST API with JWT authentication"
+
+# Orchestrator creates new version of the questioned artefact with answer
+# New claim is created for the clarified requirements
 ```
+
+Questions are treated as "late review feedback" - rather than pausing workflows, the original artefact is superseded with a clarified version, maintaining agent statelessness and preventing Q&A chain pollution.
 
 ---
 
@@ -311,11 +327,15 @@ holt hoard
 holt logs git-agent
 holt logs orchestrator
 
-# View questions requiring human input (Phase 4)
-holt questions --wait
+# View questions requiring human input (M4.1)
+holt questions                         # Show oldest or wait for new question
+holt questions --watch                 # Continuously stream questions
+holt questions --since 1h              # List all unanswered from last hour
+holt questions --watch --exit-on-complete --output jsonl  # Stream until Terminal
 
-# Answer a question (Phase 4)
-holt answer <question-id> "Use JWT tokens with RS256"
+# Answer a question (M4.1)
+holt answer abc-123 "Use JWT tokens with RS256 signing"
+holt answer def-456 "Build REST API with null handling" --then-questions
 ```
 
 ---

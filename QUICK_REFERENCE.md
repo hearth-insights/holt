@@ -97,10 +97,43 @@ pending_review → pending_parallel → pending_exclusive → complete
 ```json
 {
   "artefact_type": "string",
-  "artefact_payload": "string", 
-  "summary": "string"
+  "artefact_payload": "string",
+  "summary": "string",
+  "structural_type": "Standard|Review|Question|Answer|Failure|Terminal" // Optional, defaults to "Standard"
 }
 ```
+
+## **Special Artefact Payloads (M4.1+)**
+
+### **Question Artefact Payload**
+When an agent produces a Question artefact (`structural_type: "Question"`), the `artefact_payload` field must contain a JSON-encoded string with this schema:
+
+```json
+{
+  "question_text": "Is null handling in scope for this API?",
+  "target_artefact_id": "abc-123-def-456" // UUID of the artefact being questioned
+}
+```
+
+Example agent output producing a Question:
+```json
+{
+  "structural_type": "Question",
+  "artefact_type": "ClarificationNeeded",
+  "artefact_payload": "{\"question_text\": \"Should we use REST or GraphQL?\", \"target_artefact_id\": \"xyz-789\"}",
+  "summary": "Agent needs clarification on API architecture"
+}
+```
+
+**Question Flow**:
+1. Agent produces Question artefact referencing a target artefact
+2. Orchestrator terminates the questioning agent's claim
+3. Orchestrator creates `pending_assignment` claim for the original author of the target artefact
+4. Original author receives the Question in `additional_context_ids` and produces a new version
+5. New version increments `version` and includes Question ID in `source_artefacts`
+6. Orchestrator creates new claim for the clarified artefact
+
+**Iteration Limits**: Questions reuse `orchestrator.max_review_iterations` from `holt.yml`. If an artefact is questioned beyond this limit, the orchestrator creates a Failure artefact and terminates the workflow.
 
 ## **Common CLI Commands**
 
@@ -146,10 +179,53 @@ Retrieves and displays the full details for a single artefact.
 
 Views the logs for a specific running or stopped container (e.g., `holt logs Coder`).
 
-### **Human-in-the-Loop (Phase 4+)**
+### **Human-in-the-Loop (M4.1+)**
+
+**`holt questions [flags]`**
+
+Display unanswered Question artefacts from agents. Questions are a form of "late review feedback" that trigger the M3.3 automated feedback loop.
+
+Flags:
+- `--watch` - Continuously stream Questions as they appear
+- `--exit-on-complete` - Exit when Terminal artefact is created (used with --watch)
+- `--since <duration>` - Show all unanswered Questions from time range (e.g., `1h`, `30m`)
+- `--output jsonl` - Output as line-delimited JSON for scripting
+
+Examples:
 ```bash
-holt questions [--wait]                  # List questions from agents
-holt answer <question-id> "response"     # Answer an agent's question
+# Show oldest unanswered question or wait for new one (default)
+holt questions
+
+# Watch for questions continuously
+holt questions --watch
+
+# List all unanswered questions from last hour
+holt questions --since 1h
+
+# Stream questions as JSONL until workflow completes
+holt questions --watch --exit-on-complete --output jsonl
+```
+
+**`holt answer <question-id> "clarified-text" [flags]`**
+
+Respond to a Question by creating a new version of the questioned artefact with clarified content. The new version automatically links to both the original artefact and the Question artefact.
+
+Flags:
+- `--then-questions` - After answering, immediately run `holt questions` (default behavior)
+
+Examples:
+```bash
+# Basic usage (supports ID prefix matching, minimum 6 chars if ambiguous)
+holt answer abc-123 "Build REST API with JWT auth (not OAuth)"
+
+# Multi-line answer (quotes preserve newlines)
+holt answer def-456 "Requirements:
+1. Support null values
+2. Return 400 for invalid input
+3. Document edge cases"
+
+# Answer and watch for next question (workflow chaining)
+holt answer abc-123 "Clarified requirements here" --then-questions
 ```
 
 ## **Health Check Endpoints**

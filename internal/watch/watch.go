@@ -728,6 +728,33 @@ func (f *defaultFormatter) FormatWorkflow(event *blackboard.WorkflowEvent, times
 			timestamp, newVersion, producedByRole, artefactType, newArtefactID)
 		return err
 
+	case "human_input_required":
+		// M4.1: Display human input required event with distinct formatting
+		questionID, _ := event.Data["question_id"].(string)
+		questionText, _ := event.Data["question_text"].(string)
+		targetArtefactID, _ := event.Data["target_artefact_id"].(string)
+
+		_, err := fmt.Fprintf(f.writer, "[%s] ⚠️  HUMAN_INPUT_REQUIRED\n", timestamp)
+		if err != nil {
+			return err
+		}
+		_, err = fmt.Fprintf(f.writer, "  Question %s\n", truncateID(questionID))
+		if err != nil {
+			return err
+		}
+		if questionText != "" {
+			_, err = fmt.Fprintf(f.writer, "  \"%s\"\n", questionText)
+			if err != nil {
+				return err
+			}
+		}
+		_, err = fmt.Fprintf(f.writer, "  Target: artefact %s\n", truncateID(targetArtefactID))
+		if err != nil {
+			return err
+		}
+		_, err = fmt.Fprintf(f.writer, "\n  → Run: holt questions\n")
+		return err
+
 	default:
 		_, err := fmt.Fprintf(f.writer, "[%s] ❓ Unknown event: %s\n", timestamp, event.Event)
 		return err
@@ -825,6 +852,15 @@ func truncateImageID(imageID string) string {
 	}
 
 	return imageID
+}
+
+// truncateID truncates a UUID to the first 8 characters for display.
+// M4.1: Used for displaying Question and artefact IDs in watch output.
+func truncateID(id string) string {
+	if len(id) >= 8 {
+		return id[:8]
+	}
+	return id
 }
 
 // formatTimestampMs formats a Unix millisecond timestamp as HH:MM:SS.mmm.

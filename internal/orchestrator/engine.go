@@ -190,10 +190,19 @@ func (e *Engine) processArtefact(ctx context.Context, artefact *blackboard.Artef
 // processArtefactForPhases checks if this artefact completes a phase for any active claims.
 // M3.2: Tracks artefacts produced by granted agents and triggers phase completion checks.
 // M3.3: Also handles pending_assignment claims (feedback claims).
+// M4.1: Also handles Question artefacts (triggers feedback loop).
 func (e *Engine) processArtefactForPhases(ctx context.Context, artefact *blackboard.Artefact) {
 	// Skip non-phase-relevant artefacts
 	if artefact.StructuralType == blackboard.StructuralTypeTerminal ||
 		artefact.StructuralType == blackboard.StructuralTypeFailure {
+		return
+	}
+
+	// M4.1: Handle Question artefacts (trigger feedback loop)
+	if artefact.StructuralType == blackboard.StructuralTypeQuestion {
+		if err := e.handleQuestionArtefact(ctx, artefact); err != nil {
+			log.Printf("[Orchestrator] Error handling Question artefact %s: %v", artefact.ID, err)
+		}
 		return
 	}
 
