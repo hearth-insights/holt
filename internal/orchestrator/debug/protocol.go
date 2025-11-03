@@ -132,3 +132,44 @@ func (ph *ProtocolHandler) PublishReviewCompleteEvent(ctx context.Context, sessi
 
 	return ph.PublishEvent(ctx, EventReviewComplete, sessionID, payload)
 }
+
+// Package-level helper functions for CLI usage
+
+// PublishCommand publishes a debug command from CLI to orchestrator
+func PublishCommand(ctx context.Context, redisClient *redis.Client, instanceName string, cmd *Command) error {
+	cmdJSON, err := json.Marshal(cmd)
+	if err != nil {
+		return fmt.Errorf("failed to marshal command: %w", err)
+	}
+
+	channel := CommandChannel(instanceName)
+	if err := redisClient.Publish(ctx, channel, cmdJSON).Err(); err != nil {
+		return fmt.Errorf("failed to publish command: %w", err)
+	}
+
+	return nil
+}
+
+// PublishEvent publishes a debug event (package-level for CLI)
+func PublishEvent(ctx context.Context, redisClient *redis.Client, instanceName string, event *Event) error {
+	eventJSON, err := json.Marshal(event)
+	if err != nil {
+		return fmt.Errorf("failed to marshal event: %w", err)
+	}
+
+	channel := EventChannel(instanceName)
+	if err := redisClient.Publish(ctx, channel, eventJSON).Err(); err != nil {
+		return fmt.Errorf("failed to publish event: %w", err)
+	}
+
+	return nil
+}
+
+// ParseEvent parses a debug event from JSON
+func ParseEvent(data []byte) (*Event, error) {
+	var event Event
+	if err := json.Unmarshal(data, &event); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal event: %w", err)
+	}
+	return &event, nil
+}
