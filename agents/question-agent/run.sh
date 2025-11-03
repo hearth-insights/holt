@@ -9,6 +9,8 @@ input=$(cat)
 target_id=$(echo "$input" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 target_type=$(echo "$input" | grep -o '"type":"[^"]*"' | head -1 | cut -d'"' -f4)
 target_structural_type=$(echo "$input" | grep -o '"structural_type":"[^"]*"' | head -1 | cut -d'"' -f4)
+# Check if source_artefacts array is non-empty (contains at least one ID)
+has_sources=$(echo "$input" | grep -o '"source_artefacts":\[[^]]*[a-f0-9-][^]]*\]')
 
 # Log to stderr
 echo "Question agent received claim" >&2
@@ -18,8 +20,9 @@ echo "Target structural_type: $target_structural_type" >&2
 
 # Only ask questions about GoalDefined artefacts (not Questions, not other types)
 # This prevents infinite Question loops
-if [ "$target_type" = "GoalDefined" ] && [ "$target_structural_type" = "Standard" ]; then
-  echo "Asking question about GoalDefined artefact..." >&2
+# Also skip if this artefact is already an answer to a question (has non-empty source_artefacts)
+if [ "$target_type" = "GoalDefined" ] && [ "$target_structural_type" = "Standard" ] && [ -z "$has_sources" ]; then
+  echo "Asking question about original GoalDefined artefact (no sources)..." >&2
 
   # Output Question artefact
   cat <<EOF
