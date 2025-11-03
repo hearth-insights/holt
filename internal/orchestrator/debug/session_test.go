@@ -64,7 +64,8 @@ func TestSessionManager_CreateSession(t *testing.T) {
 	assert.Equal(t, sessionID, sessionData["session_id"])
 	assert.NotEmpty(t, sessionData["connected_at_ms"])
 	assert.NotEmpty(t, sessionData["last_heartbeat_ms"])
-	assert.Equal(t, "false", sessionData["is_paused"])
+	// Redis stores false as "0"
+	assert.Equal(t, "0", sessionData["is_paused"])
 
 	// Verify TTL is set
 	ttl, err := rdb.TTL(ctx, sessionKey).Result()
