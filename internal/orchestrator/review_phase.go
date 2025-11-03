@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/dyluth/holt/internal/orchestrator/debug"
 	"github.com/dyluth/holt/pkg/blackboard"
 )
 
@@ -108,6 +109,16 @@ func (e *Engine) CheckReviewPhaseCompletion(ctx context.Context, claim *blackboa
 			}
 		}
 	}
+
+	// M4.2: Emit review_consensus_reached event BEFORE making decision
+	e.logEvent("review_consensus_reached", map[string]interface{}{
+		"claim_id":       claim.ID,
+		"feedback_count": len(feedbackArtefacts),
+	})
+
+	// M4.2: Check breakpoints after review consensus (before decision)
+	targetArtefact, _ := e.client.GetArtefact(ctx, claim.ArtefactID)
+	e.evaluateBreakpointsAndPause(ctx, targetArtefact, claim, debug.EventReviewConsensusReached)
 
 	if len(feedbackArtefacts) > 0 {
 		// M3.3: Create feedback claim instead of just terminating

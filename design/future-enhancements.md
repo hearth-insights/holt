@@ -172,6 +172,39 @@ Terminal agents (e.g., ModulePackager) update the main branch pointer and checko
 
 ---
 
+## holt logs
+allow the user to use the holt cli to get the logs from the agent - this was originally scheduled for m3.10 but was missed/dropped by the looks of things (I think this could be got from the docker container, but i migt be wromg - we need to dig into this more - especially when the interface between pup and the tool it calls is via stdin/out)
+
+1. **Context**: What problem does this solve?
+2. **Idea**: High-level description of the enhancement
+3. **Benefits**: Why is this valuable?
+4. **Challenges**: What makes this hard?
+5. **Current Solution**: How are we handling this now?
+6. **When to Revisit**: Under what conditions should we implement this?
+7. **Design Considerations**: Key questions to answer before implementing---
+
+---
+
+## cryptographically certain audit trail
+
+for secure environments, we need to have our audit log & artefacts Cryptographically secure.
+this means: Artefacts & bids must be signed by the agents, grants and Claims must be signed by the orchestrator.
+Some sort of truly immutable datastore.. eg Blockchain instead of Redis for objects... ????!?
+
+1. **Context**: audit log is the key value proposition for finance.
+2. **Idea**: we need to have our audit trail be  cryptographically certain - so that when they are audited, the banks have certainty there was no tampering.
+3. **Benefits**: Critical for having confidence that the solution works.
+4. **Challenges**: What makes this hard?
+5. **Current Solution**: How are we handling this now?
+6. **When to Revisit**: Under what conditions should we implement this?
+7. **Design Considerations**: 
+- confirm how searchable this is - for speed - searching and querying artefacts is done a LOT - so it needs to be fast.  
+- We also need to know how scalable this needs to be - can we have all the analysis done on one blockchain? or will that explode somewhere?  
+- Does all info need to be on the blockchain? (eg cached context)  or do we need to still include redis
+- how do we get the notifications done? - do we need Redis still for notificaion channel?
+
+---
+
 ## Template for New Ideas
 
 When adding ideas, include:
