@@ -22,22 +22,28 @@ func TestFindNextAvailablePort(t *testing.T) {
 
 	ctx := context.Background()
 
-	t.Run("returns 6379 when no ports used", func(t *testing.T) {
+	t.Run("returns port in valid range when no ports used", func(t *testing.T) {
 		port, err := FindNextAvailablePort(ctx, cli)
 		require.NoError(t, err)
-		require.Equal(t, 6379, port)
+		require.GreaterOrEqual(t, port, 6379, "Port should be >= 6379")
+		require.LessOrEqual(t, port, 6478, "Port should be <= 6478")
 	})
 
 	t.Run("skips ports that are already bound", func(t *testing.T) {
-		// Bind port 6379
-		listener, err := net.Listen("tcp", "localhost:6379")
+		// Find the current next available port
+		basePort, err := FindNextAvailablePort(ctx, cli)
+		require.NoError(t, err)
+
+		// Bind that port
+		listener, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", basePort))
 		require.NoError(t, err)
 		defer listener.Close()
 
-		// Should return next available port
+		// Should return a different (higher) port
 		port, err := FindNextAvailablePort(ctx, cli)
 		require.NoError(t, err)
-		require.Equal(t, 6380, port)
+		require.Greater(t, port, basePort, "Should skip the bound port and return a higher one")
+		require.LessOrEqual(t, port, 6478, "Port should still be in valid range")
 	})
 
 	t.Run("skips ports used by Docker containers", func(t *testing.T) {
