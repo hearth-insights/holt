@@ -24,6 +24,11 @@ func setupTestRedis(t *testing.T) (*redis.Client, string) {
 
 	// Clear any existing test data
 	ctx := context.Background()
+
+	// Skip test if Redis is not available
+	if err := rdb.Ping(ctx).Err(); err != nil {
+		t.Skipf("Redis not available at localhost:6379: %v", err)
+	}
 	pattern := "holt:" + instanceName + ":debug:*"
 	keys, _ := rdb.Keys(ctx, pattern).Result()
 	if len(keys) > 0 {
