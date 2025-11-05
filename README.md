@@ -274,6 +274,44 @@ holt answer abc-123 "Build REST API with JWT authentication"
 
 Questions are treated as "late review feedback" - rather than pausing workflows, the original artefact is superseded with a clarified version, maintaining agent statelessness and preventing Q&A chain pollution.
 
+### Interactive Debugging
+
+Holt provides traditional breakpoint-based debugging for workflows (M4.2):
+
+- **Breakpoint control**: Pause workflows at specific conditions (artefact types, claim states, agent roles)
+- **Real-time inspection**: Examine artefacts, claims, and workflow state while paused
+- **Single-stepping**: Step through orchestrator events one at a time
+- **Manual intervention**: Approve/reject reviews, provide immediate feedback
+- **Safe sessions**: Ephemeral breakpoints, automatic cleanup, audit trail for all actions
+
+**Example Debug Workflow**:
+```bash
+# Start interactive debugger with breakpoints
+holt debug -b artefact.type=CodeCommit -b claim.status=pending_review
+
+# Interactive prompt appears:
+(holt-debug) print                    # Inspect current artefact
+(holt-debug) break artefact.type=*Spec   # Add more breakpoints dynamically
+(holt-debug) next                     # Single-step through one event
+(holt-debug) continue                 # Resume until next breakpoint
+
+# When paused at review:
+(holt-debug) reviews                  # List pending reviews
+(holt-debug) review claim-123 --reject "Needs error handling"
+(holt-debug) continue                 # Workflow proceeds with feedback
+
+# Clean exit
+(holt-debug) exit                     # Clears breakpoints, resumes workflow
+```
+
+**Debugger Safety Features:**
+- Session heartbeat (30-second TTL) - auto-resumes if debugger crashes
+- Single active session - prevents conflicting commands
+- Complete audit trail - all manual reviews logged as immutable artefacts
+- Context-aware commands - prevents mistakes (e.g., review only works when paused on review)
+
+See [docs/DEBUGGING_GUIDE.md](./docs/DEBUGGING_GUIDE.md) for comprehensive debugging workflows and examples.
+
 ---
 
 ## CLI Commands
@@ -336,6 +374,11 @@ holt questions --watch --exit-on-complete --output jsonl  # Stream until Termina
 # Answer a question (M4.1)
 holt answer abc-123 "Use JWT tokens with RS256 signing"
 holt answer def-456 "Build REST API with null handling" --then-questions
+
+# Interactive debugger (M4.2)
+holt debug                             # Attach to running instance
+holt debug -b artefact.type=CodeCommit # Set breakpoints on startup
+holt debug --name prod                 # Target specific instance
 ```
 
 ---

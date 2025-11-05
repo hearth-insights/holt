@@ -52,6 +52,10 @@ func (e *Engine) initializeDebugMonitoring(ctx context.Context) error {
 
 	if session != nil {
 		log.Printf("[Orchestrator] Detected active debug session: %s", session.ID)
+		e.logEvent("debug_session_detected", map[string]interface{}{
+			"session_id":      session.ID,
+			"connected_at_ms": session.ConnectedAtMs,
+		})
 	}
 
 	return nil
@@ -171,6 +175,14 @@ func (e *Engine) handleSetBreakpoints(ctx context.Context, debugSess *debugSessi
 
 		// Publish breakpoint_set event
 		debugSess.protocolHandler.PublishBreakpointSetEvent(ctx, cmd.SessionID, bp)
+
+		// Log breakpoint creation
+		e.logEvent("debug_breakpoint_set", map[string]interface{}{
+			"session_id":     cmd.SessionID,
+			"breakpoint_id":  bp.ID,
+			"condition_type": bp.ConditionType,
+			"pattern":        bp.Pattern,
+		})
 	}
 
 	return nil
@@ -183,7 +195,16 @@ func (e *Engine) handleClearBreakpoint(ctx context.Context, debugSess *debugSess
 		return fmt.Errorf("missing breakpoint_id in payload")
 	}
 
-	return debugSess.sessionMgr.RemoveBreakpoint(ctx, breakpointID)
+	if err := debugSess.sessionMgr.RemoveBreakpoint(ctx, breakpointID); err != nil {
+		return err
+	}
+
+	e.logEvent("debug_breakpoint_cleared", map[string]interface{}{
+		"session_id":    cmd.SessionID,
+		"breakpoint_id": breakpointID,
+	})
+
+	return nil
 }
 
 // M4.2: handleInspectArtefact returns artefact details
@@ -271,6 +292,15 @@ func (e *Engine) handleManualReview(ctx context.Context, debugSess *debugSession
 
 	log.Printf("[Orchestrator] Manual review submitted for claim %s: %s", claimID, feedback)
 
+	// Structured log for manual review
+	e.logEvent("debug_manual_review_submitted", map[string]interface{}{
+		"session_id": cmd.SessionID,
+		"claim_id":   claimID,
+		"decision":   "reject",
+		"feedback":   feedback,
+		"level":      "warn", // Manual intervention is noteworthy
+	})
+
 	return nil
 }
 
@@ -294,6 +324,10 @@ func (e *Engine) monitorSessionExpiration(ctx context.Context, debugSess *debugS
 				if session != nil {
 					debugSess.currentSession = session
 					log.Printf("[Orchestrator] Debug session activated: %s", session.ID)
+					e.logEvent("debug_session_activated", map[string]interface{}{
+						"session_id":      session.ID,
+						"connected_at_ms": session.ConnectedAtMs,
+					})
 				}
 				continue
 			}
@@ -306,13 +340,15 @@ func (e *Engine) monitorSessionExpiration(ctx context.Context, debugSess *debugS
 
 			if session == nil {
 				// Session expired
-				log.Printf("[Orchestrator] Debug session expired: %s", debugSess.currentSession.ID)
+				sessionID := debugSess.currentSession.ID
+				wasPaused := debugSess.currentSession.IsPaused
+				log.Printf("[Orchestrator] Debug session expired: %s", sessionID)
 
 				// Clear breakpoints
 				debugSess.sessionMgr.ClearAllBreakpoints(ctx)
 
 				// If paused, resume
-				if debugSess.currentSession.IsPaused {
+				if wasPaused {
 					select {
 					case debugSess.resumeChan <- debug.ResumeContinue:
 					default:
@@ -320,7 +356,15 @@ func (e *Engine) monitorSessionExpiration(ctx context.Context, debugSess *debugS
 				}
 
 				// Publish expiration event
-				debugSess.protocolHandler.PublishSessionExpiredEvent(ctx, debugSess.currentSession.ID)
+				debugSess.protocolHandler.PublishSessionExpiredEvent(ctx, sessionID)
+
+				// Structured log for session expiration
+				e.logEvent("debug_session_expired", map[string]interface{}{
+					"session_id":  sessionID,
+					"was_paused":  wasPaused,
+					"auto_resume": true,
+					"level":       "warn",
+				})
 
 				debugSess.currentSession = nil
 				debugSess.stepMode = false
@@ -406,13 +450,35 @@ func (e *Engine) pauseForDebug(
 	log.Printf("[Orchestrator] Paused on breakpoint: event=%s, artefact=%s, claim=%s, bp=%s",
 		eventType, artefactID, claimID, breakpointID)
 
+	// Structured log for pause
+	e.logEvent("debug_paused_on_breakpoint", map[string]interface{}{
+		"session_id":    e.debugSession.currentSession.ID,
+		"event_type":    string(eventType),
+		"artefact_id":   artefactID,
+		"claim_id":      claimID,
+		"breakpoint_id": breakpointID,
+		"paused_at_ms":  pauseCtx.PausedAtMs,
+		"level":         "warn",
+	})
+
 	// Wait for resume signal or session expiration
 	select {
 	case <-ctx.Done():
 		return
-	case <-e.debugSession.resumeChan:
+	case signal := <-e.debugSession.resumeChan:
 		// Clear pause context
 		e.debugSession.sessionMgr.ClearPauseContext(ctx)
 		log.Printf("[Orchestrator] Resumed from debug pause")
+
+		// Structured log for resume
+		resumeType := "continue"
+		if signal == debug.ResumeStep {
+			resumeType = "step"
+		}
+		e.logEvent("debug_resumed", map[string]interface{}{
+			"session_id":         e.debugSession.currentSession.ID,
+			"resume_type":        resumeType,
+			"paused_duration_ms": time.Now().UnixMilli() - pauseCtx.PausedAtMs,
+		})
 	}
 }
