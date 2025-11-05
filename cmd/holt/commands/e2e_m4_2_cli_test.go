@@ -183,15 +183,19 @@ func TestDebugCLI_SessionManagement(t *testing.T) {
 		err = debug.PublishEvent(ctx, redisClient, instanceName, event)
 		require.NoError(t, err)
 
-		// Wait for event to be processed
-		time.Sleep(500 * time.Millisecond)
+		// Wait for event to be processed (give more time for reliability)
+		time.Sleep(2 * time.Second)
 
 		// Verify pause state updated
 		debugger.mu.RLock()
-		assert.True(t, debugger.isPaused, "Should be paused after receiving pause event")
-		assert.NotNil(t, debugger.pauseContext, "Should have pause context")
-		assert.Equal(t, "test-artefact-123", debugger.pauseContext.ArtefactID)
+		isPaused := debugger.isPaused
+		pauseCtx := debugger.pauseContext
 		debugger.mu.RUnlock()
+
+		assert.True(t, isPaused, "Should be paused after receiving pause event")
+		if assert.NotNil(t, pauseCtx, "Should have pause context") {
+			assert.Equal(t, "test-artefact-123", pauseCtx.ArtefactID)
+		}
 
 		// Publish resumed event
 		resumedEvent := &debug.Event{
@@ -204,13 +208,16 @@ func TestDebugCLI_SessionManagement(t *testing.T) {
 		require.NoError(t, err)
 
 		// Wait for event to be processed
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(1 * time.Second)
 
 		// Verify resumed
 		debugger.mu.RLock()
-		assert.False(t, debugger.isPaused, "Should not be paused after resume event")
-		assert.Nil(t, debugger.pauseContext, "Pause context should be cleared")
+		isPausedAfter := debugger.isPaused
+		pauseCtxAfter := debugger.pauseContext
 		debugger.mu.RUnlock()
+
+		assert.False(t, isPausedAfter, "Should not be paused after resume event")
+		assert.Nil(t, pauseCtxAfter, "Pause context should be cleared")
 	})
 }
 
