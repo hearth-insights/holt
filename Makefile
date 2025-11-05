@@ -11,6 +11,11 @@ BUILD_DATE := $(shell date -u '+%Y-%m-%d_%H:%M:%S')
 # Go build flags
 LDFLAGS := -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(BUILD_DATE)"
 
+# Test flags (can be overridden)
+TEST_FLAGS ?= -v
+
+# Default target
+
 # Default target
 help:
 	@echo "Holt Development Makefile"
@@ -49,14 +54,14 @@ help:
 	@echo "  clean               - Remove build artifacts"
 
 # Run all tests (depends on binaries being built)
-test: build build-pup
+test:
 	@echo "Running tests..."
-	@$(GO) test ./...
+	@$(GO) test $(TEST_FLAGS) ./...
 
 # Run all tests with verbose output
-test-verbose: build build-pup
+test-verbose:
 	@echo "Running tests (verbose)..."
-	@$(GO) test -v ./...
+	@$(MAKE) test TEST_FLAGS="-v"
 
 # Run tests with coverage
 coverage: build build-pup
@@ -90,9 +95,9 @@ lint:
 	fi
 
 # Run orchestrator integration tests (requires Docker)
-test-integration: build-orchestrator
+test-integration:
 	@echo "Running orchestrator integration tests..."
-	@$(GO) test -v -tags=integration ./cmd/orchestrator
+	@$(GO) test $(TEST_FLAGS) -tags=integration ./cmd/orchestrator
 
 # Run Phase 2 E2E test suite (requires Docker)
 # M3.4: Now depends on docker-orchestrator to ensure latest orchestrator image is available
@@ -102,7 +107,7 @@ test-e2e: build build-pup docker-orchestrator
 	@docker build -q -t example-git-agent:latest -f agents/example-git-agent/Dockerfile . > /dev/null
 	@docker build -q -t example-agent:latest -f agents/example-agent/Dockerfile . > /dev/null
 	@echo "Running E2E tests..."
-	@$(GO) test -v -timeout 15m -tags=integration -run="TestE2E|TestPerformance" ./cmd/holt/commands
+	@$(GO) test $(TEST_FLAGS) -timeout 15m -tags=integration -run="TestE2E|TestPerformance" ./cmd/holt/commands
 	@echo "✓ All E2E tests passed"
 
 # Run all tests (unit + pup + integration + e2e)
@@ -120,7 +125,10 @@ test-all: test test-pup test-integration test-e2e
 # Run all tests and show only the failures
 test-failed:
 	@echo "Running all tests and filtering for failures..."
-	@$(MAKE) test-all 2>&1 | ./tools/filter-test-failures.sh || true
+	@# The `go list` command gets all packages, which are then passed to a single
+	@# `go test -json` command. This creates a single, unified JSON stream for the
+	@# filter tool to parse, which is much more robust than trying to pipe `make test-all`.
+	@$(GO) list ./... | xargs $(GO) test -v -json -tags=integration -timeout 15m 2>&1 | go run ./tools/testfilter/main.go || true
 
 # Build the holt binary
 build:
@@ -172,10 +180,10 @@ build-pup:
 	@echo "✓ Built: bin/holt-pup"
 
 # Run pup unit and integration tests
-test-pup: build-pup
+test-pup:
 	@echo "Running pup tests..."
-	@$(GO) test -v -race ./internal/pup
-	@$(GO) test -v -timeout 60s ./cmd/pup
+	@$(GO) test $(TEST_FLAGS) -race ./internal/pup
+	@$(GO) test $(TEST_FLAGS) -timeout 60s ./cmd/pup
 	@echo "✓ All pup tests passed"
 
 # Build orchestrator Docker image

@@ -74,6 +74,7 @@ temp/
 agents/*/bin/
 agents/*/target/
 agents/*/*.log
+*SUMMARY.md
 
 # Redis data files (if running locally)
 dump.rdb
