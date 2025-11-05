@@ -283,6 +283,12 @@ func TestDownCompleteCleanup(t *testing.T) {
 
 	instanceName := "test-down-cleanup"
 
+	// Clean up any existing instance before starting (in case previous test run failed)
+	cleanupInstance(t, cli, instanceName)
+
+	// Also defer cleanup in case this test fails
+	defer cleanupInstance(t, cli, instanceName)
+
 	// Create instance
 	upInstanceName = instanceName
 	upForce = false
