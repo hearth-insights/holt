@@ -271,12 +271,13 @@ services:
 	t.Logf("✓ Connected to blackboard (Redis port: %d)", env.RedisPort)
 
 	// Create artefact at version 2 (iteration count = 1, at limit)
+	// Must be GoalDefined for question-agent to ask a question
 	targetArtefact := &blackboard.Artefact{
 		ID:              uuid.New().String(),
 		LogicalID:       uuid.New().String(),
 		Version:         2, // Already at iteration limit
 		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "DesignSpec",
+		Type:            "GoalDefined",
 		Payload:         "Build API v2",
 		ProducedByRole:  "user",
 		SourceArtefacts: []string{},
