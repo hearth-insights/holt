@@ -640,6 +640,9 @@ func (d *Debugger) executor(input string) {
 		}
 		d.cmdReview(args)
 
+	case "forage":
+		d.cmdForage(args)
+
 	default:
 		printer.Warning("Unknown command: %s (type 'help' for commands)\n", command)
 	}
@@ -656,6 +659,7 @@ func (d *Debugger) completer(doc prompt.Document) []prompt.Suggest {
 		{Text: "print", Description: "Inspect artefact"},
 		{Text: "reviews", Description: "List pending reviews"},
 		{Text: "review", Description: "Manually review claim"},
+		{Text: "forage", Description: "Start new workflow with goal"},
 		{Text: "help", Description: "Show command reference"},
 		{Text: "exit", Description: "End debug session"},
 	}
@@ -789,6 +793,55 @@ func (d *Debugger) cmdReview(args []string) {
 	printer.Warning("Not yet implemented\n")
 }
 
+func (d *Debugger) cmdForage(args []string) {
+	// Parse --goal flag
+	var goal string
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--goal" {
+			if i+1 >= len(args) {
+				printer.Error("missing argument", "Usage: forage --goal \"description\"", []string{"Example: forage --goal \"Create a REST API\""})
+				return
+			}
+			// Join all remaining args as the goal (handles both quoted and unquoted)
+			goal = strings.Join(args[i+1:], " ")
+			break
+		}
+	}
+
+	if goal == "" {
+		printer.Error("missing --goal flag", "Usage: forage --goal \"description\"", []string{"Example: forage --goal \"Create a REST API\""})
+		return
+	}
+
+	// Create GoalDefined artefact
+	artefactID := uuid.New().String()
+	logicalID := uuid.New().String()
+
+	artefact := &blackboard.Artefact{
+		ID:              artefactID,
+		LogicalID:       logicalID,
+		Version:         1,
+		StructuralType:  blackboard.StructuralTypeStandard,
+		Type:            "GoalDefined",
+		Payload:         goal,
+		SourceArtefacts: []string{},
+		ProducedByRole:  "user",
+		// CreatedAtMs auto-populated by CreateArtefact
+	}
+
+	if err := d.client.CreateArtefact(d.ctx, artefact); err != nil {
+		printer.Error("failed to create artefact", err.Error(), []string{"Ensure instance is running and Redis is accessible"})
+		return
+	}
+
+	// Show success with shortened ID (first 8 chars)
+	shortID := artefactID
+	if len(shortID) > 8 {
+		shortID = shortID[:8] + "..."
+	}
+	printer.Success("✓ GoalDefined artefact created: %s\n", shortID)
+}
+
 func (d *Debugger) printHelp() {
 	help := `
 Holt Debugger Commands:
@@ -818,6 +871,9 @@ Holt Debugger Commands:
       --approve               Approve the claim
       --reject "reason"       Reject with feedback
 
+  Workflow Management:
+    forage --goal "text"      Start a new workflow with the given goal
+
   Help:
     help (h, ?)               Show this help message
 
@@ -825,6 +881,7 @@ Examples:
   break artefact.type=CodeCommit     # Pause on code commits
   break claim.status=pending_review  # Pause when reviews needed
   print                              # Inspect current artefact
+  forage --goal "Create API tests"   # Start new workflow
   continue                           # Resume workflow
 `
 	fmt.Println(help)

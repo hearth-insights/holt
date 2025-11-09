@@ -42,25 +42,28 @@ The debugger is designed to be **safe** and **ephemeral**:
 
 ### Basic Debug Session
 
-```bash
-# Start Holt instance
-holt up
+The standard workflow is to start your instance, attach the debugger, set your breakpoints, and then start the workflow directly from the debugger.
 
-# Start workflow
-holt forage --goal "Build REST API"
+1.  **Start Holt instance** (in one terminal):
+    ```bash
+    holt up
+    ```
 
-# Attach debugger (in another terminal)
-holt debug
+2.  **Attach the debugger** (in a second terminal):
+    ```bash
+    holt debug
+    ```
+    You are now in the interactive prompt.
 
-# You'll see the interactive prompt:
-Debug session attached to instance 'default-1'
-Session ID: abc-123-def-456
-Heartbeat: 5s interval, 30s TTL
+3.  **Set breakpoints and start the workflow**:
+    ```
+    (holt-debug) break artefact.type=CodeCommit
+    (holt-debug) continue
+    (holt-debug) forage --goal "Create a new test file"
+    ✓ GoalDefined artefact created: fedcba98...
+    ```
 
-Debug session ready. Type 'help' for commands, 'exit' to quit.
-
-(holt-debug)
-```
+The workflow will now begin, and the debugger will pause it as soon as it hits the `CodeCommit` breakpoint you set.
 
 ### Debug with Pre-Set Breakpoints
 
@@ -448,9 +451,10 @@ Holt Debugger Commands:
     reviews                   List all claims in pending_review status
 
   Manual Intervention:
-    review <claim-id>         Manually review claim
+- `review <claim-id>`         Manually review claim
       --approve               Approve the claim
       --reject "reason"       Reject with feedback
+    - `forage --goal "text"`    Start a new workflow with the given goal
 
   Help:
     help (h, ?)               Show this help message
