@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"github.com/dyluth/holt/internal/instance"
 	"github.com/dyluth/holt/internal/orchestrator/debug"
 	"github.com/dyluth/holt/internal/printer"
+	"github.com/dyluth/holt/internal/watch"
 	"github.com/dyluth/holt/pkg/blackboard"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
@@ -572,6 +574,19 @@ func (d *Debugger) RunInteractivePrompt() {
 		printer.Info("\nReceived interrupt signal, exiting...")
 		d.Cleanup()
 		os.Exit(0)
+	}()
+
+	// Start event streaming in background (like holt watch)
+	d.wg.Add(1)
+	go func() {
+		defer d.wg.Done()
+		// Stream events with no filters (show all events)
+		// Use default format (human-readable with timestamps and emojis)
+		err := watch.StreamActivity(d.ctx, d.client, d.instanceName, watch.OutputFormatDefault, nil, false, os.Stdout)
+		if err != nil && err != context.Canceled {
+			// Don't show error on clean shutdown
+			log.Printf("Event stream ended: %v", err)
+		}
 	}()
 
 	// Start interactive prompt (no autocomplete - use 'help' instead)
