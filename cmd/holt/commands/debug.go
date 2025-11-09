@@ -428,8 +428,8 @@ func (d *Debugger) handleEvent(event *debug.Event) {
 
 		bpID := getStringFromMap(event.Payload, "breakpoint_id")
 		eventType := getStringFromMap(event.Payload, "event_type")
-		printer.Warning("\n🛑 Paused on breakpoint %s (event: %s)\n", bpID, eventType)
-		printer.Info("Type 'continue' to resume, 'print' to inspect, or 'help' for commands")
+		fmt.Printf("\n🛑 Paused on breakpoint %s (event: %s)\n", bpID, eventType)
+		fmt.Println("Type 'continue' to resume, 'print' to inspect, or 'help' for commands\n")
 
 	case "resumed":
 		d.mu.Lock()
@@ -575,6 +575,8 @@ func (d *Debugger) RunInteractivePrompt() {
 		prompt.OptionPrefixTextColor(prompt.Yellow),
 		prompt.OptionSelectedSuggestionBGColor(prompt.DarkGray),
 		prompt.OptionSuggestionBGColor(prompt.DarkGray),
+		prompt.OptionMaxSuggestion(20), // Show all suggestions without scrolling
+		prompt.OptionShowCompletionAtStart(), // Don't show completions until user types
 	)
 
 	p.Run()
@@ -747,15 +749,34 @@ func (d *Debugger) cmdPrint(artefactID string) {
 	// If no ID provided, use pause context
 	if artefactID == "" {
 		d.mu.RLock()
-		if d.pauseContext != nil && d.pauseContext.ArtefactID != "" {
-			artefactID = d.pauseContext.ArtefactID
-		}
+		pauseCtx := d.pauseContext
 		d.mu.RUnlock()
 
+		if pauseCtx != nil {
+			if pauseCtx.ArtefactID != "" {
+				artefactID = pauseCtx.ArtefactID
+			} else if pauseCtx.ClaimID != "" {
+				// For review events, show the claim instead
+				d.printClaim(pauseCtx.ClaimID)
+				return
+			}
+		}
+
 		if artefactID == "" {
-			printer.Error("no artefact to print", "Not paused on an artefact, specify ID", []string{"Usage: print <artefact-id>"})
+			printer.Error("no artefact to print", "Not paused on an artefact or claim, specify ID", []string{"Usage: print <artefact-id>"})
 			return
 		}
+	}
+
+	// Handle shortened IDs - we can't expand them without a full list API
+	if len(artefactID) < 36 { // UUID is 36 chars with hyphens
+		printer.Error("incomplete artefact ID",
+			fmt.Sprintf("Short ID '%s' provided but full UUID required", artefactID),
+			[]string{
+				"Use full UUID from forage output or holt hoard",
+				fmt.Sprintf("Example: holt hoard | grep %s", artefactID),
+			})
+		return
 	}
 
 	// Fetch artefact from blackboard
@@ -779,6 +800,43 @@ func (d *Debugger) cmdPrint(artefactID string) {
 	}
 	fmt.Printf("  Created:          %d ms\n", artefact.CreatedAtMs)
 	fmt.Println(strings.Repeat("─", 60) + "\n")
+}
+
+func (d *Debugger) printClaim(claimID string) {
+	claim, err := d.client.GetClaim(d.ctx, claimID)
+	if err != nil {
+		printer.Warning("Claim %s not found: %v\n", claimID, err)
+		return
+	}
+
+	// Get the artefact being claimed
+	artefact, err := d.client.GetArtefact(d.ctx, claim.ArtefactID)
+	if err != nil {
+		printer.Warning("Artefact %s not found: %v\n", claim.ArtefactID, err)
+		return
+	}
+
+	fmt.Println("\n" + strings.Repeat("─", 60))
+	fmt.Printf("Claim %s\n", claim.ID)
+	fmt.Println(strings.Repeat("─", 60))
+	fmt.Printf("  Status:           %s\n", claim.Status)
+	fmt.Printf("  Artefact:         %s (v%d)\n", artefact.Type, artefact.Version)
+	fmt.Printf("  Artefact ID:      %s\n", claim.ArtefactID)
+
+	// Show granted agents based on claim status
+	if claim.GrantedExclusiveAgent != "" {
+		fmt.Printf("  Granted (excl):   %s\n", claim.GrantedExclusiveAgent)
+	}
+	if len(claim.GrantedParallelAgents) > 0 {
+		fmt.Printf("  Granted (para):   %v\n", claim.GrantedParallelAgents)
+	}
+	if len(claim.GrantedReviewAgents) > 0 {
+		fmt.Printf("  Review agents:    %v\n", claim.GrantedReviewAgents)
+	}
+
+	fmt.Println(strings.Repeat("─", 60))
+	fmt.Printf("\nArtefact payload: %s\n", artefact.Payload)
+	fmt.Println()
 }
 
 func (d *Debugger) cmdReviews() {
@@ -834,12 +892,13 @@ func (d *Debugger) cmdForage(args []string) {
 		return
 	}
 
-	// Show success with shortened ID (first 8 chars)
+	// Show success with both short and full ID
 	shortID := artefactID
 	if len(shortID) > 8 {
 		shortID = shortID[:8] + "..."
 	}
 	printer.Success("✓ GoalDefined artefact created: %s\n", shortID)
+	printer.Info("Full ID: %s\n", artefactID)
 }
 
 func (d *Debugger) printHelp() {
