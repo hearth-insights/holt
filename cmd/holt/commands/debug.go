@@ -414,21 +414,29 @@ func (d *Debugger) handleEvent(event *debug.Event) {
 	case "paused_on_breakpoint":
 		d.mu.Lock()
 		d.isPaused = true
-		// Extract pause context from payload
-		if pc, ok := event.Payload["pause_context"].(map[string]interface{}); ok {
-			d.pauseContext = &debug.PauseContext{
-				ArtefactID:   getStringFromMap(pc, "artefact_id"),
-				ClaimID:      getStringFromMap(pc, "claim_id"),
-				BreakpointID: getStringFromMap(pc, "breakpoint_id"),
-				EventType:    getStringFromMap(pc, "event_type"),
-				PausedAtMs:   int64(getFloatFromMap(pc, "paused_at_ms")),
-			}
+		// Extract pause context directly from event payload
+		d.pauseContext = &debug.PauseContext{
+			ArtefactID:   getStringFromMap(event.Payload, "artefact_id"),
+			ClaimID:      getStringFromMap(event.Payload, "claim_id"),
+			BreakpointID: getStringFromMap(event.Payload, "breakpoint_id"),
+			EventType:    getStringFromMap(event.Payload, "event_type"),
+			PausedAtMs:   int64(getFloatFromMap(event.Payload, "paused_at_ms")),
 		}
 		d.mu.Unlock()
 
 		bpID := getStringFromMap(event.Payload, "breakpoint_id")
 		eventType := getStringFromMap(event.Payload, "event_type")
+		artefactID := getStringFromMap(event.Payload, "artefact_id")
+		claimID := getStringFromMap(event.Payload, "claim_id")
+
+		// Show what we paused on
 		fmt.Printf("\n🛑 Paused on breakpoint %s (event: %s)\n", bpID, eventType)
+		if artefactID != "" {
+			fmt.Printf("   Artefact: %s\n", artefactID)
+		}
+		if claimID != "" {
+			fmt.Printf("   Claim: %s\n", claimID)
+		}
 		fmt.Println("Type 'continue' to resume, 'print' to inspect, or 'help' for commands\n")
 
 	case "resumed":
@@ -566,17 +574,13 @@ func (d *Debugger) RunInteractivePrompt() {
 		os.Exit(0)
 	}()
 
-	// Start interactive prompt
+	// Start interactive prompt (no autocomplete - use 'help' instead)
 	p := prompt.New(
 		d.executor,
-		d.completer,
+		func(doc prompt.Document) []prompt.Suggest { return []prompt.Suggest{} }, // No suggestions
 		prompt.OptionPrefix("(holt-debug) "),
 		prompt.OptionTitle("Holt Debugger"),
 		prompt.OptionPrefixTextColor(prompt.Yellow),
-		prompt.OptionSelectedSuggestionBGColor(prompt.DarkGray),
-		prompt.OptionSuggestionBGColor(prompt.DarkGray),
-		prompt.OptionMaxSuggestion(20), // Show all suggestions without scrolling
-		prompt.OptionShowCompletionAtStart(), // Don't show completions until user types
 	)
 
 	p.Run()
