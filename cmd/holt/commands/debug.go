@@ -558,9 +558,23 @@ func (d *Debugger) Cleanup() {
 	sessionKey := fmt.Sprintf("holt:%s:debug:session", d.instanceName)
 	d.redisClient.Del(d.ctx, sessionKey)
 
-	// Cancel context and wait for goroutines
+	// Cancel context to stop goroutines
 	d.cancelFunc()
-	d.wg.Wait()
+
+	// Wait for goroutines with timeout to prevent hanging
+	done := make(chan struct{})
+	go func() {
+		d.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Clean shutdown
+	case <-time.After(2 * time.Second):
+		// Timeout - force exit anyway
+		log.Printf("Warning: Goroutines did not shut down cleanly within 2s")
+	}
 }
 
 // RunInteractivePrompt starts the go-prompt interactive interface
@@ -571,8 +585,9 @@ func (d *Debugger) RunInteractivePrompt() {
 
 	go func() {
 		<-sigCh
-		printer.Info("\nReceived interrupt signal, exiting...")
+		fmt.Println("\nReceived interrupt signal, cleaning up...")
 		d.Cleanup()
+		fmt.Println("Debug session ended")
 		os.Exit(0)
 	}()
 
@@ -614,8 +629,9 @@ func (d *Debugger) executor(input string) {
 
 	switch command {
 	case "exit", "quit", "q":
-		printer.Info("Exiting debug session...\n")
+		fmt.Println("Exiting debug session...")
 		d.Cleanup()
+		// Force exit immediately after cleanup
 		os.Exit(0)
 
 	case "help", "h", "?":
@@ -918,6 +934,16 @@ func (d *Debugger) cmdForage(args []string) {
 	}
 	printer.Success("✓ GoalDefined artefact created: %s\n", shortID)
 	printer.Info("Full ID: %s\n", artefactID)
+
+	// Auto-continue if we're paused (workflow should start immediately)
+	d.mu.RLock()
+	wasPaused := d.isPaused
+	d.mu.RUnlock()
+
+	if wasPaused {
+		printer.Info("Resuming to start workflow...\n")
+		d.cmdContinue()
+	}
 }
 
 func (d *Debugger) printHelp() {
