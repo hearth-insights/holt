@@ -189,6 +189,18 @@ func (e *Engine) processArtefact(ctx context.Context, artefact *blackboard.Artef
 	// M4.2: Check breakpoints after claim creation
 	e.evaluateBreakpointsAndPause(ctx, artefact, claim, debug.EventClaimCreated)
 
+	// M4.2: Re-fetch claim after potential debugger pause (may have been terminated)
+	freshClaim, err := e.client.GetClaim(ctx, claim.ID)
+	if err != nil {
+		log.Printf("[Orchestrator] Failed to re-fetch claim %s after debugger pause: %v", claim.ID, err)
+		return nil
+	}
+	if freshClaim.Status == blackboard.ClaimStatusTerminated {
+		log.Printf("[Orchestrator] Claim %s was terminated during debugger pause, skipping consensus", claim.ID)
+		return nil
+	}
+	claim = freshClaim // Use fresh claim for subsequent operations
+
 	// M3.1: Wait for consensus and grant claim
 	if len(e.agentRegistry) > 0 {
 		if err := e.waitForConsensusAndGrant(ctx, claim); err != nil {

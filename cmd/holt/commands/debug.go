@@ -434,12 +434,12 @@ func (d *Debugger) handleEvent(event *debug.Event) {
 		// Show what we paused on
 		fmt.Printf("\n🛑 Paused on breakpoint %s (event: %s)\n", bpID, eventType)
 		if artefactID != "" {
-			fmt.Printf("   Artefact: %s\n", artefactID)
+			fmt.Printf("   Artefact: %s\n", shortID(artefactID))
 		}
 		if claimID != "" {
-			fmt.Printf("   Claim: %s\n", claimID)
+			fmt.Printf("   Claim: %s\n", shortID(claimID))
 		}
-		fmt.Println("Type 'continue' to resume, 'print' to inspect, or 'help' for commands\n")
+		fmt.Println("Type 'continue' to resume, 'print' to inspect, or 'help' for commands")
 
 	case "resumed":
 		d.mu.Lock()
@@ -680,6 +680,9 @@ func (d *Debugger) executor(input string) {
 	case "forage":
 		d.cmdForage(args)
 
+	case "terminate", "kill":
+		d.cmdTerminate()
+
 	default:
 		printer.Warning("Unknown command: %s (type 'help' for commands)\n", command)
 	}
@@ -696,6 +699,7 @@ func (d *Debugger) completer(doc prompt.Document) []prompt.Suggest {
 		{Text: "print", Description: "Inspect artefact"},
 		{Text: "reviews", Description: "List pending reviews"},
 		{Text: "review", Description: "Manually review claim"},
+		{Text: "terminate", Description: "Kill current claim (permanent audit trail)"},
 		{Text: "forage", Description: "Start new workflow with goal"},
 		{Text: "help", Description: "Show command reference"},
 		{Text: "exit", Description: "End debug session"},
@@ -803,15 +807,26 @@ func (d *Debugger) cmdPrint(artefactID string) {
 		}
 	}
 
-	// Handle shortened IDs - we can't expand them without a full list API
+	// Handle shortened IDs - try both artefact and claim
 	if len(artefactID) < 36 { // UUID is 36 chars with hyphens
-		printer.Error("incomplete artefact ID",
-			fmt.Sprintf("Short ID '%s' provided but full UUID required", artefactID),
-			[]string{
-				"Use full UUID from forage output or holt hoard",
-				fmt.Sprintf("Example: holt hoard | grep %s", artefactID),
-			})
-		return
+		// Try artefact first
+		fullID, errArtefact := d.expandShortID(artefactID, "artefact")
+		if errArtefact == nil {
+			artefactID = fullID
+		} else {
+			// Try claim instead
+			fullID, errClaim := d.expandShortID(artefactID, "claim")
+			if errClaim == nil {
+				// It's a claim, print claim instead
+				d.printClaim(fullID)
+				return
+			}
+			// Neither worked, show error
+			printer.Warning("No artefact or claim found matching short ID '%s'\n", artefactID)
+			printer.Info("Tried: %v\n", errArtefact)
+			printer.Info("       %v\n", errClaim)
+			return
+		}
 	}
 
 	// Fetch artefact from blackboard
@@ -823,7 +838,7 @@ func (d *Debugger) cmdPrint(artefactID string) {
 
 	// Display artefact
 	fmt.Println("\n" + strings.Repeat("─", 60))
-	fmt.Printf("Artefact %s\n", artefact.ID)
+	fmt.Printf("Artefact %s\n", shortID(artefact.ID))
 	fmt.Println(strings.Repeat("─", 60))
 	fmt.Printf("  Type:             %s\n", artefact.Type)
 	fmt.Printf("  Structural Type:  %s\n", artefact.StructuralType)
@@ -831,7 +846,12 @@ func (d *Debugger) cmdPrint(artefactID string) {
 	fmt.Printf("  Version:          %d\n", artefact.Version)
 	fmt.Printf("  Payload:          %s\n", artefact.Payload)
 	if len(artefact.SourceArtefacts) > 0 {
-		fmt.Printf("  Source Artefacts: %v\n", artefact.SourceArtefacts)
+		// Show short IDs for source artefacts
+		shortSources := make([]string, len(artefact.SourceArtefacts))
+		for i, src := range artefact.SourceArtefacts {
+			shortSources[i] = shortID(src)
+		}
+		fmt.Printf("  Source Artefacts: %v\n", shortSources)
 	}
 	fmt.Printf("  Created:          %d ms\n", artefact.CreatedAtMs)
 	fmt.Println(strings.Repeat("─", 60) + "\n")
@@ -851,16 +871,56 @@ func (d *Debugger) printClaim(claimID string) {
 		return
 	}
 
+	// Get bids for this claim
+	bids, err := d.client.GetAllBids(d.ctx, claim.ID)
+	if err != nil {
+		printer.Warning("Failed to get bids: %v\n", err)
+		bids = make(map[string]blackboard.BidType) // Continue with empty bids
+	}
+
 	fmt.Println("\n" + strings.Repeat("─", 60))
-	fmt.Printf("Claim %s\n", claim.ID)
+	fmt.Printf("Claim %s\n", shortID(claim.ID))
 	fmt.Println(strings.Repeat("─", 60))
 	fmt.Printf("  Status:           %s\n", claim.Status)
 	fmt.Printf("  Artefact:         %s (v%d)\n", artefact.Type, artefact.Version)
-	fmt.Printf("  Artefact ID:      %s\n", claim.ArtefactID)
+	fmt.Printf("  Artefact ID:      %s\n", shortID(claim.ArtefactID))
+
+	// Show bids grouped by type
+	if len(bids) > 0 {
+		fmt.Printf("\n  Bids:\n")
+
+		// Group bids by type
+		var reviewBids, parallelBids, exclusiveBids, ignoreBids []string
+		for agent, bidType := range bids {
+			switch bidType {
+			case blackboard.BidTypeReview:
+				reviewBids = append(reviewBids, agent)
+			case blackboard.BidTypeParallel:
+				parallelBids = append(parallelBids, agent)
+			case blackboard.BidTypeExclusive:
+				exclusiveBids = append(exclusiveBids, agent)
+			case blackboard.BidTypeIgnore:
+				ignoreBids = append(ignoreBids, agent)
+			}
+		}
+
+		if len(exclusiveBids) > 0 {
+			fmt.Printf("    Exclusive:  %v\n", exclusiveBids)
+		}
+		if len(reviewBids) > 0 {
+			fmt.Printf("    Review:     %v\n", reviewBids)
+		}
+		if len(parallelBids) > 0 {
+			fmt.Printf("    Parallel:   %v\n", parallelBids)
+		}
+		if len(ignoreBids) > 0 {
+			fmt.Printf("    Ignore:     %v\n", ignoreBids)
+		}
+	}
 
 	// Show granted agents based on claim status
 	if claim.GrantedExclusiveAgent != "" {
-		fmt.Printf("  Granted (excl):   %s\n", claim.GrantedExclusiveAgent)
+		fmt.Printf("\n  Granted (excl):   %s\n", claim.GrantedExclusiveAgent)
 	}
 	if len(claim.GrantedParallelAgents) > 0 {
 		fmt.Printf("  Granted (para):   %v\n", claim.GrantedParallelAgents)
@@ -946,6 +1006,44 @@ func (d *Debugger) cmdForage(args []string) {
 	}
 }
 
+func (d *Debugger) cmdTerminate() {
+	// Can only terminate when paused
+	d.mu.RLock()
+	pauseCtx := d.pauseContext
+	isPaused := d.isPaused
+	d.mu.RUnlock()
+
+	if !isPaused || pauseCtx == nil || pauseCtx.ClaimID == "" {
+		printer.Error("not paused on a claim",
+			"The terminate command can only be used when paused on a claim",
+			[]string{"Set a breakpoint and trigger a pause first"})
+		return
+	}
+
+	// Show what we're about to terminate
+	fmt.Printf("\n⚠️  WARNING: About to TERMINATE claim %s\n", shortID(pauseCtx.ClaimID))
+	fmt.Printf("   This will:\n")
+	fmt.Printf("   - Mark the claim as TERMINATED (permanent)\n")
+	fmt.Printf("   - Create audit trail showing manual intervention\n")
+	fmt.Printf("   - Stop this workflow branch immediately\n")
+	fmt.Printf("   - Record your debugger session ID in the termination reason\n\n")
+
+	// Send terminate command to orchestrator
+	cmd := &debug.Command{
+		CommandType: string(debug.CommandTerminateClaim),
+		SessionID:   d.sessionID,
+		Payload:     map[string]interface{}{},
+	}
+
+	if err := debug.PublishCommand(d.ctx, d.redisClient, d.instanceName, cmd); err != nil {
+		printer.Error("failed to send terminate command", err.Error(), nil)
+		return
+	}
+
+	printer.Success("✓ Claim terminated successfully\n")
+	printer.Info("The termination is recorded in the claim's audit trail\n")
+}
+
 func (d *Debugger) printHelp() {
 	help := `
 Holt Debugger Commands:
@@ -974,6 +1072,8 @@ Holt Debugger Commands:
     review <claim-id>         Manually review claim
       --approve               Approve the claim
       --reject "reason"       Reject with feedback
+    terminate (kill)          Kill the currently paused claim
+                              Creates permanent audit trail of manual termination
 
   Workflow Management:
     forage --goal "text"      Start a new workflow with the given goal
@@ -1009,4 +1109,88 @@ func getFloatFromMap(m map[string]interface{}, key string) float64 {
 		}
 	}
 	return 0
+}
+
+// shortID returns the first 8 characters of a UUID for readability
+func shortID(id string) string {
+	if len(id) > 8 {
+		return id[:8]
+	}
+	return id
+}
+
+// expandShortID attempts to expand a short ID (8 chars) to a full UUID by searching Redis
+func (d *Debugger) expandShortID(shortID, entityType string) (string, error) {
+	// Get all keys matching the pattern based on entity type
+	var pattern string
+	switch entityType {
+	case "artefact":
+		pattern = fmt.Sprintf("holt:%s:artefact:*", d.instanceName)
+	case "claim":
+		pattern = fmt.Sprintf("holt:%s:claim:*", d.instanceName)
+	default:
+		return "", fmt.Errorf("unknown entity type: %s", entityType)
+	}
+
+	// Scan for matching keys
+	var cursor uint64
+	var matches []string
+	seenIDs := make(map[string]bool) // Deduplicate
+	for {
+		keys, nextCursor, err := d.redisClient.Scan(d.ctx, cursor, pattern, 100).Result()
+		if err != nil {
+			return "", fmt.Errorf("failed to scan Redis: %w", err)
+		}
+
+		// Extract IDs and check for prefix match
+		for _, key := range keys {
+			// Extract UUID from key (format: holt:instance:type:UUID or holt:instance:type:UUID:suffix)
+			parts := strings.Split(key, ":")
+			if len(parts) < 4 {
+				continue
+			}
+			fullID := parts[3]
+
+			// Skip keys with suffixes like `:bids` (e.g., holt:instance:claim:UUID:bids)
+			if len(parts) > 4 {
+				continue
+			}
+
+			// Check if this ID starts with the short ID
+			if strings.HasPrefix(fullID, shortID) {
+				if !seenIDs[fullID] {
+					seenIDs[fullID] = true
+					matches = append(matches, fullID)
+				}
+			}
+		}
+
+		cursor = nextCursor
+		if cursor == 0 {
+			break
+		}
+	}
+
+	// Handle results
+	if len(matches) == 0 {
+		return "", fmt.Errorf("no %s found matching short ID '%s'", entityType, shortID)
+	}
+	if len(matches) > 1 {
+		// Show full IDs to help user differentiate
+		var idList string
+		for i, id := range matches {
+			if i > 2 {
+				idList += ", ..."
+				break
+			}
+			if i > 0 {
+				idList += ", "
+			}
+			idList += id
+		}
+		return "", fmt.Errorf("ambiguous short ID '%s': matches %d %ss\n  Matches: %s",
+			shortID, len(matches), entityType, idList)
+	}
+
+	return matches[0], nil
 }

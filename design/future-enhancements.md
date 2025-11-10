@@ -205,6 +205,23 @@ Some sort of truly immutable datastore.. eg Blockchain instead of Redis for obje
 
 ---
 
+## Mandatory human/external approval step
+
+Some processes need t interract with a human to get explicit approval.  This could be implemented as an Agent that bids on a claim to review it and then hooks into some interraction with a human rather than an automated process.
+
+however it might also be useful to have this built in via a similar mechanism to the debugger.
+This could possibly also appear as a change/enhancement to the `questions` behaviour - where rather than escalate to the agent that created the artefact, it is directly escalated to a human via some mechanism/integration - for human oversight.
+
+1. **Context**: What problem does this solve?
+2. **Idea**: High-level description of the enhancement
+3. **Benefits**: Why is this valuable?
+4. **Challenges**: What makes this hard?
+5. **Current Solution**: How are we handling this now?
+6. **When to Revisit**: Under what conditions should we implement this?
+7. **Design Considerations**: Key questions to answer before implementing
+
+---
+
 ## Template for New Ideas
 
 When adding ideas, include:

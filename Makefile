@@ -125,10 +125,16 @@ test-all: test test-pup test-integration test-e2e
 # Run all tests and show only the failures
 test-failed:
 	@echo "Running all tests and filtering for failures..."
-	@# The `go list` command gets all packages, which are then passed to a single
-	@# `go test -json` command. This creates a single, unified JSON stream for the
-	@# filter tool to parse, which is much more robust than trying to pipe `make test-all`.
-	@$(GO) list ./... | xargs $(GO) test -v -json -tags=integration -timeout 15m 2>&1 | go run ./tools/testfilter/main.go || true
+	@# We run each test suite separately and pipe its JSON output to the filter.
+	@# This is more robust than a single command and mirrors the 'test-all' target.
+	@# The `|| true` and `| cat` are used to ensure that the make command continues
+	@# even if a test fails, and that the output is passed through correctly.
+	@({ \
+		$(MAKE) test TEST_FLAGS="-v -json"; \
+		$(MAKE) test-pup TEST_FLAGS="-v -json"; \
+		$(MAKE) test-integration TEST_FLAGS="-v -json"; \
+		$(MAKE) test-e2e TEST_FLAGS="-v -json"; \
+	} 2>&1 | cat) | go run ./tools/testfilter/main.go || true
 
 # Build the holt binary
 build:

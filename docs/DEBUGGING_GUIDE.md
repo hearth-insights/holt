@@ -451,10 +451,15 @@ Holt Debugger Commands:
     reviews                   List all claims in pending_review status
 
   Manual Intervention:
-- `review <claim-id>`         Manually review claim
+    review <claim-id>         Manually review claim
       --approve               Approve the claim
       --reject "reason"       Reject with feedback
-    - `forage --goal "text"`    Start a new workflow with the given goal
+    terminate (kill)          Terminate the currently paused claim
+                              Creates permanent audit trail of manual termination
+                              ⚠️  WARNING: Irreversible action
+
+  Workflow Management:
+    forage --goal "text"      Start a new workflow with the given goal
 
   Help:
     help (h, ?)               Show this help message
@@ -607,6 +612,38 @@ holt debug -b event.type=review_consensus_reached
 (holt-debug) continue
 ```
 
+### Workflow 7: Emergency Claim Termination
+
+Force-kill a problematic claim during debugging.
+
+```bash
+# Set breakpoint on problematic artefact type
+holt debug -b artefact.type=FailingType
+
+# When paused:
+🛑 Paused on breakpoint bp-1 (event: artefact_received)
+   Claim: abc123de
+
+(holt-debug) print
+# Verify this is the problematic claim
+
+(holt-debug) terminate
+
+⚠️  WARNING: About to TERMINATE claim abc123de
+   This will:
+   - Mark the claim as TERMINATED (permanent)
+   - Create audit trail showing manual intervention
+   - Stop this workflow branch immediately
+   - Record your debugger session ID in the termination reason
+
+✓ Claim terminated successfully
+The termination is recorded in the claim's audit trail
+
+# Check audit trail
+(holt-debug) exit
+holt logs orchestrator | grep "MANUAL TERMINATION"
+```
+
 ---
 
 ## Manual Review Intervention
@@ -710,6 +747,193 @@ Every manual review creates immutable artefacts for full audit trail:
 ```
 
 These artefacts are queryable via `holt hoard` for compliance reporting.
+
+---
+
+## Claim Termination (Emergency Intervention)
+
+The `terminate` command allows operators to forcibly kill a paused claim, creating a permanent audit trail. This is an emergency intervention tool for problematic workflows.
+
+### When to Use Terminate
+
+1. **Runaway Claims**: Claim is stuck in an unexpected state or infinite loop
+2. **Testing Scenarios**: Validating claim termination handling
+3. **Compliance Halt**: Regulatory requirement to immediately stop processing
+4. **Debugging**: Investigating orchestrator behavior after termination
+
+### Termination Process
+
+**Step 1: Pause on Target Claim**
+
+Set a breakpoint that will catch the problematic claim:
+
+```bash
+holt debug -b artefact.type=ProblematicType
+```
+
+**Step 2: Confirm Pause Context**
+
+When paused, verify you're on the correct claim:
+
+```bash
+🛑 Paused on breakpoint bp-1 (event: artefact_received)
+   Artefact: abc123de
+   Claim: def456gh
+
+(holt-debug) print
+────────────────────────────────────────────────────────────
+Claim def456gh
+────────────────────────────────────────────────────────────
+  Status:           pending_exclusive
+  Artefact:         ProblematicType (v1)
+  Artefact ID:      abc123de
+```
+
+**Step 3: Execute Termination**
+
+```bash
+(holt-debug) terminate
+
+⚠️  WARNING: About to TERMINATE claim def456gh
+   This will:
+   - Mark the claim as TERMINATED (permanent)
+   - Create audit trail showing manual intervention
+   - Stop this workflow branch immediately
+   - Record your debugger session ID in the termination reason
+
+✓ Claim terminated successfully
+The termination is recorded in the claim's audit trail
+```
+
+**Step 4: Verify Termination**
+
+Check orchestrator logs to confirm termination was recorded:
+
+```bash
+# In another terminal
+holt logs orchestrator
+
+# Look for:
+[Orchestrator] ⚠️  MANUAL TERMINATION: Claim def456gh terminated by debugger operator (session: xyz-789)
+```
+
+### Termination Audit Trail
+
+Every termination creates comprehensive audit evidence:
+
+**1. Claim Record** (persisted in Redis):
+```json
+{
+  "id": "def456gh",
+  "status": "terminated",
+  "termination_reason": "MANUAL TERMINATION via debugger operator (session: xyz-789) at 2025-11-10T15:30:45Z. This claim was explicitly killed during interactive debugging."
+}
+```
+
+**2. Orchestrator Log Event**:
+```json
+{
+  "level": "error",
+  "component": "orchestrator",
+  "event": "debug_claim_terminated",
+  "session_id": "xyz-789",
+  "claim_id": "def456gh",
+  "artefact_id": "abc123de",
+  "termination_reason": "MANUAL TERMINATION...",
+  "manual_intervention": true
+}
+```
+
+### Safety Considerations
+
+**⚠️ Irreversible Action**:
+- Once terminated, the claim cannot be resumed or restarted
+- The termination is permanent and visible in all audit trails
+- Use with caution in production environments
+
+**Access Control**:
+- Anyone with debugger access can terminate claims
+- Termination is attributed to the debug session (traceable)
+- All terminations are logged with session ID for accountability
+
+**Impact Analysis**:
+- Terminated claim stops immediately
+- Downstream claims depending on this artefact may fail
+- Workflow may require manual restart with new goal
+- No automatic recovery or retry mechanism
+
+### Common Termination Scenarios
+
+**Scenario 1: Infinite Loop Detection**
+
+```bash
+# Workflow stuck on same artefact version
+holt debug -b artefact.logical_id=xyz-123
+
+# When paused on iteration 10+
+(holt-debug) print
+# Inspect artefact version
+
+(holt-debug) terminate
+# Kill to prevent infinite iteration
+```
+
+**Scenario 2: Compliance Emergency Stop**
+
+```bash
+# Regulatory issue detected
+holt debug -b claim.status=pending_exclusive
+
+# When paused on sensitive deployment
+(holt-debug) print
+# Verify this is the problematic claim
+
+(holt-debug) terminate
+# Emergency halt for compliance
+```
+
+**Scenario 3: Testing Claim Lifecycle**
+
+```bash
+# Validate orchestrator handles termination correctly
+holt debug -b artefact.type=TestArtefact
+
+(holt-debug) terminate
+# Verify cleanup logic works
+```
+
+### Troubleshooting Termination
+
+**Problem**: `terminate` command fails with "not paused on a claim"
+
+**Cause**: Not currently paused on a claim breakpoint
+
+**Solution**:
+```bash
+# Must be paused on a claim (not just an artefact)
+(holt-debug) break claim.status=pending_exclusive
+(holt-debug) continue
+# Wait for claim to be created
+🛑 Paused on breakpoint bp-2
+(holt-debug) terminate
+```
+
+**Problem**: Terminated claim still appears in watch output
+
+**Cause**: Orchestrator continues to log terminated claims (expected)
+
+**Solution**: This is normal audit behavior. Use `holt watch` filters:
+```bash
+holt watch --output jsonl | grep -v "claim_status.*terminated"
+```
+
+### Best Practices
+
+1. **Verify Context First**: Always use `print` to confirm you're terminating the correct claim
+2. **Document Reason**: Add comment in separate log explaining why termination was needed
+3. **Test First**: Practice terminate on non-production instances
+4. **Audit Review**: Regularly review termination events for unexpected patterns
+5. **Limited Use**: Terminate is emergency tool, not routine operation
 
 ---
 

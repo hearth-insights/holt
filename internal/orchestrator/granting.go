@@ -6,6 +6,7 @@ import (
 	"log"
 	"sort"
 
+	"github.com/dyluth/holt/internal/orchestrator/debug"
 	"github.com/dyluth/holt/pkg/blackboard"
 )
 
@@ -43,8 +44,33 @@ func (e *Engine) GrantClaim(ctx context.Context, claim *blackboard.Claim, bids m
 
 	log.Printf("[Orchestrator] Claim %s starting in %s phase (status: %s)", claim.ID, initialPhase, initialStatus)
 
-	// Grant based on initial phase
+	// M4.2: Emit review_consensus_reached even when skipping review phase (zero reviewers)
+	// This allows debugger breakpoints to trigger on review consensus regardless of reviewer count
+	if initialPhase != "review" {
+		e.logEvent("review_consensus_reached", map[string]interface{}{
+			"claim_id":       claim.ID,
+			"feedback_count": 0,
+			"skipped":        true, // Indicates review phase was skipped
+		})
+
+		// M4.2: Check breakpoints for review consensus (with zero reviewers)
+		targetArtefact, _ := e.client.GetArtefact(ctx, claim.ArtefactID)
+		e.evaluateBreakpointsAndPause(ctx, targetArtefact, claim, debug.EventReviewConsensusReached)
+	}
+
+	// M4.2: Re-fetch claim after potential debugger pause (may have been terminated)
 	var err error
+	freshClaim, err := e.client.GetClaim(ctx, claim.ID)
+	if err != nil {
+		return fmt.Errorf("failed to re-fetch claim after debugger pause: %w", err)
+	}
+	if freshClaim.Status == blackboard.ClaimStatusTerminated {
+		log.Printf("[Orchestrator] Claim %s was terminated during debugger pause, skipping grant", claim.ID)
+		return nil
+	}
+	claim = freshClaim // Use fresh claim for subsequent operations
+
+	// Grant based on initial phase
 	var grantedAgents []string
 
 	switch initialPhase {

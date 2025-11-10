@@ -120,6 +120,17 @@ func (e *Engine) TransitionToNextPhase(ctx context.Context, claim *blackboard.Cl
 	targetArtefact, _ := e.client.GetArtefact(ctx, currentClaim.ArtefactID)
 	e.evaluateBreakpointsAndPause(ctx, targetArtefact, currentClaim, debug.EventPhaseCompleted)
 
+	// M4.2: Re-fetch claim after potential debugger pause (may have been terminated)
+	freshClaim, err := e.client.GetClaim(ctx, currentClaim.ID)
+	if err != nil {
+		return fmt.Errorf("failed to re-fetch claim after debugger pause: %w", err)
+	}
+	if freshClaim.Status == blackboard.ClaimStatusTerminated {
+		log.Printf("[Orchestrator] Claim %s was terminated during debugger pause, skipping next phase grant", currentClaim.ID)
+		return nil
+	}
+	currentClaim = freshClaim // Use fresh claim for subsequent operations
+
 	// Grant next phase
 	return e.GrantNextPhase(ctx, currentClaim, phaseState, nextPhase)
 }

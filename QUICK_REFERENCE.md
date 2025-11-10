@@ -232,38 +232,14 @@ holt answer abc-123 "Clarified requirements here" --then-questions
 
 **`holt debug [flags]`**
 
-Attach an interactive debugger to a running Holt instance for breakpoint-based pausing, inspection, and manual intervention. The debugger provides a `(holt-debug)` prompt with traditional debugger commands.
+Interactive debugger with breakpoint-based control. For comprehensive workflows and examples, see **[docs/DEBUGGING_GUIDE.md](./docs/DEBUGGING_GUIDE.md)**.
 
-Flags:
-- `--name <instance>` - Target instance name (auto-inferred if omitted)
+**Flags:**
+- `--name <instance>` - Target instance (auto-inferred if omitted)
 - `--break <condition>` (alias `-b`) - Set breakpoint on startup (repeatable)
-- `--pause-on-start` - Pause orchestrator immediately on attach
-
-**Safety Features:**
-- Only one active debug session allowed per instance
-- Session heartbeat refreshed every 5 seconds with 30-second TTL
-- Workflow auto-resumes on session expiration or disconnect
-- All manual interventions are logged and auditable
-
-Examples:
-```bash
-# Basic debugging session
-holt debug
-
-# Pre-set breakpoints on startup
-holt debug -b artefact.type=CodeCommit -b claim.status=pending_review
-
-# Target specific instance
-holt debug --name my-workflow
-
-# Pause immediately on attach
-holt debug --pause-on-start
-```
+- `--pause-on-start` - Pause orchestrator immediately
 
 **Breakpoint Conditions:**
-
-Breakpoints support glob patterns for flexible matching:
-
 - `artefact.type=<glob>` - Match artefact type (e.g., `Code*`, `*Spec`)
 - `artefact.structural_type=<type>` - Match structural type (`Question`, `Review`, `Terminal`)
 - `claim.status=<status>` - Match claim status (`pending_review`, `pending_exclusive`)
@@ -271,55 +247,18 @@ Breakpoints support glob patterns for flexible matching:
 - `event.type=<event>` - Match orchestrator event type
 
 **Interactive Commands:**
-
-Once attached, the debugger provides these commands:
-
-**Execution Control:**
-- `continue` (alias: `c`) - Resume workflow execution until next breakpoint
-- `next` (alias: `n`) - Single-step: process one event, then pause again
-- `exit` - End debug session and clear all breakpoints
-
-**Breakpoints:**
+- `continue` (alias: `c`) - Resume workflow execution
+- `next` (alias: `n`) - Single-step one event
 - `break <condition>` (alias: `b`) - Set new breakpoint
-  - Examples:
-    - `break artefact.type=CodeCommit` - Pause on code commits
-    - `break claim.status=pending_review` - Pause when reviews needed
-    - `break agent.role=coder-*` - Pause on grants to any coder agent
-- `breakpoints` (alias: `bp`) - List all active breakpoints
-- `clear <id>` - Clear specific breakpoint by ID
-
-**Inspection:**
-- `print [artefact-id]` (alias: `p`) - Inspect artefact (current or by ID)
-  - Without ID: displays artefact that triggered current breakpoint
-  - With ID: displays specified artefact details
-- `reviews` - List all claims in `pending_review` status
-
-**Manual Intervention:**
-- `review <claim-id> [--approve | --reject "text"]` - Manually review claim
-  - Only works when paused on `claim.status=pending_review` breakpoint
-  - Creates Review artefact attributed to "user" role for audit trail
-  - Rejected reviews trigger M3.3 automated feedback loop
-
-**Help:**
+- `breakpoints` (alias: `bp`) - List active breakpoints
+- `clear <id>` - Clear breakpoint by ID
+- `print [id]` (alias: `p`) - Inspect artefact/claim (current or by ID)
+- `reviews` - List pending reviews
+- `review <claim-id> [--approve | --reject "text"]` - Manual review
+- `terminate` (alias: `kill`) - Terminate current claim (permanent)
+- `forage --goal "text"` - Start new workflow
 - `help` (alias: `h`, `?`) - Show command reference
-
-**Debug Workflow Example:**
-```bash
-# Start debug session
-holt debug -b claim.status=pending_review
-
-# When paused at breakpoint:
-(holt-debug) print                    # Inspect current artefact
-(holt-debug) reviews                  # List pending reviews
-(holt-debug) review claim-123 --reject "Needs error handling"
-(holt-debug) continue                 # Resume workflow
-
-# Set additional breakpoint during session:
-(holt-debug) break artefact.type=*Spec
-(holt-debug) breakpoints              # Show all active breakpoints
-(holt-debug) next                     # Step through one event
-(holt-debug) exit                     # Clean exit
-```
+- `exit` - End debug session
 
 ## **Redis Debug Protocol (M4.2+)**
 

@@ -231,7 +231,7 @@ func TestFormatters(t *testing.T) {
 		formatter := &defaultFormatter{writer: writer}
 
 		artefact := &blackboard.Artefact{
-			ID:             "terminal-123",
+			ID:             "terminal-12345678-1234-1234-1234-123456789012",
 			Type:           "PackagedModule",
 			StructuralType: blackboard.StructuralTypeTerminal,
 			ProducedByRole: "ModulePackager",
@@ -243,10 +243,9 @@ func TestFormatters(t *testing.T) {
 		output := string(buf)
 		require.Contains(t, output, "✨ Artefact created")
 		require.Contains(t, output, "type=PackagedModule")
-		require.Contains(t, output, "id=terminal-123")
+		require.Contains(t, output, "id=terminal") // Short ID (first 8 chars)
 		require.Contains(t, output, "🎉 Workflow completed")
 		require.Contains(t, output, "Terminal artefact created")
-		require.Contains(t, output, "id=terminal-123")
 	})
 
 	t.Run("defaultFormatter formats claim events", func(t *testing.T) {
@@ -255,8 +254,8 @@ func TestFormatters(t *testing.T) {
 		formatter := &defaultFormatter{writer: writer}
 
 		claim := &blackboard.Claim{
-			ID:         "claim-123",
-			ArtefactID: "artefact-456",
+			ID:         "claim-12345678-1234-1234-1234-123456789012",
+			ArtefactID: "artefact-12345678-1234-1234-1234-123456789012",
 			Status:     blackboard.ClaimStatusPendingReview,
 		}
 
@@ -265,8 +264,8 @@ func TestFormatters(t *testing.T) {
 
 		output := string(buf)
 		require.Contains(t, output, "⏳ Claim created")
-		require.Contains(t, output, "claim=claim-123")
-		require.Contains(t, output, "artefact=artefact-456")
+		require.Contains(t, output, "claim=claim-12") // Short ID (first 8 chars)
+		require.Contains(t, output, "artefact=artefact") // Short ID (first 8 chars)
 		require.Contains(t, output, "status=pending_review")
 	})
 
@@ -278,7 +277,7 @@ func TestFormatters(t *testing.T) {
 		event := &blackboard.WorkflowEvent{
 			Event: "bid_submitted",
 			Data: map[string]interface{}{
-				"claim_id":   "claim-123",
+				"claim_id":   "claim-12345678-1234-1234-1234-123456789012",
 				"agent_name": "test-agent",
 				"bid_type":   "exclusive",
 			},
@@ -290,7 +289,7 @@ func TestFormatters(t *testing.T) {
 		output := string(buf)
 		require.Contains(t, output, "🙋 Bid submitted")
 		require.Contains(t, output, "agent=test-agent")
-		require.Contains(t, output, "claim=claim-123")
+		require.Contains(t, output, "claim=claim-12") // Short ID (first 8 chars)
 		require.Contains(t, output, "type=exclusive")
 	})
 
@@ -302,7 +301,7 @@ func TestFormatters(t *testing.T) {
 		event := &blackboard.WorkflowEvent{
 			Event: "claim_granted",
 			Data: map[string]interface{}{
-				"claim_id":   "claim-123",
+				"claim_id":   "claim-12345678-1234-1234-1234-123456789012",
 				"agent_name": "test-agent",
 				"grant_type": "exclusive",
 			},
@@ -314,7 +313,7 @@ func TestFormatters(t *testing.T) {
 		output := string(buf)
 		require.Contains(t, output, "🏆 Claim granted")
 		require.Contains(t, output, "agent=test-agent")
-		require.Contains(t, output, "claim=claim-123")
+		require.Contains(t, output, "claim=claim-12") // Short ID (first 8 chars)
 		require.Contains(t, output, "type=exclusive")
 	})
 

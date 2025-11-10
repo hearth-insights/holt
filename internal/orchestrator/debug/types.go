@@ -61,6 +61,7 @@ const (
 	CommandStepNext         CommandType = "step_next"
 	CommandInspectArtefact  CommandType = "inspect_artefact"
 	CommandManualReview     CommandType = "manual_review"
+	CommandTerminateClaim   CommandType = "terminate_claim"
 )
 
 // Event represents a debug event from orchestrator to CLI

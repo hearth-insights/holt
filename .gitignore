@@ -15,6 +15,7 @@ Thumbs.db
 /holt
 /orchestrator
 /pup
+cmd/orchestrator/orchestrator
 *.exe
 *.exe~
 *.dll

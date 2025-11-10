@@ -276,41 +276,27 @@ Questions are treated as "late review feedback" - rather than pausing workflows,
 
 ### Interactive Debugging
 
-Holt provides traditional breakpoint-based debugging for workflows (M4.2):
+Holt provides traditional breakpoint-based debugging for AI agent workflows (M4.2):
 
 - **Breakpoint control**: Pause workflows at specific conditions (artefact types, claim states, agent roles)
 - **Real-time inspection**: Examine artefacts, claims, and workflow state while paused
 - **Single-stepping**: Step through orchestrator events one at a time
-- **Manual intervention**: Approve/reject reviews, provide immediate feedback
-- **Safe sessions**: Ephemeral breakpoints, automatic cleanup, audit trail for all actions
+- **Manual intervention**: Approve/reject reviews, terminate problematic claims
+- **Safe sessions**: Ephemeral breakpoints, automatic cleanup, complete audit trail
 
-**Example Debug Workflow**:
+**Key Commands**:
 ```bash
-# Start interactive debugger with breakpoints
-holt debug -b artefact.type=CodeCommit -b claim.status=pending_review
-
-# Interactive prompt appears:
-(holt-debug) print                    # Inspect current artefact
-(holt-debug) break artefact.type=*Spec   # Add more breakpoints dynamically
-(holt-debug) next                     # Single-step through one event
-(holt-debug) continue                 # Resume until next breakpoint
-
-# When paused at review:
-(holt-debug) reviews                  # List pending reviews
-(holt-debug) review claim-123 --reject "Needs error handling"
-(holt-debug) continue                 # Workflow proceeds with feedback
-
-# Clean exit
-(holt-debug) exit                     # Clears breakpoints, resumes workflow
+holt debug                             # Attach interactive debugger
+holt debug -b artefact.type=CodeCommit # Set breakpoints on startup
 ```
 
-**Debugger Safety Features:**
-- Session heartbeat (30-second TTL) - auto-resumes if debugger crashes
+**Safety Features**:
+- Session heartbeat with 30-second TTL - auto-resumes if debugger crashes
 - Single active session - prevents conflicting commands
-- Complete audit trail - all manual reviews logged as immutable artefacts
-- Context-aware commands - prevents mistakes (e.g., review only works when paused on review)
+- Complete audit trail - all manual interventions logged as immutable artefacts
+- Context-aware commands - prevents mistakes (e.g., terminate only when paused on claim)
 
-See [docs/DEBUGGING_GUIDE.md](./docs/DEBUGGING_GUIDE.md) for comprehensive debugging workflows and examples.
+See **[docs/DEBUGGING_GUIDE.md](./docs/DEBUGGING_GUIDE.md)** for comprehensive workflows and examples.
 
 ---
 

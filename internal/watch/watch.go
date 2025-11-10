@@ -453,6 +453,7 @@ func displayHistoricalArtefacts(ctx context.Context, client *blackboard.Client, 
 				Data: map[string]interface{}{
 					"reviewer_role":        reviewArtefact.ProducedByRole,
 					"original_artefact_id": artefact.ID,
+					"review_artefact_id":   reviewArtefact.ID,
 				},
 			}
 			// Use review artefact's actual creation time
@@ -605,6 +606,14 @@ func reconnectWithRetry(ctx context.Context, client *blackboard.Client, retryInt
 	}
 }
 
+// shortID returns the first 8 characters of a UUID for readability
+func shortID(id string) string {
+	if len(id) > 8 {
+		return id[:8]
+	}
+	return id
+}
+
 // eventFormatter formats events for output
 type eventFormatter interface {
 	FormatArtefact(artefact *blackboard.Artefact) error
@@ -634,24 +643,24 @@ func (f *defaultFormatter) FormatArtefact(artefact *blackboard.Artefact) error {
 	// Special handling for Terminal artefacts - indicate workflow completion
 	if artefact.StructuralType == blackboard.StructuralTypeTerminal {
 		_, err := fmt.Fprintf(f.writer, "[%s] ✨ Artefact created: by=%s, type=%s, id=%s\n",
-			timestamp, artefact.ProducedByRole, artefact.Type, artefact.ID)
+			timestamp, artefact.ProducedByRole, artefact.Type, shortID(artefact.ID))
 		if err != nil {
 			return err
 		}
 		_, err = fmt.Fprintf(f.writer, "[%s] 🎉 Workflow completed: Terminal artefact created (type=%s, id=%s)\n",
-			timestamp, artefact.Type, artefact.ID)
+			timestamp, artefact.Type, shortID(artefact.ID))
 		return err
 	}
 
 	_, err := fmt.Fprintf(f.writer, "[%s] ✨ Artefact created: by=%s, type=%s, id=%s\n",
-		timestamp, artefact.ProducedByRole, artefact.Type, artefact.ID)
+		timestamp, artefact.ProducedByRole, artefact.Type, shortID(artefact.ID))
 	return err
 }
 
 func (f *defaultFormatter) FormatClaim(claim *blackboard.Claim, timestampMs int64) error {
 	timestamp := formatTimestampMs(timestampMs)
 	_, err := fmt.Fprintf(f.writer, "[%s] ⏳ Claim created: claim=%s, artefact=%s, status=%s\n",
-		timestamp, claim.ID, claim.ArtefactID, claim.Status)
+		timestamp, shortID(claim.ID), shortID(claim.ArtefactID), claim.Status)
 	return err
 }
 
@@ -664,7 +673,7 @@ func (f *defaultFormatter) FormatWorkflow(event *blackboard.WorkflowEvent, times
 		claimID, _ := event.Data["claim_id"].(string)
 		bidType, _ := event.Data["bid_type"].(string)
 		_, err := fmt.Fprintf(f.writer, "[%s] 🙋 Bid submitted: agent=%s, claim=%s, type=%s\n",
-			timestamp, agentName, claimID, bidType)
+			timestamp, agentName, shortID(claimID), bidType)
 		return err
 
 	case "claim_granted":
@@ -680,23 +689,25 @@ func (f *defaultFormatter) FormatWorkflow(event *blackboard.WorkflowEvent, times
 		}
 
 		_, err := fmt.Fprintf(f.writer, "[%s] 🏆 Claim granted: agent=%s, claim=%s, type=%s\n",
-			timestamp, agentDisplay, claimID, grantType)
+			timestamp, agentDisplay, shortID(claimID), grantType)
 		return err
 
 	case "review_approved":
 		reviewerRole, _ := event.Data["reviewer_role"].(string)
 		originalArtefactID, _ := event.Data["original_artefact_id"].(string)
+		reviewArtefactID, _ := event.Data["review_artefact_id"].(string)
 
-		_, err := fmt.Fprintf(f.writer, "[%s] ✅ Review Approved: by=%s for artefact %s\n",
-			timestamp, reviewerRole, originalArtefactID)
+		_, err := fmt.Fprintf(f.writer, "[%s] ✅ Review Approved: by=%s for artefact %s (review: %s)\n",
+			timestamp, reviewerRole, shortID(originalArtefactID), shortID(reviewArtefactID))
 		return err
 
 	case "review_rejected":
 		reviewerRole, _ := event.Data["reviewer_role"].(string)
 		originalArtefactID, _ := event.Data["original_artefact_id"].(string)
+		reviewArtefactID, _ := event.Data["review_artefact_id"].(string)
 
-		_, err := fmt.Fprintf(f.writer, "[%s] ❌ Review Rejected: by=%s for artefact %s\n",
-			timestamp, reviewerRole, originalArtefactID)
+		_, err := fmt.Fprintf(f.writer, "[%s] ❌ Review Rejected: by=%s for artefact %s (review: %s)\n",
+			timestamp, reviewerRole, shortID(originalArtefactID), shortID(reviewArtefactID))
 		return err
 
 	case "feedback_claim_created":
@@ -710,7 +721,7 @@ func (f *defaultFormatter) FormatWorkflow(event *blackboard.WorkflowEvent, times
 		}
 
 		_, err := fmt.Fprintf(f.writer, "[%s] 🔄 Rework Assigned: to=%s for claim %s (iteration %d)\n",
-			timestamp, targetAgentRole, feedbackClaimID, iteration)
+			timestamp, targetAgentRole, shortID(feedbackClaimID), iteration)
 		return err
 
 	case "artefact_reworked":
@@ -725,7 +736,7 @@ func (f *defaultFormatter) FormatWorkflow(event *blackboard.WorkflowEvent, times
 		}
 
 		_, err := fmt.Fprintf(f.writer, "[%s] 🔄 Artefact Reworked (v%d): by=%s, type=%s, id=%s\n",
-			timestamp, newVersion, producedByRole, artefactType, newArtefactID)
+			timestamp, newVersion, producedByRole, artefactType, shortID(newArtefactID))
 		return err
 
 	case "human_input_required":
@@ -738,7 +749,7 @@ func (f *defaultFormatter) FormatWorkflow(event *blackboard.WorkflowEvent, times
 		if err != nil {
 			return err
 		}
-		_, err = fmt.Fprintf(f.writer, "  Question %s\n", truncateID(questionID))
+		_, err = fmt.Fprintf(f.writer, "  Question %s\n", shortID(questionID))
 		if err != nil {
 			return err
 		}
@@ -748,7 +759,7 @@ func (f *defaultFormatter) FormatWorkflow(event *blackboard.WorkflowEvent, times
 				return err
 			}
 		}
-		_, err = fmt.Fprintf(f.writer, "  Target: artefact %s\n", truncateID(targetArtefactID))
+		_, err = fmt.Fprintf(f.writer, "  Target: artefact %s\n", shortID(targetArtefactID))
 		if err != nil {
 			return err
 		}

@@ -83,9 +83,24 @@ func (e *Engine) processDebugCommands(ctx context.Context, debugSess *debugSessi
 				return
 			}
 
-			// Verify command is for current session
-			if debugSess.currentSession == nil || cmd.SessionID != debugSess.currentSession.ID {
-				log.Printf("[Orchestrator] Ignoring command for inactive session: %s", cmd.SessionID)
+			// Special handling for set_breakpoints during session initialization
+			if debugSess.currentSession == nil {
+				// Check if this is for a valid session that's being initialized
+				session, err := debugSess.sessionMgr.GetActiveSession(ctx)
+				if err == nil && session != nil && cmd.SessionID == session.ID {
+					// Session exists but not yet activated - activate it now
+					debugSess.currentSession = session
+					log.Printf("[Orchestrator] Debug session activated early due to command: %s", session.ID)
+					e.logEvent("debug_session_activated", map[string]interface{}{
+						"session_id":      session.ID,
+						"connected_at_ms": session.ConnectedAtMs,
+					})
+				} else {
+					log.Printf("[Orchestrator] Ignoring command for inactive session: %s", cmd.SessionID)
+					continue
+				}
+			} else if cmd.SessionID != debugSess.currentSession.ID {
+				log.Printf("[Orchestrator] Ignoring command for wrong session: %s (expected %s)", cmd.SessionID, debugSess.currentSession.ID)
 				continue
 			}
 
@@ -130,6 +145,9 @@ func (e *Engine) handleDebugCommand(ctx context.Context, debugSess *debugSession
 	case debug.CommandManualReview:
 		return e.handleManualReview(ctx, debugSess, cmd)
 
+	case debug.CommandTerminateClaim:
+		return e.handleTerminateClaim(ctx, debugSess, cmd)
+
 	default:
 		return fmt.Errorf("unknown command type: %s", cmd.CommandType)
 	}
@@ -137,16 +155,22 @@ func (e *Engine) handleDebugCommand(ctx context.Context, debugSess *debugSession
 
 // M4.2: handleSetBreakpoints adds new breakpoints
 func (e *Engine) handleSetBreakpoints(ctx context.Context, debugSess *debugSession, cmd *debug.Command) error {
+	log.Printf("[Orchestrator] Handling set_breakpoints command for session %s", cmd.SessionID)
+
 	// Expecting payload: {"breakpoints": [{"id": "bp-1", "condition_type": "...", "pattern": "..."}]}
 	bpsInterface, ok := cmd.Payload["breakpoints"]
 	if !ok {
+		log.Printf("[Orchestrator] ERROR: missing breakpoints in payload")
 		return fmt.Errorf("missing breakpoints in payload")
 	}
 
 	bpsList, ok := bpsInterface.([]interface{})
 	if !ok {
+		log.Printf("[Orchestrator] ERROR: breakpoints must be array")
 		return fmt.Errorf("breakpoints must be array")
 	}
+
+	log.Printf("[Orchestrator] Setting %d breakpoints", len(bpsList))
 
 	for _, bpInterface := range bpsList {
 		bpMap, ok := bpInterface.(map[string]interface{})
@@ -160,18 +184,25 @@ func (e *Engine) handleSetBreakpoints(ctx context.Context, debugSess *debugSessi
 			Pattern:       bpMap["pattern"].(string),
 		}
 
+		log.Printf("[Orchestrator] Setting breakpoint %s: %s=%s", bp.ID, bp.ConditionType, bp.Pattern)
+
 		// Validate breakpoint
 		if err := debug.ValidateBreakpointConditionType(bp.ConditionType); err != nil {
+			log.Printf("[Orchestrator] ERROR: Invalid condition type: %v", err)
 			return err
 		}
 		if err := debug.ValidateBreakpointPattern(bp.Pattern); err != nil {
+			log.Printf("[Orchestrator] ERROR: Invalid pattern: %v", err)
 			return err
 		}
 
 		// Add breakpoint
 		if err := debugSess.sessionMgr.AddBreakpoint(ctx, bp); err != nil {
+			log.Printf("[Orchestrator] ERROR: Failed to add breakpoint: %v", err)
 			return err
 		}
+
+		log.Printf("[Orchestrator] Breakpoint %s added successfully", bp.ID)
 
 		// Publish breakpoint_set event
 		debugSess.protocolHandler.PublishBreakpointSetEvent(ctx, cmd.SessionID, bp)
@@ -304,6 +335,76 @@ func (e *Engine) handleManualReview(ctx context.Context, debugSess *debugSession
 	return nil
 }
 
+// M4.2: handleTerminateClaim manually terminates the currently paused claim
+func (e *Engine) handleTerminateClaim(ctx context.Context, debugSess *debugSession, cmd *debug.Command) error {
+	// Only allowed when paused on a claim
+	pauseCtx, err := debugSess.sessionMgr.GetPauseContext(ctx)
+	if err != nil {
+		return err
+	}
+
+	if pauseCtx == nil {
+		return fmt.Errorf("not paused on any claim")
+	}
+
+	if pauseCtx.ClaimID == "" {
+		return fmt.Errorf("no claim in current pause context")
+	}
+
+	claimID := pauseCtx.ClaimID
+
+	// Get claim
+	claim, err := e.client.GetClaim(ctx, claimID)
+	if err != nil {
+		return fmt.Errorf("failed to get claim: %w", err)
+	}
+
+	// Verify claim is not already terminated
+	if claim.Status == blackboard.ClaimStatusTerminated || claim.Status == blackboard.ClaimStatusComplete {
+		return fmt.Errorf("claim %s is already %s", claimID, claim.Status)
+	}
+
+	// Terminate the claim with detailed audit trail
+	timestamp := time.Now().UTC().Format(time.RFC3339)
+	claim.Status = blackboard.ClaimStatusTerminated
+	claim.TerminationReason = fmt.Sprintf("MANUAL TERMINATION via debugger operator (session: %s) at %s. This claim was explicitly killed during interactive debugging.",
+		cmd.SessionID, timestamp)
+
+	if err := e.client.UpdateClaim(ctx, claim); err != nil {
+		return fmt.Errorf("failed to terminate claim: %w", err)
+	}
+
+	// Clean up phase state if it exists
+	delete(e.phaseStates, claimID)
+
+	// Delete from pending assignment tracking if present
+	delete(e.pendingAssignmentClaims, claimID)
+
+	// Structured log with HIGH visibility
+	log.Printf("[Orchestrator] ⚠️  MANUAL TERMINATION: Claim %s terminated by debugger operator (session: %s)",
+		claimID, cmd.SessionID)
+
+	e.logEvent("debug_claim_terminated", map[string]interface{}{
+		"session_id":         cmd.SessionID,
+		"claim_id":           claimID,
+		"artefact_id":        claim.ArtefactID,
+		"paused_event_type":  pauseCtx.EventType,
+		"termination_reason": claim.TerminationReason,
+		"level":              "error", // Use error level for high visibility
+		"manual_intervention": true,
+	})
+
+	// Resume the orchestrator - work is done on this claim
+	select {
+	case debugSess.resumeChan <- debug.ResumeContinue:
+		log.Printf("[Orchestrator] Resuming after claim termination")
+	default:
+		// Not waiting for resume - that's ok
+	}
+
+	return nil
+}
+
 // M4.2: monitorSessionExpiration checks for session expiration
 func (e *Engine) monitorSessionExpiration(ctx context.Context, debugSess *debugSession) {
 	ticker := time.NewTicker(1 * time.Second)
@@ -381,6 +482,11 @@ func (e *Engine) evaluateBreakpointsAndPause(
 	eventType debug.EventType,
 ) {
 	if e.debugSession == nil || e.debugSession.currentSession == nil {
+		// Only log on the first few events to avoid spam
+		if eventType == debug.EventReviewConsensusReached {
+			log.Printf("[Orchestrator] Skipping breakpoint evaluation: debugSession=%v, currentSession=%v, eventType=%s",
+				e.debugSession != nil, e.debugSession != nil && e.debugSession.currentSession != nil, eventType)
+		}
 		return
 	}
 
@@ -391,6 +497,8 @@ func (e *Engine) evaluateBreakpointsAndPause(
 		return
 	}
 
+	log.Printf("[Orchestrator] Evaluating %d breakpoints for event %s", len(breakpoints), eventType)
+
 	if len(breakpoints) == 0 {
 		return
 	}
@@ -398,6 +506,7 @@ func (e *Engine) evaluateBreakpointsAndPause(
 	// Evaluate breakpoints
 	matchedBp := debug.EvaluateBreakpoints(ctx, breakpoints, artefact, claim, eventType)
 	if matchedBp == nil {
+		log.Printf("[Orchestrator] No breakpoints matched for event %s", eventType)
 		// Check step mode
 		if e.debugSession.stepMode {
 			e.debugSession.stepMode = false
@@ -405,6 +514,8 @@ func (e *Engine) evaluateBreakpointsAndPause(
 		}
 		return
 	}
+
+	log.Printf("[Orchestrator] Breakpoint %s matched! Pausing execution", matchedBp.ID)
 
 	// Breakpoint matched - pause
 	e.pauseForDebug(ctx, artefact, claim, eventType, matchedBp)
