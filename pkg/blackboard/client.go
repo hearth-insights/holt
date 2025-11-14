@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -876,6 +877,132 @@ func (c *Client) ZRem(ctx context.Context, key string, members ...string) error 
 	}
 
 	return nil
+}
+
+// createOrVersionKnowledgeScript is a Lua script for atomically creating or versioning Knowledge artefacts (M4.3).
+// This script ensures that the knowledge_index check-and-set operation is truly atomic.
+//
+// KEYS[1] = knowledge_index Redis key (HASH mapping knowledge_name → logical_id)
+// ARGV[1] = knowledge_name (globally unique name for this knowledge)
+// ARGV[2] = new_logical_id (pre-generated UUID from Go, used if creating new thread)
+//
+// Returns: logical_id (existing or newly created) to use for versioning
+var createOrVersionKnowledgeScript = redis.NewScript(`
+	local existing = redis.call('HGET', KEYS[1], ARGV[1])
+	if existing then
+		return existing
+	else
+		redis.call('HSET', KEYS[1], ARGV[1], ARGV[2])
+		return ARGV[2]
+	end
+`)
+
+// CreateOrVersionKnowledge atomically creates a new Knowledge artefact or creates a new version
+// of an existing Knowledge thread (M4.3).
+//
+// This method uses a Lua script to atomically check the knowledge_index and either:
+//   - Return the existing logical_id if the knowledge_name already exists
+//   - Create a new entry in the index with the provided newLogicalID if it doesn't exist
+//
+// The method then creates the Knowledge artefact with the appropriate version number and
+// adds it to the thread_context SET for the specified threadLogicalID.
+//
+// Parameters:
+//   - knowledgeName: Globally unique name for this knowledge (e.g., "go-sdk-docs")
+//   - knowledgePayload: The actual content to cache
+//   - contextForRoles: Array of glob patterns for which agent roles should receive this knowledge
+//   - threadLogicalID: The logical_id of the work thread this knowledge belongs to
+//   - producedByRole: The agent role producing this knowledge
+//
+// Returns the created Knowledge artefact.
+func (c *Client) CreateOrVersionKnowledge(ctx context.Context, knowledgeName, knowledgePayload string, contextForRoles []string, threadLogicalID, producedByRole string) (*Artefact, error) {
+	// Generate a new logical_id optimistically (may not be used if knowledge already exists)
+	newLogicalID := uuid.New().String()
+
+	// Execute Lua script to atomically get or create the logical_id for this knowledge_name
+	indexKey := KnowledgeIndexKey(c.instanceName)
+	result, err := createOrVersionKnowledgeScript.Run(ctx, c.rdb, []string{indexKey}, knowledgeName, newLogicalID).Result()
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute knowledge index script: %w", err)
+	}
+
+	logicalID, ok := result.(string)
+	if !ok {
+		return nil, fmt.Errorf("unexpected result type from Lua script: %T", result)
+	}
+
+	// Determine the version number by querying the thread
+	threadKey := ThreadKey(c.instanceName, logicalID)
+	versions, err := c.rdb.ZRevRangeWithScores(ctx, threadKey, 0, 0).Result()
+	if err != nil {
+		return nil, fmt.Errorf("failed to query thread for version: %w", err)
+	}
+
+	var version int
+	if len(versions) == 0 {
+		// This is v1 of a new knowledge thread
+		version = 1
+	} else {
+		// Increment the latest version
+		version = int(versions[0].Score) + 1
+	}
+
+	// Default target_roles to ["*"] if empty
+	if len(contextForRoles) == 0 {
+		contextForRoles = []string{"*"}
+	}
+
+	// Create the Knowledge artefact
+	artefactID := uuid.New().String()
+	knowledge := &Artefact{
+		ID:              artefactID,
+		LogicalID:       logicalID,
+		Version:         version,
+		StructuralType:  StructuralTypeKnowledge,
+		Type:            knowledgeName, // The knowledge_name becomes the Type field
+		Payload:         knowledgePayload,
+		SourceArtefacts: []string{}, // Knowledge artefacts have no sources
+		ProducedByRole:  producedByRole,
+		ContextForRoles: contextForRoles,
+		CreatedAtMs:     time.Now().UnixMilli(),
+	}
+
+	// Write the artefact to Redis (without publishing an event - Knowledge is passive)
+	if err := knowledge.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid knowledge artefact: %w", err)
+	}
+
+	hash, err := ArtefactToHash(knowledge)
+	if err != nil {
+		return nil, fmt.Errorf("failed to serialize knowledge artefact: %w", err)
+	}
+
+	artefactKey := ArtefactKey(c.instanceName, artefactID)
+	if err := c.rdb.HSet(ctx, artefactKey, hash).Err(); err != nil {
+		return nil, fmt.Errorf("failed to write knowledge artefact: %w", err)
+	}
+
+	// Add to thread tracking
+	if err := c.rdb.ZAdd(ctx, threadKey, redis.Z{
+		Score:  float64(version),
+		Member: artefactID,
+	}).Err(); err != nil {
+		return nil, fmt.Errorf("failed to add to thread: %w", err)
+	}
+
+	// Add to thread_context SET for the work thread
+	// M4.3: For manual provisioning, use special "global" logical_id
+	targetLogicalID := threadLogicalID
+	if targetLogicalID == "" {
+		targetLogicalID = "global" // Special marker for manually provisioned knowledge
+	}
+
+	threadContextKey := ThreadContextKey(c.instanceName, targetLogicalID)
+	if err := c.rdb.SAdd(ctx, threadContextKey, artefactID).Err(); err != nil {
+		return nil, fmt.Errorf("failed to add to thread context: %w", err)
+	}
+
+	return knowledge, nil
 }
 
 // IsNotFound returns true if the error is a Redis "key not found" error (redis.Nil).

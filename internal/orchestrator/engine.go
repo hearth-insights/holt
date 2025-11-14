@@ -134,9 +134,11 @@ func (e *Engine) Run(ctx context.Context) error {
 // Creates a claim if appropriate, or skips if Terminal, Failure, or Review type.
 func (e *Engine) processArtefact(ctx context.Context, artefact *blackboard.Artefact) error {
 	// Do not create claims for artefacts that are the output of a process, like reviews or failures.
+	// M4.3: Also skip Knowledge artefacts as they are passive context data, not claimable work.
 	if artefact.StructuralType == blackboard.StructuralTypeTerminal ||
 		artefact.StructuralType == blackboard.StructuralTypeFailure ||
-		artefact.StructuralType == blackboard.StructuralTypeReview {
+		artefact.StructuralType == blackboard.StructuralTypeReview ||
+		artefact.StructuralType == blackboard.StructuralTypeKnowledge {
 		e.logEvent("claim_creation_skipped", map[string]interface{}{
 			"artefact_id":     artefact.ID,
 			"type":            artefact.Type,

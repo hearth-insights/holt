@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"path/filepath"
 
 	"github.com/dyluth/holt/pkg/blackboard"
 )
@@ -165,6 +166,7 @@ func (e *Engine) getLatestVersionForContext(ctx context.Context, discoveredArtef
 
 // filterContextArtefacts filters the context map to include only Standard, Answer, and Review artefacts.
 // M3.3: Review artefacts are included for feedback claims to provide review feedback to agents.
+// M4.3: Knowledge artefacts are filtered out (they are not part of the work chain, loaded separately).
 // This provides agents with a clean, actionable history without failures or terminal artefacts.
 func filterContextArtefacts(contextMap map[string]*blackboard.Artefact) []*blackboard.Artefact {
 	filtered := make([]*blackboard.Artefact, 0, len(contextMap))
@@ -202,4 +204,180 @@ func sortContextChronologically(artefacts []*blackboard.Artefact) []*blackboard.
 	}
 
 	return sorted
+}
+
+// loadKnowledgeForAgent loads and filters Knowledge artefacts for the agent's role (M4.3).
+// This function:
+//  1. Collects all unique logical_ids from the work history
+//  2. Queries thread_context SETs for each logical_id to find attached Knowledge artefact IDs
+//  3. Loads all unique Knowledge artefacts
+//  4. Filters by matching agent's role against context_for_roles glob patterns
+//  5. Implements "latest version wins" merge strategy for duplicate knowledge_names
+//
+// Returns:
+//   - contextIsDeclared: true if any Knowledge was found for this agent
+//   - knowledgeBase: map of knowledge_name → payload
+//   - loadedKnowledge: list of knowledge names that were loaded
+func (e *Engine) loadKnowledgeForAgent(ctx context.Context, contextChain []*blackboard.Artefact) (bool, map[string]string, []string, error) {
+	// Collect all unique logical_ids from work history
+	logicalIDSet := make(map[string]bool)
+	for _, art := range contextChain {
+		logicalIDSet[art.LogicalID] = true
+	}
+
+	// M4.3: Always include "global" logical_id for manually provisioned knowledge
+	logicalIDSet["global"] = true
+
+	logicalIDs := make([]string, 0, len(logicalIDSet))
+	for logicalID := range logicalIDSet {
+		logicalIDs = append(logicalIDs, logicalID)
+	}
+
+	log.Printf("[INFO] M4.3: Searching for Knowledge artefacts across %d logical threads", len(logicalIDs))
+
+	// Query thread_context SETs for all logical_ids and collect Knowledge artefact IDs
+	knowledgeIDs := make(map[string]bool) // Use map for de-duplication
+	for _, logicalID := range logicalIDs {
+		// Guard against nil bbClient (unit tests)
+		if e.bbClient == nil {
+			return false, nil, nil, nil
+		}
+
+		threadContextKey := blackboard.ThreadContextKey(e.bbClient.GetInstanceName(), logicalID)
+		members, err := e.bbClient.GetRedisClient().SMembers(ctx, threadContextKey).Result()
+		if err != nil {
+			log.Printf("[WARN] Failed to query thread_context for logical_id=%s: %v", logicalID, err)
+			continue
+		}
+
+		for _, memberID := range members {
+			knowledgeIDs[memberID] = true
+		}
+	}
+
+	if len(knowledgeIDs) == 0 {
+		log.Printf("[DEBUG] M4.3: No Knowledge artefacts found in thread_context")
+		return false, nil, nil, nil
+	}
+
+	log.Printf("[DEBUG] M4.3: Found %d Knowledge artefact IDs", len(knowledgeIDs))
+
+	// Load all Knowledge artefacts
+	allKnowledge := make([]*blackboard.Artefact, 0, len(knowledgeIDs))
+	for knowledgeID := range knowledgeIDs {
+		knowledge, err := e.bbClient.GetArtefact(ctx, knowledgeID)
+		if err != nil {
+			log.Printf("[WARN] Failed to load Knowledge artefact %s: %v (skipping)", knowledgeID, err)
+			continue
+		}
+		if knowledge == nil {
+			log.Printf("[WARN] Knowledge artefact %s not found (skipping)", knowledgeID)
+			continue
+		}
+		allKnowledge = append(allKnowledge, knowledge)
+	}
+
+	log.Printf("[DEBUG] M4.3: Loaded %d Knowledge artefacts", len(allKnowledge))
+
+	// Filter by role matching and implement "latest version wins" merge strategy
+	filtered, err := e.filterAndMergeKnowledge(allKnowledge)
+	if err != nil {
+		return false, nil, nil, fmt.Errorf("failed to filter and merge knowledge: %w", err)
+	}
+
+	if len(filtered) == 0 {
+		log.Printf("[DEBUG] M4.3: No Knowledge artefacts matched agent role %s", e.config.AgentName)
+		return false, nil, nil, nil
+	}
+
+	// Build knowledge_base map and loaded_knowledge list
+	knowledgeBase := make(map[string]string, len(filtered))
+	loadedKnowledge := make([]string, 0, len(filtered))
+
+	for _, knowledge := range filtered {
+		knowledgeName := knowledge.Type // The knowledge_name is stored in the Type field
+		knowledgeBase[knowledgeName] = knowledge.Payload
+		loadedKnowledge = append(loadedKnowledge, knowledgeName)
+		log.Printf("[INFO] M4.3: Loaded knowledge '%s' (version=%d) for role %s",
+			knowledgeName, knowledge.Version, e.config.AgentName)
+	}
+
+	return true, knowledgeBase, loadedKnowledge, nil
+}
+
+// filterAndMergeKnowledge filters Knowledge artefacts by role matching and implements "latest version wins" (M4.3).
+// This function:
+//  1. Filters artefacts by matching agent's role against context_for_roles glob patterns
+//  2. Groups artefacts by knowledge_name (Type field)
+//  3. For each group, selects the artefact with the highest version number
+func (e *Engine) filterAndMergeKnowledge(allKnowledge []*blackboard.Artefact) ([]*blackboard.Artefact, error) {
+	// First, filter by role matching
+	roleMatched := make([]*blackboard.Artefact, 0)
+
+	for _, knowledge := range allKnowledge {
+		if e.matchesRole(knowledge.ContextForRoles) {
+			roleMatched = append(roleMatched, knowledge)
+			log.Printf("[DEBUG] M4.3: Knowledge '%s' (v%d) matched role %s",
+				knowledge.Type, knowledge.Version, e.config.AgentName)
+		} else {
+			log.Printf("[DEBUG] M4.3: Knowledge '%s' (v%d) did not match role %s (target_roles=%v)",
+				knowledge.Type, knowledge.Version, e.config.AgentName, knowledge.ContextForRoles)
+		}
+	}
+
+	if len(roleMatched) == 0 {
+		return nil, nil
+	}
+
+	// Group by knowledge_name (Type field) and select latest version
+	knowledgeMap := make(map[string]*blackboard.Artefact)
+
+	for _, knowledge := range roleMatched {
+		knowledgeName := knowledge.Type
+
+		existing, exists := knowledgeMap[knowledgeName]
+		if !exists || knowledge.Version > existing.Version {
+			// Either first time seeing this knowledge, or this is a newer version
+			knowledgeMap[knowledgeName] = knowledge
+			if exists {
+				log.Printf("[DEBUG] M4.3: Latest version wins: '%s' v%d replaced v%d",
+					knowledgeName, knowledge.Version, existing.Version)
+			}
+		}
+	}
+
+	// Convert map to slice
+	result := make([]*blackboard.Artefact, 0, len(knowledgeMap))
+	for _, knowledge := range knowledgeMap {
+		result = append(result, knowledge)
+	}
+
+	return result, nil
+}
+
+// matchesRole checks if the agent's role matches any of the glob patterns in context_for_roles.
+// Returns true if the agent's role matches at least one pattern, or if patterns is empty/contains "*".
+func (e *Engine) matchesRole(contextForRoles []string) bool {
+	if len(contextForRoles) == 0 {
+		return true // Empty means all roles
+	}
+
+	for _, roleGlob := range contextForRoles {
+		if roleGlob == "*" {
+			return true // Wildcard matches all
+		}
+
+		// Use path/filepath.Match for glob pattern matching
+		matched, err := filepath.Match(roleGlob, e.config.AgentName)
+		if err != nil {
+			log.Printf("[WARN] Invalid glob pattern '%s': %v", roleGlob, err)
+			continue
+		}
+
+		if matched {
+			return true
+		}
+	}
+
+	return false
 }

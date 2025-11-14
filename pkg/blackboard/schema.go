@@ -73,3 +73,17 @@ func WorkflowEventsChannel(instanceName string) string {
 func AgentImagesKey(instanceName string) string {
 	return fmt.Sprintf("holt:%s:agent_images", instanceName)
 }
+
+// KnowledgeIndexKey returns the Redis key for the global knowledge index hash (M4.3).
+// This hash maps knowledge_name → logical_id for globally unique knowledge threads.
+// Pattern: holt:{instance_name}:knowledge_index
+func KnowledgeIndexKey(instanceName string) string {
+	return fmt.Sprintf("holt:%s:knowledge_index", instanceName)
+}
+
+// ThreadContextKey returns the Redis key for a thread's context set (M4.3).
+// This SET contains Knowledge artefact IDs attached to a specific work thread.
+// Pattern: holt:{instance_name}:thread_context:{logical_id}
+func ThreadContextKey(instanceName, logicalID string) string {
+	return fmt.Sprintf("holt:%s:thread_context:%s", instanceName, logicalID)
+}

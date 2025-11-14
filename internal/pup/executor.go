@@ -117,6 +117,7 @@ func (e *Engine) fetchTargetArtefact(ctx context.Context, claim *blackboard.Clai
 // prepareToolInput creates the JSON structure to pass to the tool via stdin.
 // M2.4: Uses context assembly to populate context_chain with historical artefacts.
 // M3.3: Passes claim to assembleContext for AdditionalContextIDs support.
+// M4.3: Loads Knowledge artefacts and populates context caching fields.
 func (e *Engine) prepareToolInput(ctx context.Context, claim *blackboard.Claim, targetArtefact *blackboard.Artefact) (string, error) {
 	// Assemble context chain via BFS traversal with thread tracking
 	// M3.3: Pass claim for feedback claim context support
@@ -127,6 +128,12 @@ func (e *Engine) prepareToolInput(ctx context.Context, claim *blackboard.Claim, 
 
 	log.Printf("[DEBUG] Prepared context chain: %d artefacts", len(contextChain))
 
+	// M4.3: Load Knowledge artefacts for this agent
+	contextIsDeclared, knowledgeBase, loadedKnowledge, err := e.loadKnowledgeForAgent(ctx, contextChain)
+	if err != nil {
+		return "", fmt.Errorf("failed to load knowledge: %w", err)
+	}
+
 	// Convert to []interface{} for JSON marshaling
 	contextChainInterface := make([]interface{}, len(contextChain))
 	for i, art := range contextChain {
@@ -134,9 +141,12 @@ func (e *Engine) prepareToolInput(ctx context.Context, claim *blackboard.Claim, 
 	}
 
 	input := &ToolInput{
-		ClaimType:      "exclusive", // M2.4: still hardcoded (Phase 3 will support review/parallel)
-		TargetArtefact: targetArtefact,
-		ContextChain:   contextChainInterface,
+		ClaimType:         "exclusive", // M2.4: still hardcoded (Phase 3 will support review/parallel)
+		TargetArtefact:    targetArtefact,
+		ContextChain:      contextChainInterface,
+		ContextIsDeclared: contextIsDeclared,
+		KnowledgeBase:     knowledgeBase,
+		LoadedKnowledge:   loadedKnowledge,
 	}
 
 	jsonBytes, err := json.Marshal(input)
@@ -324,7 +334,56 @@ func (e *Engine) createResultArtefact(ctx context.Context, claim *blackboard.Cla
 		log.Printf("[WARN] Failed to add version to thread: logical_id=%s error=%v", logicalID, err)
 	}
 
+	// M4.3: Process checkpoints if present
+	if len(output.Checkpoints) > 0 {
+		if err := e.processCheckpoints(ctx, output.Checkpoints, artefact.LogicalID); err != nil {
+			// Log but don't fail - main artefact was created successfully
+			log.Printf("[WARN] Failed to process checkpoints: %v", err)
+		}
+	}
+
 	return artefact, nil
+}
+
+// processCheckpoints handles declarative context caching (M4.3).
+// For each checkpoint in the tool output, this function:
+//  1. Calls the blackboard's CreateOrVersionKnowledge method (uses Lua script for atomicity)
+//  2. Creates/versions Knowledge artefacts and attaches them to the work thread
+//
+// Parameters:
+//   - checkpoints: Array of checkpoint declarations from tool output
+//   - threadLogicalID: The logical_id of the work thread to attach knowledge to
+func (e *Engine) processCheckpoints(ctx context.Context, checkpoints []Checkpoint, threadLogicalID string) error {
+	log.Printf("[INFO] M4.3: Processing %d checkpoints for thread %s", len(checkpoints), threadLogicalID)
+
+	for i, checkpoint := range checkpoints {
+		log.Printf("[DEBUG] M4.3: Processing checkpoint %d: knowledge_name=%s target_roles=%v",
+			i+1, checkpoint.KnowledgeName, checkpoint.TargetRoles)
+
+		// Validate checkpoint
+		if checkpoint.KnowledgeName == "" {
+			log.Printf("[WARN] Skipping checkpoint %d: knowledge_name is empty", i+1)
+			continue
+		}
+
+		// Use blackboard's atomic create-or-version method
+		knowledge, err := e.bbClient.CreateOrVersionKnowledge(
+			ctx,
+			checkpoint.KnowledgeName,
+			checkpoint.KnowledgePayload,
+			checkpoint.TargetRoles,
+			threadLogicalID,
+			e.config.AgentName, // M3.7: AgentName IS the role
+		)
+		if err != nil {
+			return fmt.Errorf("failed to create/version knowledge '%s': %w", checkpoint.KnowledgeName, err)
+		}
+
+		log.Printf("[INFO] M4.3: Created Knowledge artefact: name=%s version=%d id=%s",
+			checkpoint.KnowledgeName, knowledge.Version, knowledge.ID)
+	}
+
+	return nil
 }
 
 // createFailureArtefact creates a Failure artefact describing a tool execution failure.
@@ -474,6 +533,14 @@ func (e *Engine) createReworkArtefact(ctx context.Context, claim *blackboard.Cla
 
 	log.Printf("[INFO] Rework artefact created: id=%s logical_id=%s version=%d (agent unaware of versioning)",
 		artefact.ID, artefact.LogicalID, artefact.Version)
+
+	// M4.3: Process checkpoints if present
+	if len(output.Checkpoints) > 0 {
+		if err := e.processCheckpoints(ctx, output.Checkpoints, artefact.LogicalID); err != nil {
+			// Log but don't fail - main artefact was created successfully
+			log.Printf("[WARN] Failed to process checkpoints: %v", err)
+		}
+	}
 
 	return artefact, nil
 }

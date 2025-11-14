@@ -125,16 +125,10 @@ test-all: test test-pup test-integration test-e2e
 # Run all tests and show only the failures
 test-failed:
 	@echo "Running all tests and filtering for failures..."
-	@# We run each test suite separately and pipe its JSON output to the filter.
-	@# This is more robust than a single command and mirrors the 'test-all' target.
-	@# The `|| true` and `| cat` are used to ensure that the make command continues
-	@# even if a test fails, and that the output is passed through correctly.
-	@({ \
-		$(MAKE) test TEST_FLAGS="-v -json"; \
-		$(MAKE) test-pup TEST_FLAGS="-v -json"; \
-		$(MAKE) test-integration TEST_FLAGS="-v -json"; \
-		$(MAKE) test-e2e TEST_FLAGS="-v -json"; \
-	} 2>&1 | cat) | go run ./tools/testfilter/main.go || true
+	@# This is a simple but robust approach using grep. It may show some extra
+	@# context from previous tests, but it will not swallow failure messages.
+	@# It looks for lines starting with "--- FAIL:" (for test failures) or "FAIL	" (for package/build failures).
+	@$(MAKE) test-all 2>&1 | grep -E -A 20 -B 20 "^--- FAIL:|^FAIL	" || true
 
 # Build the holt binary
 build:
