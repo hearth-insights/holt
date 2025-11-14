@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"regexp"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -94,8 +96,11 @@ type ServicesConfig struct {
 }
 
 // ServiceOverride allows overriding default service images
+// M4.4: Added URI and Password fields for Redis configuration
 type ServiceOverride struct {
 	Image     string           `yaml:"image,omitempty"`
+	URI       string           `yaml:"uri,omitempty"`      // M4.4: External Redis URI (mutually exclusive with Image)
+	Password  string           `yaml:"password,omitempty"` // M4.4: Password for managed Redis (only valid with Image)
 	Resources *ResourcesConfig `yaml:"resources,omitempty"`
 }
 
@@ -138,6 +143,13 @@ func (c *HoltConfig) Validate() error {
 	// M3.3: Validate orchestrator config
 	if *c.Orchestrator.MaxReviewIterations < 0 {
 		return fmt.Errorf("orchestrator.max_review_iterations must be >= 0 (0 = unlimited), got %d", *c.Orchestrator.MaxReviewIterations)
+	}
+
+	// M4.4: Validate Redis configuration
+	if c.Services != nil && c.Services.Redis != nil {
+		if err := validateRedisConfig(c.Services.Redis); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -260,14 +272,21 @@ func (a *Agent) Validate(name string) error {
 }
 
 // Load reads and validates holt.yml from the specified path
+// M4.4: Enhanced to expand environment variables before parsing YAML
 func Load(path string) (*HoltConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config: %w", err)
 	}
 
+	// M4.4: Expand environment variables before parsing
+	expandedData, err := expandEnvVars(data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to expand environment variables: %w", err)
+	}
+
 	var config HoltConfig
-	if err := yaml.Unmarshal(data, &config); err != nil {
+	if err := yaml.Unmarshal(expandedData, &config); err != nil {
 		return nil, fmt.Errorf("failed to parse YAML: %w", err)
 	}
 
@@ -276,4 +295,71 @@ func Load(path string) (*HoltConfig, error) {
 	}
 
 	return &config, nil
+}
+
+// expandEnvVars expands environment variable references in YAML content (M4.4)
+// Supports ${VAR_NAME} syntax. Returns error if referenced variable is not set.
+func expandEnvVars(data []byte) ([]byte, error) {
+	content := string(data)
+
+	// Regex to find ${VAR_NAME} patterns
+	// Matches ${...} where ... is alphanumeric plus underscore
+	re := regexp.MustCompile(`\$\{([A-Za-z0-9_]+)\}`)
+
+	// Track missing variables for error reporting
+	var missingVars []string
+
+	// Replace all matches
+	result := re.ReplaceAllStringFunc(content, func(match string) string {
+		// Extract variable name (remove ${ and })
+		varName := match[2 : len(match)-1]
+
+		// Get value from environment
+		value, exists := os.LookupEnv(varName)
+		if !exists {
+			missingVars = append(missingVars, varName)
+			return match // Keep original if not found (will be caught below)
+		}
+
+		return value
+	})
+
+	// Error if any variables were missing
+	if len(missingVars) > 0 {
+		return nil, fmt.Errorf("environment variable '%s' referenced in holt.yml is not set", missingVars[0])
+	}
+
+	return []byte(result), nil
+}
+
+// validateRedisConfig validates Redis configuration (M4.4)
+func validateRedisConfig(redis *ServiceOverride) error {
+	hasURI := redis.URI != ""
+	hasImage := redis.Image != ""
+	hasPassword := redis.Password != ""
+
+	// M4.4: URI and Image are mutually exclusive
+	if hasURI && hasImage {
+		return fmt.Errorf("invalid configuration: services.redis.uri and services.redis.image are mutually exclusive. Use 'uri' for external Redis or 'image' for managed Redis")
+	}
+
+	// M4.4: Password is only valid with managed Redis (Image mode)
+	if hasPassword && hasURI {
+		log.Printf("[Config] Warning: services.redis.password is ignored when using external Redis (uri mode)")
+	}
+
+	// M4.4: Validate URI length (practical Docker env var limit)
+	if hasURI && len(redis.URI) > 4096 {
+		return fmt.Errorf("services.redis.uri exceeds maximum length of 4096 characters")
+	}
+
+	// M4.4: Basic URI format validation (must start with redis:// or rediss://)
+	if hasURI {
+		uri := strings.ToLower(strings.TrimSpace(redis.URI))
+		if !strings.HasPrefix(uri, "redis://") && !strings.HasPrefix(uri, "rediss://") {
+			return fmt.Errorf("services.redis.uri must start with 'redis://' or 'rediss://' scheme")
+		}
+	}
+
+	return nil
 }

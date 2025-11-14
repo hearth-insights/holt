@@ -2,6 +2,7 @@ package docker
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 )
@@ -73,4 +74,12 @@ func WorkerContainerName(instanceName, agentRole, claimID string) string {
 		shortClaimID = claimID[:8]
 	}
 	return fmt.Sprintf("holt-%s-%s-worker-%s", instanceName, agentRole, shortClaimID)
+}
+
+// M4.4: IsRedisContainer checks if a container name matches the Redis container pattern
+func IsRedisContainer(containerName string) bool {
+	// Remove leading slash if present (Docker adds this to Names[0])
+	name := strings.TrimPrefix(containerName, "/")
+	// Check if it matches the holt-redis-* pattern
+	return strings.HasPrefix(name, "holt-redis-")
 }

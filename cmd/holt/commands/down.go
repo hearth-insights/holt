@@ -99,10 +99,24 @@ func runDown(cmd *cobra.Command, args []string) error {
 		)
 	}
 
+	// M4.4: Detect Redis mode before cleanup
+	isManaged, err := detectRedisModeFromInstance(ctx, cli, targetInstanceName)
+	if err != nil {
+		printer.Warning("Failed to detect Redis mode: %v (will attempt cleanup)\n", err)
+		isManaged = true // Default to managed mode (safer - cleanup if uncertain)
+	}
+
 	// Stop containers (10s graceful timeout)
 	timeout := 10
 	for _, c := range containers {
 		containerName := c.Names[0]
+
+		// M4.4: Skip Redis container if external mode
+		if !isManaged && dockerpkg.IsRedisContainer(containerName) {
+			printer.Info("Skipping Redis cleanup (external mode)\n")
+			continue
+		}
+
 		printer.Step("Stopping %s...\n", containerName)
 		if err := cli.ContainerStop(ctx, c.ID, container.StopOptions{Timeout: &timeout}); err != nil {
 			// Log but continue - container might already be stopped
@@ -113,6 +127,12 @@ func runDown(cmd *cobra.Command, args []string) error {
 	// Remove containers
 	for _, c := range containers {
 		containerName := c.Names[0]
+
+		// M4.4: Skip Redis container if external mode
+		if !isManaged && dockerpkg.IsRedisContainer(containerName) {
+			continue
+		}
+
 		printer.Step("Removing %s...\n", containerName)
 		if err := cli.ContainerRemove(ctx, c.ID, container.RemoveOptions{Force: true, RemoveVolumes: true}); err != nil {
 			return fmt.Errorf("failed to remove %s: %w", containerName, err)

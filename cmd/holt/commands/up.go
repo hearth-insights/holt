@@ -62,12 +62,13 @@ func runUp(cmd *cobra.Command, args []string) error {
 	// Phase 2: Configuration Validation
 	cfg, err := config.Load("holt.yml")
 	if err != nil {
+		// M4.4: Show actual config error for better debugging
 		return printer.Error(
 			"holt.yml not found or invalid",
-			"No configuration file found in the current directory.",
+			fmt.Sprintf("Configuration error: %v", err),
 			[]string{
-				"Initialize your project first:\n  holt init",
-				"Then retry: holt up",
+				"Fix the configuration error above",
+				"Or initialize a new project: holt init",
 			},
 		)
 	}
@@ -179,13 +180,11 @@ func createInstance(ctx context.Context, cli *client.Client, cfg *config.HoltCon
 		return err
 	}
 
-	// Step 2: Allocate Redis port
-	redisPort, err := instance.FindNextAvailablePort(ctx, cli)
+	// M4.4: Determine Redis mode (external vs managed)
+	redisConfig, err := determineRedisMode(cfg)
 	if err != nil {
-		return fmt.Errorf("failed to allocate Redis port: %w", err)
+		return fmt.Errorf("failed to determine Redis mode: %w", err)
 	}
-
-	printer.Debug("Allocated Redis port: %d\n", redisPort)
 
 	// Step 2: Create isolated network
 	networkName := dockerpkg.NetworkName(instanceName)
@@ -201,43 +200,34 @@ func createInstance(ctx context.Context, cli *client.Client, cfg *config.HoltCon
 
 	printer.Debug("Created network: %s\n", networkName)
 
-	// Step 3: Start Redis container with port mapping
-	redisImage := "redis:7-alpine"
-	if cfg.Services != nil && cfg.Services.Redis != nil && cfg.Services.Redis.Image != "" {
-		redisImage = cfg.Services.Redis.Image
+	// M4.4: Step 3: Handle Redis based on mode
+	var redisURL string
+	var redisPort int
+
+	if redisConfig.Mode == RedisModeExternal {
+		// External mode: Use provided URI directly
+		redisURL = redisConfig.URI
+		redisPort = 0 // No port allocation needed for external Redis
+		printer.Debug("Using external Redis: %s\n", sanitizeRedisURI(redisURL))
+	} else {
+		// Managed mode: Start Redis container
+		redisPort, err = instance.FindNextAvailablePort(ctx, cli)
+		if err != nil {
+			return fmt.Errorf("failed to allocate Redis port: %w", err)
+		}
+		printer.Debug("Allocated Redis port: %d\n", redisPort)
+
+		redisName := dockerpkg.RedisContainerName(instanceName)
+
+		// M4.4: Start Redis with optional password
+		if err := startManagedRedis(ctx, cli, instanceName, runID, workspacePath, networkName, redisConfig, redisPort); err != nil {
+			return err
+		}
+
+		// M4.4: Construct Redis URL (with password if set)
+		redisURL = constructManagedRedisURI(redisName, redisConfig.Password)
+		printer.Debug("Started Redis container: %s (port %d, auth: %v)\n", redisName, redisPort, redisConfig.Password != "")
 	}
-
-	redisName := dockerpkg.RedisContainerName(instanceName)
-	redisLabels := dockerpkg.BuildLabels(instanceName, runID, workspacePath, "redis")
-	// Add Redis port label
-	redisLabels[dockerpkg.LabelRedisPort] = fmt.Sprintf("%d", redisPort)
-
-	redisResp, err := cli.ContainerCreate(ctx, &container.Config{
-		Image:  redisImage,
-		Labels: redisLabels,
-		ExposedPorts: nat.PortSet{
-			"6379/tcp": struct{}{},
-		},
-	}, &container.HostConfig{
-		NetworkMode: container.NetworkMode(networkName),
-		PortBindings: nat.PortMap{
-			"6379/tcp": []nat.PortBinding{
-				{
-					HostIP:   "127.0.0.1",
-					HostPort: fmt.Sprintf("%d", redisPort),
-				},
-			},
-		},
-	}, nil, nil, redisName)
-	if err != nil {
-		return fmt.Errorf("failed to create Redis container: %w", err)
-	}
-
-	if err := cli.ContainerStart(ctx, redisResp.ID, container.StartOptions{}); err != nil {
-		return fmt.Errorf("failed to start Redis container: %w", err)
-	}
-
-	printer.Debug("Started Redis container: %s (port %d)\n", redisName, redisPort)
 
 	// Step 4: Verify orchestrator image exists
 	orchestratorImage := "holt-orchestrator:latest"
@@ -249,9 +239,6 @@ func createInstance(ctx context.Context, cli *client.Client, cfg *config.HoltCon
 	orchestratorName := dockerpkg.OrchestratorContainerName(instanceName)
 	orchestratorLabels := dockerpkg.BuildLabels(instanceName, runID, workspacePath, "orchestrator")
 
-	// Use Redis container name as hostname (Docker DNS)
-	redisURL := fmt.Sprintf("redis://%s:6379", redisName)
-
 	// M3.4: Get Docker socket GID for worker management permissions
 	dockerGroups := getDockerSocketGroups()
 
@@ -260,7 +247,7 @@ func createInstance(ctx context.Context, cli *client.Client, cfg *config.HoltCon
 		Labels: orchestratorLabels,
 		Env: []string{
 			fmt.Sprintf("HOLT_INSTANCE_NAME=%s", instanceName),
-			fmt.Sprintf("REDIS_URL=%s", redisURL),
+			fmt.Sprintf("REDIS_URL=%s", redisURL), // M4.4: May be external or managed
 			// M3.4: Pass host workspace path for worker mounts
 			fmt.Sprintf("HOST_WORKSPACE_PATH=%s", workspacePath),
 		},
@@ -286,13 +273,65 @@ func createInstance(ctx context.Context, cli *client.Client, cfg *config.HoltCon
 	printer.Debug("Started orchestrator container: %s\n", orchestratorName)
 
 	// Step 6: Launch agent containers
-	if err := launchAgentContainers(ctx, cli, cfg, instanceName, runID, workspacePath, networkName, redisName); err != nil {
+	// M4.4: Pass redisURL instead of redisName to support both modes
+	if err := launchAgentContainersWithRedisURL(ctx, cli, cfg, instanceName, runID, workspacePath, networkName, redisURL); err != nil {
 		return fmt.Errorf("failed to launch agent containers: %w", err)
 	}
 
 	// Step 7: M3.9: Populate agent_images hash for audit trail
-	if err := populateAgentImages(ctx, cli, cfg, instanceName, redisPort); err != nil {
-		return fmt.Errorf("failed to populate agent images: %w", err)
+	// M4.4: Skip if external Redis (port is 0)
+	if redisPort > 0 {
+		if err := populateAgentImages(ctx, cli, cfg, instanceName, redisPort); err != nil {
+			return fmt.Errorf("failed to populate agent images: %w", err)
+		}
+	} else {
+		// M4.4: For external Redis, we need to connect differently
+		// For now, skip this step - will be addressed in future work
+		printer.Debug("Skipping agent_images population for external Redis (not yet implemented)\n")
+	}
+
+	return nil
+}
+
+// M4.4: startManagedRedis creates and starts a managed Redis container with optional password
+func startManagedRedis(ctx context.Context, cli *client.Client, instanceName, runID, workspacePath, networkName string, redisConfig RedisConfig, redisPort int) error {
+	redisName := dockerpkg.RedisContainerName(instanceName)
+	redisLabels := dockerpkg.BuildLabels(instanceName, runID, workspacePath, "redis")
+	// Add Redis port label
+	redisLabels[dockerpkg.LabelRedisPort] = fmt.Sprintf("%d", redisPort)
+
+	// M4.4: Build Redis command with optional password
+	var redisCmd []string
+	if redisConfig.Password != "" {
+		// Start Redis with password protection
+		redisCmd = []string{"redis-server", "--requirepass", redisConfig.Password}
+	}
+	// If no password, use default Redis command (nil = use image's default CMD)
+
+	redisResp, err := cli.ContainerCreate(ctx, &container.Config{
+		Image:  redisConfig.Image,
+		Labels: redisLabels,
+		Cmd:    redisCmd, // M4.4: May be nil (default) or with password
+		ExposedPorts: nat.PortSet{
+			"6379/tcp": struct{}{},
+		},
+	}, &container.HostConfig{
+		NetworkMode: container.NetworkMode(networkName),
+		PortBindings: nat.PortMap{
+			"6379/tcp": []nat.PortBinding{
+				{
+					HostIP:   "127.0.0.1",
+					HostPort: fmt.Sprintf("%d", redisPort),
+				},
+			},
+		},
+	}, nil, nil, redisName)
+	if err != nil {
+		return fmt.Errorf("failed to create Redis container: %w", err)
+	}
+
+	if err := cli.ContainerStart(ctx, redisResp.ID, container.StartOptions{}); err != nil {
+		return fmt.Errorf("failed to start Redis container: %w", err)
 	}
 
 	return nil
@@ -459,6 +498,14 @@ func validateAgentImages(ctx context.Context, cli *client.Client, cfg *config.Ho
 // Validates health checks before reporting success.
 // Returns error immediately on first failure (fail-fast) and triggers rollback.
 func launchAgentContainers(ctx context.Context, cli *client.Client, cfg *config.HoltConfig, instanceName, runID, workspacePath, networkName, redisName string) error {
+	// M4.4: Construct Redis URL from container name (backward compatibility)
+	redisURL := fmt.Sprintf("redis://%s:6379", redisName)
+	return launchAgentContainersWithRedisURL(ctx, cli, cfg, instanceName, runID, workspacePath, networkName, redisURL)
+}
+
+// M4.4: launchAgentContainersWithRedisURL is the updated version that accepts a Redis URL
+// This supports both external and managed Redis modes
+func launchAgentContainersWithRedisURL(ctx context.Context, cli *client.Client, cfg *config.HoltConfig, instanceName, runID, workspacePath, networkName, redisURL string) error {
 	if len(cfg.Agents) == 0 {
 		return nil
 	}
@@ -480,7 +527,7 @@ func launchAgentContainers(ctx context.Context, cli *client.Client, cfg *config.
 		agentCount++
 		// Launch each agent in a goroutine
 		go func(role string, agentCfg config.Agent) {
-			err := launchAgentContainer(launchCtx, cli, instanceName, runID, workspacePath, networkName, redisName, role, agentCfg)
+			err := launchAgentContainerWithRedisURL(launchCtx, cli, instanceName, runID, workspacePath, networkName, redisURL, role, agentCfg)
 			resultChan <- launchResult{agentName: role, err: err}
 		}(agentRole, agent)
 	}
@@ -511,6 +558,13 @@ func launchAgentContainers(ctx context.Context, cli *client.Client, cfg *config.
 
 // M3.7: agentRole parameter is the agent key from holt.yml (which IS the role)
 func launchAgentContainer(ctx context.Context, cli *client.Client, instanceName, runID, workspacePath, networkName, redisName, agentRole string, agent config.Agent) error {
+	// M4.4: Construct Redis URL from container name (backward compatibility)
+	redisURL := fmt.Sprintf("redis://%s:6379", redisName)
+	return launchAgentContainerWithRedisURL(ctx, cli, instanceName, runID, workspacePath, networkName, redisURL, agentRole, agent)
+}
+
+// M4.4: launchAgentContainerWithRedisURL is the updated version that accepts a Redis URL
+func launchAgentContainerWithRedisURL(ctx context.Context, cli *client.Client, instanceName, runID, workspacePath, networkName, redisURL, agentRole string, agent config.Agent) error {
 	containerName := dockerpkg.AgentContainerName(instanceName, agentRole)
 	labels := dockerpkg.BuildLabels(instanceName, runID, workspacePath, "agent")
 	labels[dockerpkg.LabelAgentName] = agentRole // M3.7: Agent name = role
@@ -524,7 +578,7 @@ func launchAgentContainer(ctx context.Context, cli *client.Client, instanceName,
 
 	// Build environment variables
 	// M3.7: ONLY HOLT_AGENT_NAME is set (to the role), HOLT_AGENT_ROLE removed
-	redisURL := fmt.Sprintf("redis://%s:6379", redisName)
+	// M4.4: Use provided redisURL (may be external or managed with password)
 	env := []string{
 		fmt.Sprintf("HOLT_INSTANCE_NAME=%s", instanceName),
 		fmt.Sprintf("HOLT_AGENT_NAME=%s", agentRole),
