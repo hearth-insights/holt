@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -49,6 +51,43 @@ func init() {
 	// Note: Cannot use -f shorthand because it conflicts with global --config flag
 	upCmd.Flags().BoolVar(&upForce, "force", false, "Bypass workspace collision check")
 	rootCmd.AddCommand(upCmd)
+}
+
+// expandTildeInVolume expands ~ at the beginning of a volume mount source path (M4.5)
+// Example: "~/foo:/bar:ro" → "/home/user/foo:/bar:ro"
+// Only expands ~ at the start of the source path, not in destination or mode
+func expandTildeInVolume(volumeSpec string) (string, error) {
+	// Split by colons to get source:destination:mode parts
+	parts := strings.Split(volumeSpec, ":")
+	if len(parts) < 2 {
+		// Invalid format, but let Docker handle the error
+		return volumeSpec, nil
+	}
+
+	sourcePath := parts[0]
+
+	// Only expand if it starts with ~/
+	if !strings.HasPrefix(sourcePath, "~/") && sourcePath != "~" {
+		return volumeSpec, nil
+	}
+
+	// Get user's home directory
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("failed to get user home directory for tilde expansion: %w", err)
+	}
+
+	// Expand tilde
+	var expandedSource string
+	if sourcePath == "~" {
+		expandedSource = homeDir
+	} else {
+		expandedSource = filepath.Join(homeDir, sourcePath[2:]) // Remove ~/ and join with home
+	}
+
+	// Reconstruct volume spec with expanded source
+	parts[0] = expandedSource
+	return strings.Join(parts, ":"), nil
 }
 
 func runUp(cmd *cobra.Command, args []string) error {
@@ -616,6 +655,21 @@ func launchAgentContainerWithRedisURL(ctx context.Context, cli *client.Client, i
 		}
 	}
 
+	// M4.5: Build bind mounts (workspace + custom volumes)
+	binds := []string{
+		fmt.Sprintf("%s:/workspace:%s", workspacePath, workspaceMode),
+	}
+
+	// M4.5: Add custom volume mounts with tilde expansion
+	for _, volumeSpec := range agent.Volumes {
+		expandedVolume, err := expandTildeInVolume(volumeSpec)
+		if err != nil {
+			return fmt.Errorf("failed to expand volume mount '%s': %w", volumeSpec, err)
+		}
+		binds = append(binds, expandedVolume)
+		printer.Debug("Agent '%s': Added volume mount: %s\n", agentRole, expandedVolume)
+	}
+
 	// Create container
 	resp, err := cli.ContainerCreate(ctx, &container.Config{
 		Image:  agent.Image,
@@ -624,9 +678,7 @@ func launchAgentContainerWithRedisURL(ctx context.Context, cli *client.Client, i
 		Cmd:    agent.Command,
 	}, &container.HostConfig{
 		NetworkMode: container.NetworkMode(networkName),
-		Binds: []string{
-			fmt.Sprintf("%s:/workspace:%s", workspacePath, workspaceMode),
-		},
+		Binds:       binds,
 	}, nil, nil, containerName)
 	if err != nil {
 		return fmt.Errorf("failed to create container: %w", err)

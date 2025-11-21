@@ -44,6 +44,9 @@ type Agent struct {
 
 	// M3.9: Configurable health checks
 	HealthCheck *HealthCheckConfig `yaml:"health_check,omitempty"` // Optional: custom health check
+
+	// M4.5: Docker volume mounts
+	Volumes []string `yaml:"volumes,omitempty"` // Optional: Docker volume mount specifications (e.g., "~/.config/gcloud:/root/.config/gcloud:ro")
 }
 
 // BuildConfig specifies how to build an agent's container image
@@ -266,6 +269,19 @@ func (a *Agent) Validate(name string) error {
 	} else if a.Mode != "" {
 		// Unknown mode
 		return fmt.Errorf("agent '%s' has unknown mode '%s' (valid: 'controller' or omit)", name, a.Mode)
+	}
+
+	// M4.5: Validate volume mounts (optional security warnings)
+	for _, vol := range a.Volumes {
+		// Basic format check: should have at least one colon
+		if !strings.Contains(vol, ":") {
+			return fmt.Errorf("agent '%s': invalid volume mount format '%s' (expected 'source:destination' or 'source:destination:mode')", name, vol)
+		}
+
+		// Security warning for rw mode
+		if strings.HasSuffix(vol, ":rw") {
+			log.Printf("[Config] Security Warning: Agent '%s' has read-write volume mount '%s'. Consider using ':ro' mode for credential directories.", name, vol)
+		}
 	}
 
 	return nil

@@ -1,0 +1,6 @@
+{
+  "artefact_type": "ChangeSet",
+  "artefact_payload": "{\"commit_hash\":\"abc123def456789\",\"commit_message\":\"feat(M4.5): Implement development lifecycle demo agents\",\"files_changed\":[\"agents/test-runner/run-tests.sh\",\"agents/security-scanner/scan.sh\",\"agents/human-reviewer/main.go\"],\"test_summary\":{\"tests_added\":15,\"tests_passed\":15,\"coverage_percentage\":94.2},\"change_summary\":\"Implemented all M4.5 agents including TestRunner, SecurityScanner, and HumanReviewer with comprehensive test coverage.\",\"notable_decisions\":[\"Used shell scripts for TestRunner and SecurityScanner for simplicity\",\"Implemented HumanReviewer in Go for robust signal handling and timeout management\"]}",
+  "summary": "CoderClaude: Implemented feature with tests",
+  "structural_type": "Standard"
+}

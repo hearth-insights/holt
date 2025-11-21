@@ -54,6 +54,7 @@ $RECYCLE.BIN/
 *.seed
 *.pid.lock
 .gemini-clipboard*
+future*
 
 # Coverage reports and test files
 *.cover

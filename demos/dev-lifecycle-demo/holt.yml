@@ -1,0 +1,158 @@
+version: "1.0"
+
+# M4.5: Holt Development Lifecycle Demo Configuration
+# This configuration demonstrates the complete development workflow with 8 specialized agents.
+
+orchestrator:
+  max_review_iterations: 3  # Maximum rework cycles before termination
+
+agents:
+  # ========================================
+  # DESIGN WORKFLOW AGENTS
+  # ========================================
+
+  # Designer: Creates high-level design proposals (Gemini)
+  Designer:
+    image: holt/gemini-agent:latest
+    command: ["/app/designer.sh"]
+    bidding_strategy: "exclusive"
+    workspace:
+      mode: ro
+
+    # AUTHENTICATION METHOD 1: Volume mounts (for local gcloud credentials)
+    # WARNING: Only use with trusted images! Exposes host filesystem to container.
+    # Uncomment to use gcloud CLI authentication:
+    # volumes:
+    #   - "~/.config/gcloud:/root/.config/gcloud:ro"
+
+    # AUTHENTICATION METHOD 2: Environment variables (recommended)
+    # Use API keys for portable, secure authentication
+    environment:
+      - MOCK_MODE=true  # Set to false and provide API key for real Gemini
+      # - GEMINI_API_KEY=${GEMINI_API_KEY}
+
+    prompts:
+      execution: |
+        You are a senior product designer. Your role is to:
+        1. Understand high-level goals and ask clarifying questions if needed
+        2. Create concise, high-level design proposals (1-2 pages)
+        3. Focus on the "what" and "why", not the "how"
+
+        Output a DesignSpecDraft artefact with markdown content.
+
+  # HumanReviewer: Reviews design drafts and specifications
+  HumanReviewer:
+    image: holt/human-reviewer:latest
+    command: ["/app/human-reviewer"]
+    bidding_strategy: "review"
+    workspace:
+      mode: ro
+    environment:
+      - REVIEW_TIMEOUT=300      # 5 minutes
+      - AUTO_APPROVE=true       # Set to false for interactive review
+
+  # DetailedDesigner: Expands design draft into complete specification (Claude)
+  DetailedDesigner:
+    image: holt/claude-agent:latest
+    command: ["/app/designer.sh"]
+    bidding_strategy: "exclusive"
+    workspace:
+      mode: ro
+    environment:
+      - MOCK_MODE=true  # Set to false and provide API key for real Claude
+      # - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+
+    prompts:
+      execution: |
+        You are a technical architect. Your role is to:
+        1. Take a high-level design draft and expand it into a complete design document
+        2. Follow the Holt feature design template strictly (10 sections)
+        3. Provide implementation-ready specifications
+
+        Output a complete DesignSpec artefact with markdown content.
+
+  # ========================================
+  # IMPLEMENTATION WORKFLOW AGENTS
+  # ========================================
+
+  # Coder: Implements code and tests based on design (Claude)
+  Coder:
+    image: holt/claude-agent:latest
+    command: ["/app/code.sh"]
+    bidding_strategy: "exclusive"
+    workspace:
+      mode: rw  # Needs write access for git commits
+    environment:
+      - MOCK_MODE=true
+      # - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+
+    prompts:
+      execution: |
+        You are an expert Go developer. Your role is to:
+        1. Implement code and tests based on approved design specifications
+        2. Follow Go best practices and Holt coding conventions
+        3. Ask questions if design is ambiguous (create Question artefacts)
+        4. Produce a ChangeSet artefact with commit hash and test results
+
+        Important: Create a git commit but do NOT push. Include commit hash in ChangeSet.
+
+  # Architect: Answers technical questions during implementation (Gemini)
+  Architect:
+    image: holt/gemini-agent:latest
+    command: ["/app/answer.sh"]
+    bidding_strategy: "exclusive"
+    workspace:
+      mode: ro
+    environment:
+      - MOCK_MODE=true
+      # - GEMINI_API_KEY=${GEMINI_API_KEY}
+
+    prompts:
+      execution: |
+        You are a Holt system architect. Your role is to:
+        1. Answer technical questions about the Holt codebase and architecture
+        2. Use provided project documentation (Knowledge artefacts) to inform answers
+        3. Provide specific, actionable guidance
+
+        You have access to project documentation via Knowledge artefacts. Reference
+        specific design documents when answering.
+
+  # TestRunner: Runs automated tests on code changes
+  TestRunner:
+    image: holt/test-runner:latest
+    command: ["/app/run-tests.sh"]
+    bidding_strategy: "review"
+    workspace:
+      mode: ro
+
+  # SecurityScanner: Runs security scans on code changes
+  SecurityScanner:
+    image: holt/security-scanner:latest
+    command: ["/app/scan.sh"]
+    bidding_strategy: "review"
+    workspace:
+      mode: ro
+
+  # LeadEngineer: Final code review and approval (Gemini)
+  LeadEngineer:
+    image: holt/gemini-agent:latest
+    command: ["/app/review-code.sh"]
+    bidding_strategy: "exclusive"
+    workspace:
+      mode: ro
+    environment:
+      - MOCK_MODE=true
+      # - GEMINI_API_KEY=${GEMINI_API_KEY}
+
+    prompts:
+      execution: |
+        You are a lead engineer performing final code review. Your role is to:
+        1. Review code for quality, maintainability, and design adherence
+        2. Approve with Terminal artefact or reject with Review feedback
+        3. Be constructive and specific in feedback
+
+        This is the final gate before implementation is accepted. Be thorough but fair.
+
+services:
+  redis:
+    image: redis:7-alpine
