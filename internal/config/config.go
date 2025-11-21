@@ -313,6 +313,36 @@ func Load(path string) (*HoltConfig, error) {
 	return &config, nil
 }
 
+// ExtractEnvVarNames extracts all environment variable names referenced in YAML content (M4.4)
+// Returns a slice of unique variable names found in ${VAR_NAME} patterns.
+// This is used to pass environment variables to containers that need to load the config.
+func ExtractEnvVarNames(data []byte) []string {
+	content := string(data)
+
+	// Regex to find ${VAR_NAME} patterns
+	// Matches ${...} where ... is alphanumeric plus underscore
+	re := regexp.MustCompile(`\$\{([A-Za-z0-9_]+)\}`)
+
+	// Find all matches
+	matches := re.FindAllStringSubmatch(content, -1)
+
+	// Extract unique variable names
+	varNames := make(map[string]bool)
+	for _, match := range matches {
+		if len(match) > 1 {
+			varNames[match[1]] = true
+		}
+	}
+
+	// Convert to slice
+	result := make([]string, 0, len(varNames))
+	for varName := range varNames {
+		result = append(result, varName)
+	}
+
+	return result
+}
+
 // expandEnvVars expands environment variable references in YAML content (M4.4)
 // Supports ${VAR_NAME} syntax. Returns error if referenced variable is not set.
 func expandEnvVars(data []byte) ([]byte, error) {

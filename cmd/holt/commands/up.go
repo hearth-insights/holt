@@ -281,15 +281,38 @@ func createInstance(ctx context.Context, cli *client.Client, cfg *config.HoltCon
 	// M3.4: Get Docker socket GID for worker management permissions
 	dockerGroups := getDockerSocketGroups()
 
+	// M4.5: Extract environment variables from holt.yml and pass them to orchestrator
+	// The orchestrator needs these to expand ${VAR_NAME} references when loading the config
+	orchestratorEnv := []string{
+		fmt.Sprintf("HOLT_INSTANCE_NAME=%s", instanceName),
+		fmt.Sprintf("REDIS_URL=%s", redisURL), // M4.4: May be external or managed
+		// M3.4: Pass host workspace path for worker mounts
+		fmt.Sprintf("HOST_WORKSPACE_PATH=%s", workspacePath),
+	}
+
+	// Read raw holt.yml to extract environment variable references
+	holtYmlData, err := os.ReadFile("holt.yml")
+	if err != nil {
+		return fmt.Errorf("failed to read holt.yml for env var extraction: %w", err)
+	}
+
+	// Extract environment variable names referenced in the config
+	envVarNames := config.ExtractEnvVarNames(holtYmlData)
+	for _, varName := range envVarNames {
+		// Get value from host environment
+		if value, exists := os.LookupEnv(varName); exists {
+			orchestratorEnv = append(orchestratorEnv, fmt.Sprintf("%s=%s", varName, value))
+			printer.Debug("Passing environment variable to orchestrator: %s\n", varName)
+		} else {
+			// This should not happen since config.Load() already validated all vars exist
+			printer.Warning("Environment variable '%s' referenced in holt.yml but not set\n", varName)
+		}
+	}
+
 	orchestratorResp, err := cli.ContainerCreate(ctx, &container.Config{
 		Image:  orchestratorImage,
 		Labels: orchestratorLabels,
-		Env: []string{
-			fmt.Sprintf("HOLT_INSTANCE_NAME=%s", instanceName),
-			fmt.Sprintf("REDIS_URL=%s", redisURL), // M4.4: May be external or managed
-			// M3.4: Pass host workspace path for worker mounts
-			fmt.Sprintf("HOST_WORKSPACE_PATH=%s", workspacePath),
-		},
+		Env:    orchestratorEnv,
 	}, &container.HostConfig{
 		NetworkMode: container.NetworkMode(networkName),
 		Binds: []string{
