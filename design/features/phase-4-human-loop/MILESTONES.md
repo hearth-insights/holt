@@ -125,4 +125,4 @@ Phase 4 focuses on adding sophisticated human-in-the-loop interaction, productio
 - Create user guides for the Q&A system, interactive debugging, and context caching features.
 - Document the new persistent state model and the `holt down` vs. `holt destroy` behavior.
 - Create a new "How-To" guide walking through the new `holt-development-lifecycle-demo`.
-- Update all relevant sections of the `README.md`, `QUICK_REFERENCE.md`, etc.
+- Update all relevant sections of the `README.md`, `docs/QUICK_REFERENCE.md`, etc.

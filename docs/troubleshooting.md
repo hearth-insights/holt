@@ -977,5 +977,5 @@ If you've tried the solutions above and still have issues:
 
 **Next Steps:**
 - [Agent Development Guide](./agent-development.md)
-- [Project Context](../PROJECT_CONTEXT.md)
+- [Project Context](./PROJECT_CONTEXT.md)
 - [System Specification](../design/holt-system-specification.md)

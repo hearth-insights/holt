@@ -1266,7 +1266,7 @@ Manual review as "user" role is a **privileged operation**:
 
 ## Next Steps
 
-- **Learn More**: See [QUICK_REFERENCE.md](../QUICK_REFERENCE.md) for command syntax reference
+- **Learn More**: See [QUICK_REFERENCE.md](./QUICK_REFERENCE.md) for command syntax reference
 - **Understand Architecture**: See [M4.2 Design Document](../design/features/phase-4-human-loop/M4.2-interactive-debugging-control.md)
 - **Report Issues**: https://github.com/dyluth/holt/issues
 - **Advanced Topics**: See [holt-system-specification.md](../design/holt-system-specification.md)

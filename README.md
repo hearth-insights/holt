@@ -596,7 +596,7 @@ For a detailed look at long-term, enterprise-focused ideas like RBAC, Secrets Ma
   - Reference architecture designed to support EU AI Act (Article 14) and NYDFS Part 504 compliance requirements
 - **[System Specification](./design/holt-system-specification.md)** - Complete technical architecture documenting the immutable ledger design and orchestration state machine
 - **[Agent Development Guide](./docs/agent-development.md)** - Build custom agents for your compliance workflows
-- **[Project Context](./PROJECT_CONTEXT.md)** - Philosophy, principles, and vision for regulated AI
+- **[Project Context](./docs/PROJECT_CONTEXT.md)** - Philosophy, principles, and vision for regulated AI
 - **[Troubleshooting Guide](./docs/troubleshooting.md)** - Common issues & solutions
 - **[Feature Design Template](./design/holt-feature-design-template.md)** - Development process
 
@@ -614,7 +614,7 @@ Holt uses a systematic, template-driven feature design process suitable for ente
 4. **Test**: Comprehensive unit, integration, and E2E tests
 5. **Validate**: Verify against success criteria, Definition of Done, and regulatory requirements
 
-See `DEVELOPMENT_PROCESS.md` for details. For regulated industry implementations, consult the Compliance Guide before beginning development.
+See `docs/DEVELOPMENT_PROCESS.md` for details. For regulated industry implementations, consult the Compliance Guide before beginning development.
 
 ---
 

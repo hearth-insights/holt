@@ -11,8 +11,8 @@ For any non-trivial task, load this core set of documents to understand the proj
 
 - **`README.md`** (~2,000 tokens) - Project overview, quick start, and links to key documents.
 - **`ROADMAP.md`** (~500 tokens) - The official 6-phase project roadmap.
-- **`PROJECT_CONTEXT.md`** (~1,500 tokens) - The project's core philosophy and architectural principles.
-- **`QUICK_REFERENCE.md`** (~1,000 tokens) - Essential data structures, CLI commands, and Redis patterns.
+- **`docs/PROJECT_CONTEXT.md`** (~1,500 tokens) - The project's core philosophy and architectural principles.
+- **`docs/QUICK_REFERENCE.md`** (~1,000 tokens) - Essential data structures, CLI commands, and Redis patterns.
 
 ---
 
@@ -22,7 +22,7 @@ To supplement the core context, select from the lists below based on your specif
 
 ### **Topic: Onboarding & Contributing**
 - **`CONTRIBUTING.md`** (~1,000 tokens) - How to set up the environment and contribute.
-- **`DEVELOPMENT_PROCESS.md`** (~2,000 tokens) - The mandatory design-first development lifecycle.
+- **`docs/DEVELOPMENT_PROCESS.md`** (~2,000 tokens) - The mandatory design-first development lifecycle.
 
 ### **Topic: Enterprise & Compliance Features**
 - **`docs/compliance/ENTERPRISE.md`** (~1,000 tokens) - Explains built-in security, data sovereignty, and air-gap capabilities.
@@ -54,13 +54,13 @@ To supplement the core context, select from the lists below based on your specif
 
 - **Goal: "Learn how to build my first agent."**
   - → `docs/HOW_TO_1_BUILD_A_SIMPLE_AGENT.md`
-  - → `QUICK_REFERENCE.md` (for data structures)
+  - → `docs/QUICK_REFERENCE.md` (for data structures)
 
 - **Goal: "Design a new feature for Phase 4."**
   - → `ROADMAP.md` (to understand Phase 4 goals)
-  - → `DEVELOPMENT_PROCESS.md` (to understand the process)
+  - → `docs/DEVELOPMENT_PROCESS.md` (to understand the process)
   - → `design/holt-feature-design-template.md` (to create the design document)
 
 - **Goal: "Fix a bug in the Orchestrator."**
   - → `design/holt-orchestrator-component.md` (to understand the logic)
-  - → `QUICK_REFERENCE.md` (for Redis patterns)
+  - → `docs/QUICK_REFERENCE.md` (for Redis patterns)

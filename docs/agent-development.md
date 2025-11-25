@@ -1054,4 +1054,4 @@ For more examples, see:
 
 For troubleshooting, see: [docs/troubleshooting.md](./troubleshooting.md)
 
-For system architecture, see: [PROJECT_CONTEXT.md](../PROJECT_CONTEXT.md)
+For system architecture, see: [PROJECT_CONTEXT.md](./PROJECT_CONTEXT.md)
