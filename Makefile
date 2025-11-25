@@ -189,7 +189,7 @@ test-pup:
 # Build orchestrator Docker image
 docker-orchestrator:
 	@echo "Building orchestrator Docker image..."
-	@docker build -f Dockerfile.orchestrator -t holt-orchestrator:latest .
+	@docker build -f cmd/orchestrator/Dockerfile -t holt-orchestrator:latest .
 	@echo "✓ Built: holt-orchestrator:latest"
 
 # Build everything (CLI + orchestrator Docker image + pup)
