@@ -25,8 +25,9 @@ To supplement the core context, select from the lists below based on your specif
 - **`DEVELOPMENT_PROCESS.md`** (~2,000 tokens) - The mandatory design-first development lifecycle.
 
 ### **Topic: Enterprise & Compliance Features**
-- **`ENTERPRISE_GRADE_HOLT.md`** (~1,000 tokens) - Explains built-in security, auditability, and governance.
-- **`HOLT_COMPLIANCE_GUIDE.md`** (~1,500 tokens) - Maps Holt features to HIPAA, SOC 2, and ISO 27001 controls.
+- **`docs/compliance/ENTERPRISE.md`** (~1,000 tokens) - Explains built-in security, data sovereignty, and air-gap capabilities.
+- **`docs/compliance/CONTROLS_MAP.md`** (~1,500 tokens) - Maps Holt features to HIPAA, SOC 2, and ISO 27001 technical controls.
+- **`docs/compliance/AUDIT_DEFENSE.md`** (~1,200 tokens) - Articulates the forensic argument for Internal Audit, explaining how deterministic orchestration resolves the "Audit Paradox".
 
 ### **Topic: Learning by Example**
 - **`docs/HOW_TO_1_BUILD_A_SIMPLE_AGENT.md`** - Walkthrough of the basic file-creation agent.
@@ -47,8 +48,9 @@ To supplement the core context, select from the lists below based on your specif
 ## 3. Common Navigation Patterns
 
 - **Goal: "Understand the project's security and compliance features."**
-  - → `ENTERPRISE_GRADE_HOLT.md`
-  - → `HOLT_COMPLIANCE_GUIDE.md`
+  - → `docs/compliance/ENTERPRISE.md`
+  - → `docs/compliance/CONTROLS_MAP.md`
+  - → `docs/compliance/AUDIT_DEFENSE.md`
 
 - **Goal: "Learn how to build my first agent."**
   - → `docs/HOW_TO_1_BUILD_A_SIMPLE_AGENT.md`

@@ -38,9 +38,9 @@ graph LR
 
 Holt is architected to support the stringent security and compliance requirements of regulated industries. Its self-hosted nature, chronological audit trail, and declarative policies provide the foundation needed to build a compliant system.
 
-For a detailed guide on how Holt's features map to the technical controls of frameworks like **HIPAA, SOC 2, and ISO 27001**, please read our full compliance guide:
+For comprehensive regulatory assurance documentation—including controls mapping, audit defense theory, and enterprise architecture—see our compliance suite:
 
-**[➡️ Holt: A Guide to Compliance](./HOLT_COMPLIANCE_GUIDE.md)**
+**[➡️ Holt: Regulatory Assurance Suite](./docs/compliance/)**
 
 ---
 
@@ -589,8 +589,12 @@ For a detailed look at long-term, enterprise-focused ideas like RBAC, Secrets Ma
 
 ## Documentation
 
-- **[Holt Compliance Guide](./HOLT_COMPLIANCE_GUIDE.md)** - Reference architecture designed to support EU AI Act (Article 14) and NYDFS Part 504 compliance requirements. Maps Holt's technical controls to regulatory frameworks.
-- **[System Specification](./design/holt-system-specification.md)** - Complete technical architecture documenting the immutable ledger design and orchestration state machine.
+- **[Holt Compliance Suite](./docs/compliance/)** - Comprehensive regulatory assurance documentation including:
+  - **Controls Mapping**: Maps Holt's technical controls to SOC 2, ISO 27001, and HIPAA requirements
+  - **Audit Defense Theory**: Articulates the forensic argument for Internal Audit, explaining how deterministic orchestration resolves the "Audit Paradox"
+  - **Enterprise Architecture**: Deep dive into air-gap capabilities, data sovereignty, and security boundaries
+  - Reference architecture designed to support EU AI Act (Article 14) and NYDFS Part 504 compliance requirements
+- **[System Specification](./design/holt-system-specification.md)** - Complete technical architecture documenting the immutable ledger design and orchestration state machine
 - **[Agent Development Guide](./docs/agent-development.md)** - Build custom agents for your compliance workflows
 - **[Project Context](./PROJECT_CONTEXT.md)** - Philosophy, principles, and vision for regulated AI
 - **[Troubleshooting Guide](./docs/troubleshooting.md)** - Common issues & solutions
