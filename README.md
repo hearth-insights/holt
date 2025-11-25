@@ -578,7 +578,7 @@ Agents can use any tool that can be containerized - not just Python functions. T
 
 ## Roadmap
 
-Holt is being developed through a series of well-defined phases, from the initial "Heartbeat" to a fully "Kubernetes-Native" platform. For a detailed overview of the project's phased delivery plan and future direction, please see our comprehensive roadmap:
+Holt is being developed through a series of well-defined phases, from the initial "Heartbeat" to a fully developed platform. For a detailed overview of the project's phased delivery plan and future direction, please see our comprehensive roadmap:
 
 **[➡️ View the Full Project Roadmap](./ROADMAP.md)**
 

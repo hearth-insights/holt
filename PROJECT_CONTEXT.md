@@ -54,8 +54,7 @@ Holt provides integrated tools for monitoring and debugging your AI agents and w
 Holt's architecture is designed for a seamless transition from local development to production deployment on any standard container platform.
 
 - **Local Development:** The `holt up` command provides a simple, `docker-compose`-like experience for running a complete Holt instance on your local machine.
-- **Production-Ready Architecture:** Because every agent and Holt component is a container, a `holt.yml` configuration serves as a blueprint for production. This stack can be deployed to any major orchestrator, including **Kubernetes, Amazon ECS, or Google Cloud Run**.
-- **Future: First-Class Kubernetes Native:** The Phase 6 roadmap will make Holt a first-class citizen in Kubernetes. This includes a **Holt Operator** for managing the entire lifecycle, native integration with Kubernetes health and logging, and built-in **Prometheus metrics endpoints** for seamless integration with your existing monitoring infrastructure.
+- **Production-Ready Architecture:** Because every agent and Holt component is a container, a `holt.yml` configuration serves as a blueprint for production. This stack can be deployed to any major orchestrator, including **Amazon ECS, or Google Cloud Run**.
 
 ## Key Architectural Concepts
 
@@ -169,13 +168,6 @@ Holt is being developed through a series of well-defined phases, each delivering
 ### Phase 5: "Complex Coordination" 📋
 *Goal: Enable the orchestration of complex, non-linear workflows (DAGs).*
 - **Features:** Support for "fan-in" synchronization patterns and conditional workflow pathing based on agent bidding logic.
-
-### Phase 6: "Kubernetes-Native" 📋
-*Goal: Evolve Holt into a first-class, native Kubernetes platform.*
-- **Features:** A **Holt Operator** for managing instances via Custom Resource Definitions (CRDs), native integration with Kubernetes networking and storage, and **Prometheus metrics endpoints**.
-
-### Future Enhancements
-For a detailed look at long-term, enterprise-focused ideas like RBAC, Secrets Management, and High Availability, see the living document at **[design/future-enhancements.md](./design/future-enhancements.md)**.
 
 ## **Key Design Decisions & Rationale**
 

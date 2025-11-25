@@ -94,10 +94,8 @@ design/features/
 │   └── M3.10-cli-observability.md
 ├── phase-4-human-loop/             # Production Ready & Human Interaction
 │   └── M4.1-question-answer-system.md
-├── phase-5-complex-coordination/   # Advanced DAG Workflows
-│   └── M5.1-declarative-fan-in-synchronization.md
-└── phase-6-kubernetes-native/      # Kubernetes Operator & Deployment
-    └── M6.1-holt-operator-and-crd-design.md
+└── phase-5-complex-coordination/   # Advanced DAG Workflows
+    └── M5.1-declarative-fan-in-synchronization.md
 ```
 
 ## **AI Agent Guidelines for Feature Development**
