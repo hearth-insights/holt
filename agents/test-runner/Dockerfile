@@ -24,10 +24,6 @@ FROM alpine:latest
 # Install required tools: git (for checkout), make (for tests), jq (for JSON parsing)
 RUN apk --no-cache add git make jq ca-certificates
 
-# Configure git to trust /workspace directory (fixes "dubious ownership" errors in CI)
-# This is required when the workspace is owned by a different user than the container user
-RUN git config --global --add safe.directory /workspace
-
 WORKDIR /app
 
 # Copy pup binary from builder
@@ -40,6 +36,11 @@ RUN chmod +x /app/run-tests.sh
 # Create non-root user
 RUN adduser -D -u 1000 agent
 USER agent
+
+# Configure git to trust /workspace directory (fixes "dubious ownership" errors in CI)
+# This MUST be run as the agent user (not root) since the agent user is who runs git
+# This is required when the workspace is owned by a different user than the container user
+RUN git config --global --add safe.directory /workspace
 
 # Pup is the entrypoint - it will call our script
 ENTRYPOINT ["/app/pup"]
