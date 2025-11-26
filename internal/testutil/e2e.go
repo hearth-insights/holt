@@ -180,8 +180,8 @@ test-failed:
 `
 	makefilePath := filepath.Join(tmpDir, "Makefile")
 	require.NoError(t, os.WriteFile(makefilePath, []byte(makefileContent), 0644), "Failed to write Makefile")
-	exec.Command("git", "-C", tmpDir, "add", "Makefile").Run()
-	exec.Command("git", "-C", tmpDir, "commit", "-m", "Add Makefile for tests").Run()
+	require.NoError(t, exec.Command("git", "-C", tmpDir, "add", "Makefile").Run(), "Failed to git add Makefile")
+	require.NoError(t, exec.Command("git", "-C", tmpDir, "commit", "-m", "Add Makefile for tests").Run(), "Failed to git commit Makefile")
 
 	// Fix permissions for Docker container access (critical for CI environments)
 	// Containers may run as different users, so we need world-readable/writable files
