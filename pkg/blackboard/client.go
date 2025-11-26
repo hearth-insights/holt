@@ -1023,3 +1023,94 @@ func (c *Client) GetRedisClient() *redis.Client {
 func (c *Client) GetInstanceName() string {
 	return c.instanceName
 }
+
+// TriggerGlobalLockdown executes the three-step alert mechanism for M4.6 security events.
+//
+// Step 1: LPUSH to holt:{instance}:security:alerts:log (permanent audit trail)
+// Step 2: SET holt:{instance}:security:lockdown with alert payload (circuit breaker)
+// Step 3: PUBLISH to holt:{instance}:security:alerts (real-time notification)
+//
+// This is called when hash mismatches or orphan blocks are detected.
+// The orchestrator will halt ALL operations until manual unlock.
+func (c *Client) TriggerGlobalLockdown(ctx context.Context, alert *SecurityAlert) error {
+	alertJSON, err := json.Marshal(alert)
+	if err != nil {
+		return fmt.Errorf("failed to marshal security alert: %w", err)
+	}
+
+	// Step 1: LPUSH to permanent audit log (newest first)
+	logKey := SecurityAlertsLogKey(c.instanceName)
+	if err := c.rdb.LPush(ctx, logKey, alertJSON).Err(); err != nil {
+		return fmt.Errorf("failed to persist alert to log: %w", err)
+	}
+
+	// Step 2: SET lockdown key (circuit breaker state)
+	lockdownKey := SecurityLockdownKey(c.instanceName)
+	if err := c.rdb.Set(ctx, lockdownKey, alertJSON, 0).Err(); err != nil {
+		return fmt.Errorf("failed to set lockdown key: %w", err)
+	}
+
+	// Step 3: PUBLISH to real-time notification channel
+	channel := SecurityAlertsChannel(c.instanceName)
+	if err := c.rdb.Publish(ctx, channel, alertJSON).Err(); err != nil {
+		return fmt.Errorf("failed to publish alert: %w", err)
+	}
+
+	return nil
+}
+
+// IsInLockdown checks if the instance is currently in global lockdown.
+// Returns (true, alert) if locked down, (false, nil) if operational.
+// Used by orchestrator to check lockdown state before processing events.
+func (c *Client) IsInLockdown(ctx context.Context) (bool, *SecurityAlert, error) {
+	lockdownKey := SecurityLockdownKey(c.instanceName)
+	alertJSON, err := c.rdb.Get(ctx, lockdownKey).Result()
+	if errors.Is(err, redis.Nil) {
+		// No lockdown key = system operational
+		return false, nil, nil
+	}
+	if err != nil {
+		return false, nil, fmt.Errorf("failed to check lockdown status: %w", err)
+	}
+
+	// Lockdown key exists - unmarshal alert
+	var alert SecurityAlert
+	if err := json.Unmarshal([]byte(alertJSON), &alert); err != nil {
+		return true, nil, fmt.Errorf("failed to unmarshal lockdown alert: %w", err)
+	}
+
+	return true, &alert, nil
+}
+
+// ClearLockdown removes the lockdown circuit breaker and logs the override.
+// Creates a security_override alert in the audit log before clearing.
+// Used by `holt security --unlock` command.
+func (c *Client) ClearLockdown(ctx context.Context, reason, operator string) error {
+	// Create override alert for audit trail
+	overrideAlert := NewSecurityOverrideAlert(reason, operator)
+
+	alertJSON, err := json.Marshal(overrideAlert)
+	if err != nil {
+		return fmt.Errorf("failed to marshal override alert: %w", err)
+	}
+
+	// LPUSH override to audit log
+	logKey := SecurityAlertsLogKey(c.instanceName)
+	if err := c.rdb.LPush(ctx, logKey, alertJSON).Err(); err != nil {
+		return fmt.Errorf("failed to log security override: %w", err)
+	}
+
+	// DELETE lockdown key (clear circuit breaker)
+	lockdownKey := SecurityLockdownKey(c.instanceName)
+	if err := c.rdb.Del(ctx, lockdownKey).Err(); err != nil {
+		return fmt.Errorf("failed to clear lockdown key: %w", err)
+	}
+
+	// PUBLISH override alert
+	channel := SecurityAlertsChannel(c.instanceName)
+	if err := c.rdb.Publish(ctx, channel, alertJSON).Err(); err != nil {
+		return fmt.Errorf("failed to publish override alert: %w", err)
+	}
+
+	return nil
+}
