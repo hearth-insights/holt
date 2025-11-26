@@ -17,9 +17,10 @@ func TestArtefactRoundTrip(t *testing.T) {
 		Version:         1,
 		StructuralType:  StructuralTypeStandard,
 		Type:            "CodeCommit",
-			ProducedByRole:  "test-agent",
+		ProducedByRole:  "test-agent",
 		Payload:         "abc123def",
 		SourceArtefacts: []string{uuid.New().String(), uuid.New().String()},
+		ContextForRoles: []string{}, // M4.3: Explicitly set to empty slice
 	}
 
 	// Convert to hash
@@ -54,9 +55,10 @@ func TestArtefactRoundTrip_EmptySourceArtefacts(t *testing.T) {
 		Version:         1,
 		StructuralType:  StructuralTypeStandard,
 		Type:            "GoalDefined",
-			ProducedByRole:  "test-agent",
+		ProducedByRole:  "test-agent",
 		Payload:         "Create a REST API",
-		SourceArtefacts: []string{}, // Empty array
+		SourceArtefacts: []string{},     // Empty array
+		ContextForRoles: []string{},     // M4.3: Explicitly set to empty slice
 	}
 
 	hash, err := ArtefactToHash(original)

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/dyluth/holt/internal/config"
+	"github.com/dyluth/holt/internal/orchestrator/debug"
 	"github.com/dyluth/holt/pkg/blackboard"
 	"github.com/google/uuid"
 )
@@ -23,6 +24,7 @@ type Engine struct {
 	phaseStates             map[string]*PhaseState // claimID -> PhaseState (M3.2: in-memory tracking)
 	pendingAssignmentClaims map[string]string      // claimID -> targetArtefactID (M3.3: feedback claim tracking)
 	workerManager           *WorkerManager         // M3.4: Worker lifecycle management
+	debugSession            *debugSession          // M4.2: Debug session state
 }
 
 // NewEngine creates a new orchestrator engine.
@@ -73,6 +75,11 @@ func (e *Engine) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to recover state: %w", err)
 	}
 
+	// M4.2: Initialize debug monitoring
+	if err := e.initializeDebugMonitoring(ctx); err != nil {
+		return fmt.Errorf("failed to initialize debug monitoring: %w", err)
+	}
+
 	// Subscribe to artefact events
 	subscription, err := e.client.SubscribeArtefactEvents(ctx)
 	if err != nil {
@@ -109,6 +116,9 @@ func (e *Engine) Run(ctx context.Context) error {
 			// M3.2: Also process artefact for phase completion tracking
 			e.processArtefactForPhases(ctx, artefact)
 
+			// M4.2: Check breakpoints after event processing (state committed)
+			e.evaluateBreakpointsAndPause(ctx, artefact, nil, debug.EventArtefactReceived)
+
 		case err, ok := <-subscription.Errors():
 			if !ok {
 				log.Printf("[Orchestrator] Error channel closed")
@@ -124,9 +134,11 @@ func (e *Engine) Run(ctx context.Context) error {
 // Creates a claim if appropriate, or skips if Terminal, Failure, or Review type.
 func (e *Engine) processArtefact(ctx context.Context, artefact *blackboard.Artefact) error {
 	// Do not create claims for artefacts that are the output of a process, like reviews or failures.
+	// M4.3: Also skip Knowledge artefacts as they are passive context data, not claimable work.
 	if artefact.StructuralType == blackboard.StructuralTypeTerminal ||
 		artefact.StructuralType == blackboard.StructuralTypeFailure ||
-		artefact.StructuralType == blackboard.StructuralTypeReview {
+		artefact.StructuralType == blackboard.StructuralTypeReview ||
+		artefact.StructuralType == blackboard.StructuralTypeKnowledge {
 		e.logEvent("claim_creation_skipped", map[string]interface{}{
 			"artefact_id":     artefact.ID,
 			"type":            artefact.Type,
@@ -176,6 +188,21 @@ func (e *Engine) processArtefact(ctx context.Context, artefact *blackboard.Artef
 		"latency_ms":  latencyMs,
 	})
 
+	// M4.2: Check breakpoints after claim creation
+	e.evaluateBreakpointsAndPause(ctx, artefact, claim, debug.EventClaimCreated)
+
+	// M4.2: Re-fetch claim after potential debugger pause (may have been terminated)
+	freshClaim, err := e.client.GetClaim(ctx, claim.ID)
+	if err != nil {
+		log.Printf("[Orchestrator] Failed to re-fetch claim %s after debugger pause: %v", claim.ID, err)
+		return nil
+	}
+	if freshClaim.Status == blackboard.ClaimStatusTerminated {
+		log.Printf("[Orchestrator] Claim %s was terminated during debugger pause, skipping consensus", claim.ID)
+		return nil
+	}
+	claim = freshClaim // Use fresh claim for subsequent operations
+
 	// M3.1: Wait for consensus and grant claim
 	if len(e.agentRegistry) > 0 {
 		if err := e.waitForConsensusAndGrant(ctx, claim); err != nil {
@@ -190,10 +217,19 @@ func (e *Engine) processArtefact(ctx context.Context, artefact *blackboard.Artef
 // processArtefactForPhases checks if this artefact completes a phase for any active claims.
 // M3.2: Tracks artefacts produced by granted agents and triggers phase completion checks.
 // M3.3: Also handles pending_assignment claims (feedback claims).
+// M4.1: Also handles Question artefacts (triggers feedback loop).
 func (e *Engine) processArtefactForPhases(ctx context.Context, artefact *blackboard.Artefact) {
 	// Skip non-phase-relevant artefacts
 	if artefact.StructuralType == blackboard.StructuralTypeTerminal ||
 		artefact.StructuralType == blackboard.StructuralTypeFailure {
+		return
+	}
+
+	// M4.1: Handle Question artefacts (trigger feedback loop)
+	if artefact.StructuralType == blackboard.StructuralTypeQuestion {
+		if err := e.handleQuestionArtefact(ctx, artefact); err != nil {
+			log.Printf("[Orchestrator] Error handling Question artefact %s: %v", artefact.ID, err)
+		}
 		return
 	}
 

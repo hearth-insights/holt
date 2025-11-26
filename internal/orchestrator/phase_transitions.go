@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/dyluth/holt/internal/orchestrator/debug"
 	"github.com/dyluth/holt/pkg/blackboard"
 )
 
@@ -107,6 +108,28 @@ func (e *Engine) TransitionToNextPhase(ctx context.Context, claim *blackboard.Cl
 
 	log.Printf("[Orchestrator] Claim %s transitioned from %s to %s",
 		claim.ID, claim.Status, nextStatus)
+
+	// M4.2: Emit phase_completed event after successful phase completion
+	e.logEvent("phase_completed", map[string]interface{}{
+		"claim_id":       claim.ID,
+		"completed_phase": claim.Status,
+		"next_phase":     nextPhase,
+	})
+
+	// M4.2: Check breakpoints after phase completion
+	targetArtefact, _ := e.client.GetArtefact(ctx, currentClaim.ArtefactID)
+	e.evaluateBreakpointsAndPause(ctx, targetArtefact, currentClaim, debug.EventPhaseCompleted)
+
+	// M4.2: Re-fetch claim after potential debugger pause (may have been terminated)
+	freshClaim, err := e.client.GetClaim(ctx, currentClaim.ID)
+	if err != nil {
+		return fmt.Errorf("failed to re-fetch claim after debugger pause: %w", err)
+	}
+	if freshClaim.Status == blackboard.ClaimStatusTerminated {
+		log.Printf("[Orchestrator] Claim %s was terminated during debugger pause, skipping next phase grant", currentClaim.ID)
+		return nil
+	}
+	currentClaim = freshClaim // Use fresh claim for subsequent operations
 
 	// Grant next phase
 	return e.GrantNextPhase(ctx, currentClaim, phaseState, nextPhase)

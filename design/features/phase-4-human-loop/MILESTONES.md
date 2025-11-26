@@ -1,183 +1,128 @@
-# **Phase 4: "Human-in-the-Loop" - Implementation Milestones**
+# Phase 4: "Human-in-the-Loop" - Implementation Milestones
 
-**Phase Goal**: Full featured system with human oversight and production-ready operations.
-Thoughts from Cam:
-* there are times when one LLM might want to ask questions from the implementer LLM of an earlier Artefact (think implementer asking an implementation detail) - this is a form of late review, but done at the Claim / exlcusive step, not necessarily the review step - we need to support this additional flow.
-* human in the loop 2 modes:
-    - implicit human decision requests - questions that filter up to the top of the chain that the LLMs cant answer
-    - breakpointing - where a human can set explicit breakpoints or step controlls - eg whenever an artefact of type X is created, enter full control to review every decision.  this is complex, so we need to think hard on how to implement this, and what is simple, and what we can build later.
-    - also when in full control, the human can take action - eg add an explicit manual review artefact on something to cause it to be re-evaluated.
-* a much more sophisticated demo - eg a `Go Microservice & OpenAPI Spec` where there are designs, comprehensive design reviews, implementations (including asking implementation questions back to the architect), implementation reviews & tooling that runs the tests checks code coverage etc,  then documentation creation & reviews etc, then final total review including all genarated artefacts and code changes. -  showing off extensive use of tools AND LLMS.  and including the possibility of questions escalating up to the human.
-* 
-
+**Phase Goal**: To deliver a full-featured system with robust human oversight, production-grade data persistence, and advanced interactive capabilities, culminating in a powerful "dogfooding" demonstration.
 
 **Phase Success Criteria**:
-- Complex workflows with human decision points
-- Production-ready operational features
-- Comprehensive error handling and monitoring
-- Complete audit trail for regulated environments
+- Complex workflows can be paused for and resumed by human or agent-based clarification.
+- Humans can interactively intercept and control workflows at predefined breakpoints.
+- Holt instances can be stopped without data loss and permanently destroyed when required.
+- The entire development lifecycle of a Holt feature can be demonstrated using Holt itself.
 
 ---
 
 ## **Milestone Overview**
 
-Phase 4 milestones focus on production readiness, human interaction, and operational safety.
+Phase 4 focuses on adding sophisticated human-in-the-loop interaction, production-level data management, and proving the power of the platform by using it to develop itself.
 
-### **M4.1: Question-Answer System**
-**Status**: Not Started
+### **M4.1: Advanced Question/Answer System**
+**Status**: Design Complete
 **Dependencies**: Phase 3 completion
-**Estimated Effort**: Medium
 
-**Goal**: Enable agents to escalate questions to humans and receive answers
+**Goal**: Enable agents to ask clarifying questions to other agents or escalate to a human when necessary.
 
 **Scope**:
-- Question structural type handling in orchestrator
-- `holt questions [--wait]` command implementation
-- `holt answer <question-id> "response"` command
-- Answer artefact creation and claim unblocking
-- Timeout handling for unanswered questions
+- **Agent-to-Agent Questions**: Implement a mechanism for an agent working on a claim to create a `Question` artefact that is directed at the `produced_by_role` of a source artefact. The target agent can then produce a new version of the questioned artefact, triggering the M3.3 automated feedback loop.
+- **Agent-to-Human Escalation**: If a question cannot be answered by another agent (or is directed to a `user` role), it should be escalated to the human operator.
+- **CLI Tooling**: Implement `holt questions [--wait]` and `holt answer <question-id> "response"`.
+- **Orchestrator Logic**: The orchestrator treats Questions as "late review feedback" that terminates the original claim and creates a `pending_assignment` claim for the original author to produce a clearer version.
+- **Iteration Limits**: Questions reuse `orchestrator.max_review_iterations` to prevent infinite Q&A loops.
 
-**Deliverables**:
-- `cmd/holt/commands/questions.go` - Questions command
-- `cmd/holt/commands/answer.go` - Answer command
-- Orchestrator Question/Answer workflow logic
-- Integration tests for human-in-the-loop scenarios
+**Design Document**: [M4.1-advanced-question-answer-system.md](./M4.1-advanced-question-answer-system.md)
+
+---
+
+### **M4.2: Interactive Debugging & Control**
+**Status**: Design Complete
+**Dependencies**: Phase 3 completion
+
+**Goal**: Provide a traditional, breakpoint-based interactive debugger that allows human operators to attach to a running Holt instance, pause workflows at specific conditions, inspect state, and manually intervene.
+
+**Scope**:
+- **`holt debug` Command**: A new top-level command that attaches to a running instance and starts an interactive debugging session with a `(holt-debug)` prompt.
+- **Ephemeral Breakpoints**: Breakpoints are session-specific and exist only while the debugger is connected. When the debugger disconnects (gracefully or via crash), all breakpoints are automatically cleared and workflows resume.
+- **Interactive Session Commands**: Support for traditional debugger commands:
+  - `continue` (c) - Resume workflow until next breakpoint
+  - `next` (n) - Single-step through orchestrator events
+  - `break` (b) - Set breakpoint with glob patterns (e.g., `artefact.type=*Spec`, `claim.status=pending_review`)
+  - `print` (p) - Inspect artefacts
+  - `reviews` - List pending review claims
+  - `review <claim-id> [--approve|--reject]` - Manually approve/reject reviews
+  - `breakpoints` (bp) - List active breakpoints
+  - `clear <id>` - Remove breakpoint
+  - `exit` - Disconnect and clear all breakpoints
+- **Pub/Sub Communication**: CLI and Orchestrator communicate via Redis Pub/Sub channels (`debug:command` and `debug:event`).
+- **Orchestrator Pause Logic**: The orchestrator's main event loop checks for breakpoints before processing each event and blocks when paused, waiting for continue/step commands.
+- **Context-Aware Manual Review**: The `review` command only works when paused on a `claim.status=pending_review` breakpoint, preventing mistakes.
+- **Safety Features**:
+  - Session heartbeat with 30-second TTL (auto-resume if debugger crashes)
+  - Single active session only (prevent conflicting commands)
+  - All manual interventions create proper Review artefacts for audit trail
+
+**Design Document**: [M4.2-interactive-debugging-control.md](./M4.2-interactive-debugging-control.md)
+
+---
+
+### **M4.3: Context Caching**
+**Status**: Design Complete (Approved)
+**Dependencies**: None
+
+**Goal**: Enable agents to perform an expensive, one-time context discovery and then cache that context on the Blackboard for efficient reuse across all subsequent runs and rework cycles for that thread of work.
+
+**Scope**:
+- **Checkpoint Side-Effect**: Enhance the agent tool's output contract to include an optional `checkpoints` array. This allows an agent to produce its main work artefact and checkpoint its context in a single turn.
+- **Knowledge Artefact**: The pup will process the `checkpoints` array to create special `Knowledge` artefacts on the Blackboard, linked to the current work thread's `logical_id`.
+- **Pup Logic**: The pup's context assembly logic will be enhanced to find these `Knowledge` artefacts and automatically inject their content into the agent's context on subsequent runs.
+- **Agent Logic**: The pup will provide a `context_is_declared` flag to the agent, allowing the agent's tool script to know whether it needs to perform its one-time discovery logic or if the context has already been cached.
+- **Global Knowledge Index**: A Redis hash maps globally unique knowledge names to version threads, preventing naming collisions.
+- **CLI Provisioning**: New `holt provision` command for manually creating Knowledge artefacts from files, URLs, or commands.
+
+**Design Document**: [M4.3-context-caching.md](./M4.3-context-caching.md)
+
+---
+
+### **M4.4: Production-Grade State Management**
+**Status**: Not Started
+**Dependencies**: None
+
+**Goal**: Ensure that Holt instances are persistent by default and can be explicitly destroyed when no longer needed.
+
+**Scope**:
+- **Persistent Redis Storage**: Modify the `holt up` command to create and use a persistent data volume for the Redis container, likely in a local `~/.holt/instances/<instance_name>/` directory. This path should be configurable.
+- **Clarify `holt down`**: The `holt down` command will stop the service containers but will **not** delete the persistent Redis data volume.
+- **Implement `holt destroy`**: Create the `holt destroy --name <instance>` command. This command will stop the instance (if running) and permanently delete the associated Redis data volume from the host machine.
+- **Safety Features**: The `destroy` command must include safety checks, such as requiring the instance name to be typed out for confirmation, as specified in the original design.
 
 **Design Document**: TBD
 
 ---
 
-### **M4.2: Health Checks and Monitoring**
+### **M4.5: The Holt Development Lifecycle Demo**
 **Status**: Not Started
-**Dependencies**: M4.1
-**Estimated Effort**: Medium
+**Dependencies**: M4.1, M4.2, M4.3, M4.4
 
-**Goal**: Production-ready monitoring and observability
+**Goal**: Create the ultimate "dogfooding" demo, showcasing a team of Holt agents building a new feature for Holt itself.
 
 **Scope**:
-- `/healthz` endpoints for orchestrator and pups
-- Structured JSON logging throughout
-- Performance metrics collection
-- Operational debugging commands
-
-**Deliverables**:
-- Health check HTTP servers in orchestrator and pup
-- Logging framework integration
-- Metrics collection infrastructure
-- Debug tooling and commands
+- **Demo Scenario**: The goal will be to "add a new `holt stats` command that shows the number of artefacts and claims".
+- **New Agents**: Create a clan of agents for the demo:
+    - `designer-agent`: Creates a feature design document.
+    - `go-coder-agent`: Implements the Go code for the CLI command and tests. It will use the new Context Caching feature to load relevant design docs.
+    - `reviewer-agent`: Reviews code and design documents.
+    - `test-runner-agent`: A tool-based agent that runs `make test` and reports results.
+- **Workflow**: The demo will showcase the full lifecycle: design -> review -> implementation -> testing -> human approval, including the potential for agent-to-agent questions and human breakpoints.
 
 **Design Document**: TBD
 
 ---
 
-### **M4.3: Instance Destruction**
+### **M4.6: Production Documentation**
 **Status**: Not Started
-**Dependencies**: M4.2
-**Estimated Effort**: Medium
+**Dependencies**: All other M4 milestones.
 
-**Goal**: Safely destroy Holt instances and all associated data
+**Goal**: Document all new Phase 4 features for end-users.
 
 **Scope**:
-- `holt destroy --name <instance> [--force]` command implementation
-- Validation that instance is stopped before destruction
-- Complete removal of all Redis keys for the instance:
-  - `holt:{instance_name}:artefact:*`
-  - `holt:{instance_name}:claim:*`
-  - `holt:{instance_name}:thread:*`
-  - `holt:{instance_name}:lock`
-  - Entry in `holt:instances` hash
-- Confirmation prompts and safety checks
-- `--force` flag to bypass confirmation (for scripting)
-- Comprehensive audit logging of destruction operations
-
-**Deliverables**:
-- `cmd/holt/commands/destroy.go` - Destroy command
-- `internal/instance/destroyer.go` - Instance destruction logic
-- Confirmation and safety validation
-- Integration tests for destruction scenarios
-- Documentation for data recovery and backups
-
-**Design Document**: `instance-destruction.md`
-
-**Safety Requirements**:
-- **MUST** verify instance is not running (no lock exists)
-- **MUST** prompt for confirmation with instance name re-entry
-- **MUST** log destruction operation with timestamp and operator
-- **SHOULD** support dry-run mode (`--dry-run` flag)
-- **SHOULD** create audit artefact before destruction (future enhancement)
-
-**Example UX**:
-```bash
-# Basic usage (requires confirmation)
-$ holt destroy --name myproject
-WARNING: This will permanently delete ALL data for instance 'myproject'
-This includes:
-  - All artefacts and claims
-  - All thread history
-  - All metadata
-
-Type the instance name to confirm: myproject
-Destroying instance 'myproject'...
-✓ Removed 1,234 artefacts
-✓ Removed 567 claims
-✓ Removed 89 threads
-✓ Removed metadata
-Instance 'myproject' destroyed successfully
-
-# Force mode (no confirmation, for scripts)
-$ holt destroy --name myproject --force
-Instance 'myproject' destroyed successfully
-
-# Error: Instance still running
-$ holt destroy --name myproject
-Error: Cannot destroy instance 'myproject' - instance is still running
-Run 'holt down --name myproject' first
-
-# Error: Instance doesn't exist
-$ holt destroy --name nonexistent
-Error: Instance 'nonexistent' not found
-```
-
----
-
-### **M4.4: Production Documentation**
-**Status**: Not Started
-**Dependencies**: M4.3
-**Estimated Effort**: Small
-
-**Goal**: Complete production deployment and operational documentation
-
-**Scope**:
-- Deployment guides for various environments
-- Operational runbooks for common scenarios
-- Troubleshooting guides
-- Security hardening recommendations
-- Backup and recovery procedures
-
-**Deliverables**:
-- Production deployment guide
-- Operational runbooks
-- Troubleshooting documentation
-- Security best practices guide
-
-**Design Document**: N/A (documentation only)
-
----
-
-## **Phase 4 Completion Criteria**
-
-Phase 4 is complete when:
-- ✅ Question/Answer workflow fully functional
-- ✅ Health checks operational for all components
-- ✅ Instance destruction works safely with audit logging
-- ✅ Production documentation complete
-- ✅ All Phase 4 tests passing
-- ✅ Security review completed
-- ✅ Performance benchmarks met
-
-## **Next Steps**
-
-After Phase 4 completion, Holt v1.0 is production-ready for:
-- Software engineering workflows
-- Regulated industry compliance scenarios
-- Enterprise deployments requiring auditability
+- Create user guides for the Q&A system, interactive debugging, and context caching features.
+- Document the new persistent state model and the `holt down` vs. `holt destroy` behavior.
+- Create a new "How-To" guide walking through the new `holt-development-lifecycle-demo`.
+- Update all relevant sections of the `README.md`, `docs/QUICK_REFERENCE.md`, etc.

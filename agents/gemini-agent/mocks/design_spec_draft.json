@@ -1,0 +1,6 @@
+{
+  "artefact_type": "DesignSpecDraft",
+  "artefact_payload": "# Design Proposal: Sample Feature Implementation\n\n## Problem Statement\n\nThe current system lacks a comprehensive development lifecycle demonstration that showcases multi-agent collaboration with human oversight.\n\n## Proposed Solution\n\nImplement a multi-stage workflow that includes:\n- Design phase with AI-generated proposals\n- Human review gates at critical decision points\n- Implementation phase with automated testing\n- Security scanning and final approval\n\n## Key Design Decisions\n\n1. **Two-workflow structure**: Separate design and implementation phases\n2. **Human-in-the-loop**: Mandatory human approval before proceeding\n3. **Automated quality gates**: Tests and security scans run automatically\n4. **Iterative refinement**: M3.3 feedback loops for continuous improvement\n\n## Open Questions\n\n- Should we support parallel design variations?\n- What is the acceptable iteration limit for rework cycles?\n",
+  "summary": "DesignerGemini: Created high-level design proposal",
+  "structural_type": "Standard"
+}

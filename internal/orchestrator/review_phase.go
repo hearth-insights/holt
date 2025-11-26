@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/dyluth/holt/internal/orchestrator/debug"
 	"github.com/dyluth/holt/pkg/blackboard"
 )
 
@@ -92,7 +93,7 @@ func (e *Engine) CheckReviewPhaseCompletion(ctx context.Context, claim *blackboa
 			})
 
 			// Publish review_rejected workflow event
-			if err := e.publishReviewRejectedEvent(ctx, claim.ArtefactID, agentRole, artefact.Payload); err != nil {
+			if err := e.publishReviewRejectedEvent(ctx, claim.ArtefactID, artefact.ID, agentRole, artefact.Payload); err != nil {
 				log.Printf("[Orchestrator] Failed to publish review_rejected event: %v", err)
 			}
 		} else {
@@ -103,11 +104,32 @@ func (e *Engine) CheckReviewPhaseCompletion(ctx context.Context, claim *blackboa
 			})
 
 			// Publish review_approved workflow event
-			if err := e.publishReviewApprovedEvent(ctx, claim.ArtefactID, agentRole); err != nil {
+			if err := e.publishReviewApprovedEvent(ctx, claim.ArtefactID, artefact.ID, agentRole); err != nil {
 				log.Printf("[Orchestrator] Failed to publish review_approved event: %v", err)
 			}
 		}
 	}
+
+	// M4.2: Emit review_consensus_reached event BEFORE making decision
+	e.logEvent("review_consensus_reached", map[string]interface{}{
+		"claim_id":       claim.ID,
+		"feedback_count": len(feedbackArtefacts),
+	})
+
+	// M4.2: Check breakpoints after review consensus (before decision)
+	targetArtefact, _ := e.client.GetArtefact(ctx, claim.ArtefactID)
+	e.evaluateBreakpointsAndPause(ctx, targetArtefact, claim, debug.EventReviewConsensusReached)
+
+	// M4.2: Re-fetch claim after potential debugger pause (may have been terminated)
+	freshClaim, err := e.client.GetClaim(ctx, claim.ID)
+	if err != nil {
+		return fmt.Errorf("failed to re-fetch claim after debugger pause: %w", err)
+	}
+	if freshClaim.Status == blackboard.ClaimStatusTerminated {
+		log.Printf("[Orchestrator] Claim %s was terminated during debugger pause, skipping review decision", claim.ID)
+		return nil
+	}
+	claim = freshClaim // Use fresh claim for subsequent operations
 
 	if len(feedbackArtefacts) > 0 {
 		// M3.3: Create feedback claim instead of just terminating
@@ -227,9 +249,10 @@ func extractIDs(artefacts []*blackboard.Artefact) []string {
 
 // publishReviewApprovedEvent publishes a review_approved workflow event.
 // Called when a Review artefact with empty payload (approval) is processed.
-func (e *Engine) publishReviewApprovedEvent(ctx context.Context, originalArtefactID, reviewerRole string) error {
+func (e *Engine) publishReviewApprovedEvent(ctx context.Context, originalArtefactID, reviewArtefactID, reviewerRole string) error {
 	eventData := map[string]interface{}{
 		"original_artefact_id": originalArtefactID,
+		"review_artefact_id":   reviewArtefactID,
 		"reviewer_role":        reviewerRole,
 	}
 
@@ -237,15 +260,12 @@ func (e *Engine) publishReviewApprovedEvent(ctx context.Context, originalArtefac
 		return fmt.Errorf("failed to publish review_approved event: %w", err)
 	}
 
-	log.Printf("[Orchestrator] Published review_approved event: artefact=%s, reviewer=%s",
-		originalArtefactID, reviewerRole)
-
+	log.Printf("[Orchestrator] Published review_approved event: artefact=%s, review=%s, reviewer=%s",
+		originalArtefactID, reviewArtefactID, reviewerRole)
 	return nil
 }
 
-// publishReviewRejectedEvent publishes a review_rejected workflow event.
-// Called when a Review artefact with non-empty payload (feedback) is processed.
-func (e *Engine) publishReviewRejectedEvent(ctx context.Context, originalArtefactID, reviewerRole, feedback string) error {
+func (e *Engine) publishReviewRejectedEvent(ctx context.Context, originalArtefactID, reviewArtefactID, reviewerRole, feedback string) error {
 	// Truncate feedback for event payload
 	feedbackSummary := feedback
 	if len(feedbackSummary) > 200 {
@@ -254,6 +274,7 @@ func (e *Engine) publishReviewRejectedEvent(ctx context.Context, originalArtefac
 
 	eventData := map[string]interface{}{
 		"original_artefact_id": originalArtefactID,
+		"review_artefact_id":   reviewArtefactID,
 		"reviewer_role":        reviewerRole,
 		"feedback":             feedbackSummary,
 	}
@@ -262,8 +283,8 @@ func (e *Engine) publishReviewRejectedEvent(ctx context.Context, originalArtefac
 		return fmt.Errorf("failed to publish review_rejected event: %w", err)
 	}
 
-	log.Printf("[Orchestrator] Published review_rejected event: artefact=%s, reviewer=%s",
-		originalArtefactID, reviewerRole)
+	log.Printf("[Orchestrator] Published review_rejected event: artefact=%s, review=%s, reviewer=%s",
+		originalArtefactID, reviewArtefactID, reviewerRole)
 
 	return nil
 }

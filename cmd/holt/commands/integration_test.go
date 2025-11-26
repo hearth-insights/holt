@@ -172,10 +172,11 @@ func TestUpSuccess(t *testing.T) {
 	// Verify: Containers exist and running
 	containers := listContainersForInstance(t, cli, instanceName)
 
-	assert.Len(t, containers, 2, "should have 2 containers")
+	assert.Len(t, containers, 3, "should have 3 containers (redis, orchestrator, agent)")
 	names := containerNames(containers)
 	assert.Contains(t, names, dockerpkg.RedisContainerName(instanceName))
 	assert.Contains(t, names, dockerpkg.OrchestratorContainerName(instanceName))
+	// Agent container name is dynamic based on agent name in holt.yml
 
 	for _, c := range containers {
 		assert.Equal(t, "running", c.State, "container %s should be running", c.Names[0])
@@ -259,10 +260,10 @@ func TestUpWorkspaceCollision(t *testing.T) {
 
 	// Verify both instances exist
 	containers1 := listContainersForInstance(t, cli, instance1)
-	assert.Len(t, containers1, 2)
+	assert.Len(t, containers1, 3, "should have 3 containers (redis, orchestrator, agent)")
 
 	containers2 := listContainersForInstance(t, cli, instance2)
-	assert.Len(t, containers2, 2)
+	assert.Len(t, containers2, 3, "should have 3 containers (redis, orchestrator, agent)")
 }
 
 // TestDownCompleteCleanup verifies complete resource cleanup
@@ -282,6 +283,12 @@ func TestDownCompleteCleanup(t *testing.T) {
 
 	instanceName := "test-down-cleanup"
 
+	// Clean up any existing instance before starting (in case previous test run failed)
+	cleanupInstance(t, cli, instanceName)
+
+	// Also defer cleanup in case this test fails
+	defer cleanupInstance(t, cli, instanceName)
+
 	// Create instance
 	upInstanceName = instanceName
 	upForce = false
@@ -290,7 +297,7 @@ func TestDownCompleteCleanup(t *testing.T) {
 
 	// Verify it exists
 	containers := listContainersForInstance(t, cli, instanceName)
-	require.Len(t, containers, 2)
+	require.Len(t, containers, 3, "should have 3 containers (redis, orchestrator, agent)")
 
 	// Execute down command
 	downInstanceName = instanceName

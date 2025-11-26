@@ -5,6 +5,7 @@ package testutil
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -166,6 +167,21 @@ func SetupE2EEnvironment(t *testing.T, holtYML string) *E2EEnvironment {
 	// Commit holt.yml so workspace is clean
 	exec.Command("git", "-C", tmpDir, "add", "holt.yml").Run()
 	exec.Command("git", "-C", tmpDir, "commit", "-m", "Add holt.yml").Run()
+
+	// Create a simple Makefile for test-runner agent tests
+	// This allows test-runner to successfully run `make test-failed`
+	makefileContent := `# Test Makefile for E2E tests
+
+.PHONY: test-failed
+test-failed:
+	@echo "Running tests..."
+	@echo "All tests passed!"
+	@exit 0
+`
+	makefilePath := filepath.Join(tmpDir, "Makefile")
+	require.NoError(t, os.WriteFile(makefilePath, []byte(makefileContent), 0644), "Failed to write Makefile")
+	require.NoError(t, exec.Command("git", "-C", tmpDir, "add", "Makefile").Run(), "Failed to git add Makefile")
+	require.NoError(t, exec.Command("git", "-C", tmpDir, "commit", "-m", "Add Makefile for tests").Run(), "Failed to git commit Makefile")
 
 	// Fix permissions for Docker container access (critical for CI environments)
 	// Containers may run as different users, so we need world-readable/writable files
@@ -565,4 +581,266 @@ func GetProjectRoot() string {
 		}
 		root = parent
 	}
+}
+
+// WaitForArtefactOfType waits for an artefact with the specified type to appear on the blackboard.
+//
+// WARNING: This function returns the FIRST artefact found with matching type, regardless of version.
+// If multiple artefacts with the same type exist (e.g., from rework cycles or duplicate agent runs),
+// this may not return the one you expect!
+//
+// For Knowledge artefacts or situations where multiple versions may exist, use:
+//   - WaitForArtefactWithContext() to find an artefact based on its relationship to another artefact
+//   - WaitForArtefactVersion() to find a specific version of a logical artefact
+//   - FindAllArtefactsOfType() to get all matching artefacts and select the right one
+//
+// Parameters:
+//   - ctx: Context for cancellation
+//   - client: Blackboard client
+//   - artefactType: The 'type' field to match (e.g., "DesignSpec", "CodeCommit")
+//   - timeout: Maximum time to wait
+//
+// Returns:
+//   - The first artefact found with matching type
+//   - Error if no artefact found within timeout
+func WaitForArtefactOfType(ctx context.Context, client *blackboard.Client, artefactType string, timeout time.Duration) (*blackboard.Artefact, error) {
+	deadline := time.Now().Add(timeout)
+
+	for time.Now().Before(deadline) {
+		// Scan for artefacts
+		pattern := fmt.Sprintf("holt:*:artefact:*")
+		iter := client.GetRedisClient().Scan(ctx, 0, pattern, 0).Iterator()
+
+		for iter.Next(ctx) {
+			key := iter.Val()
+			data, err := client.GetRedisClient().HGetAll(ctx, key).Result()
+			if err != nil {
+				continue
+			}
+
+			if data["type"] == artefactType {
+				artefact := &blackboard.Artefact{
+					ID:             data["id"],
+					LogicalID:      data["logical_id"],
+					StructuralType: blackboard.StructuralType(data["structural_type"]),
+					Type:           data["type"],
+					Payload:        data["payload"],
+					ProducedByRole: data["produced_by_role"],
+				}
+
+				if versionStr, ok := data["version"]; ok {
+					if version, err := strconv.Atoi(versionStr); err == nil {
+						artefact.Version = version
+					}
+				}
+
+				// Parse context_for_roles if present
+				if rolesJSON, ok := data["context_for_roles"]; ok && rolesJSON != "" {
+					var roles []string
+					json.Unmarshal([]byte(rolesJSON), &roles)
+					artefact.ContextForRoles = roles
+				}
+
+				return artefact, nil
+			}
+		}
+
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	return nil, fmt.Errorf("artefact of type '%s' not found within %v", artefactType, timeout)
+}
+
+// WaitForArtefactVersion polls for a specific version of a logical artefact (helper for M4.3 tests)
+func WaitForArtefactVersion(ctx context.Context, client *blackboard.Client, logicalID string, targetVersion int, timeout time.Duration) (*blackboard.Artefact, error) {
+	deadline := time.Now().Add(timeout)
+
+	for time.Now().Before(deadline) {
+		// Scan for artefacts
+		pattern := fmt.Sprintf("holt:*:artefact:*")
+		iter := client.GetRedisClient().Scan(ctx, 0, pattern, 0).Iterator()
+
+		for iter.Next(ctx) {
+			key := iter.Val()
+			data, err := client.GetRedisClient().HGetAll(ctx, key).Result()
+			if err != nil {
+				continue
+			}
+
+			if data["logical_id"] == logicalID {
+				versionStr := data["version"]
+				if version, err := strconv.Atoi(versionStr); err == nil && version == targetVersion {
+					artefact := &blackboard.Artefact{
+						ID:             data["id"],
+						LogicalID:      data["logical_id"],
+						Version:        version,
+						StructuralType: blackboard.StructuralType(data["structural_type"]),
+						Type:           data["type"],
+						Payload:        data["payload"],
+						ProducedByRole: data["produced_by_role"],
+					}
+
+					return artefact, nil
+				}
+			}
+		}
+
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	return nil, fmt.Errorf("artefact with logical_id='%s' version=%d not found within %v", logicalID, targetVersion, timeout)
+}
+
+// FindAllArtefactsOfType returns all artefacts of a specific type that currently exist on the blackboard.
+// This is useful when you need to:
+//   - Select a specific artefact based on additional criteria (e.g., version, payload content)
+//   - Verify the total count of artefacts
+//   - Check for duplicates or multiple versions
+//
+// Unlike WaitForArtefactOfType, this function:
+//   - Returns immediately with whatever is currently available (no polling)
+//   - Returns ALL matching artefacts, not just the first one
+//   - Returns an empty slice if no matches found (no error)
+func FindAllArtefactsOfType(ctx context.Context, client *blackboard.Client, artefactType string) ([]*blackboard.Artefact, error) {
+	var results []*blackboard.Artefact
+
+	pattern := fmt.Sprintf("holt:*:artefact:*")
+	iter := client.GetRedisClient().Scan(ctx, 0, pattern, 0).Iterator()
+
+	for iter.Next(ctx) {
+		key := iter.Val()
+		data, err := client.GetRedisClient().HGetAll(ctx, key).Result()
+		if err != nil {
+			continue
+		}
+
+		if data["type"] == artefactType {
+			artefact := &blackboard.Artefact{
+				ID:             data["id"],
+				LogicalID:      data["logical_id"],
+				StructuralType: blackboard.StructuralType(data["structural_type"]),
+				Type:           data["type"],
+				Payload:        data["payload"],
+				ProducedByRole: data["produced_by_role"],
+			}
+
+			if versionStr, ok := data["version"]; ok {
+				if version, err := strconv.Atoi(versionStr); err == nil {
+					artefact.Version = version
+				}
+			}
+
+			// Parse context_for_roles if present
+			if rolesJSON, ok := data["context_for_roles"]; ok && rolesJSON != "" {
+				var roles []string
+				json.Unmarshal([]byte(rolesJSON), &roles)
+				artefact.ContextForRoles = roles
+			}
+
+			results = append(results, artefact)
+		}
+	}
+
+	if err := iter.Err(); err != nil {
+		return nil, fmt.Errorf("error scanning for artefacts: %w", err)
+	}
+
+	return results, nil
+}
+
+// WaitForArtefactWithContext waits for an artefact of a specific type that has a relationship
+// to another artefact via thread_context attachment. This is essential for M4.3 Knowledge tests
+// where multiple artefacts of the same type may exist, and you need to find the one that's
+// contextually related to a specific work artefact.
+//
+// Example: Finding a DesignSpec that has a specific Knowledge checkpoint attached to it.
+//
+// Parameters:
+//   - ctx: Context for cancellation
+//   - client: Blackboard client
+//   - artefactType: The type of artefact to find (e.g., "DesignSpec")
+//   - relatedArtefactID: The ID of an artefact that should be in the target's thread_context
+//   - instanceName: The Holt instance name (for constructing Redis keys)
+//   - timeout: Maximum time to wait
+//
+// Returns:
+//   - The artefact that has relatedArtefactID in its thread_context
+//   - Error if no matching artefact found within timeout
+func WaitForArtefactWithContext(ctx context.Context, client *blackboard.Client, artefactType string, relatedArtefactID string, instanceName string, timeout time.Duration) (*blackboard.Artefact, error) {
+	deadline := time.Now().Add(timeout)
+
+	for time.Now().Before(deadline) {
+		// Get all artefacts of the specified type
+		artefacts, err := FindAllArtefactsOfType(ctx, client, artefactType)
+		if err != nil {
+			return nil, err
+		}
+
+		// Check each artefact's thread_context to see if it contains the related artefact
+		for _, artefact := range artefacts {
+			threadContextKey := blackboard.ThreadContextKey(instanceName, artefact.LogicalID)
+			isMember, err := client.GetRedisClient().SIsMember(ctx, threadContextKey, relatedArtefactID).Result()
+			if err != nil {
+				continue
+			}
+			if isMember {
+				return artefact, nil
+			}
+		}
+
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	return nil, fmt.Errorf("artefact of type '%s' with relatedArtefactID='%s' in thread_context not found within %v", artefactType, relatedArtefactID, timeout)
+}
+
+// DumpInstanceLogs retrieves and logs all container logs for an instance.
+// This is useful for debugging test failures - call it before cleanup.
+func (env *E2EEnvironment) DumpInstanceLogs() {
+	if env.DockerClient == nil {
+		return
+	}
+
+	env.T.Log("=== Dumping container logs for debugging ===")
+
+	// List all containers for this instance
+	containers, err := env.DockerClient.ContainerList(env.Ctx, container.ListOptions{All: true})
+	if err != nil {
+		env.T.Logf("Failed to list containers: %v", err)
+		return
+	}
+
+	for _, c := range containers {
+		// Check if container belongs to this instance
+		for _, name := range c.Names {
+			// Instance containers follow pattern: /holt-{component}-{instance} or /holt-{instance}-{agent}
+			if strings.Contains(name, env.InstanceName) {
+				containerName := strings.TrimPrefix(name, "/")
+				env.T.Logf("\n--- Logs for %s (state: %s) ---", containerName, c.State)
+
+				// Get container logs
+				logs, logErr := env.DockerClient.ContainerLogs(env.Ctx, containerName, container.LogsOptions{
+					ShowStdout: true,
+					ShowStderr: true,
+					Tail:       "100", // Last 100 lines
+				})
+				if logErr != nil {
+					env.T.Logf("Failed to get logs for %s: %v", containerName, logErr)
+					continue
+				}
+
+				logBytes, _ := io.ReadAll(logs)
+				logs.Close()
+
+				if len(logBytes) > 0 {
+					env.T.Logf("%s", string(logBytes))
+				} else {
+					env.T.Logf("(no logs)")
+				}
+				env.T.Logf("--- End logs for %s ---\n", containerName)
+			}
+		}
+	}
+
+	env.T.Log("=== End container logs ===")
 }

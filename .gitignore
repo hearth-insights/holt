@@ -15,6 +15,7 @@ Thumbs.db
 /holt
 /orchestrator
 /pup
+cmd/orchestrator/orchestrator
 *.exe
 *.exe~
 *.dll
@@ -53,7 +54,8 @@ $RECYCLE.BIN/
 *.seed
 *.pid.lock
 .gemini-clipboard*
-
+future*
+.test*
 # Coverage reports and test files
 *.cover
 coverage.out
@@ -74,6 +76,7 @@ temp/
 agents/*/bin/
 agents/*/target/
 agents/*/*.log
+*SUMMARY.md
 
 # Redis data files (if running locally)
 dump.rdb

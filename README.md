@@ -1,8 +1,18 @@
 # Holt
 
-**The Enterprise-Grade AI Orchestrator for Secure, Auditable, and Compliant Workflows**
+**Sovereign Orchestration for Regulated Industries**
 
-Holt enables organizations to safely automate complex software engineering tasks using AI agents—while maintaining complete control, security, and regulatory compliance.
+Holt is the open-source control plane for regulated AI. It enables organizations to orchestrate autonomous agents in high-compliance environments—from Financial Crime investigations (AML/KYC) to Clinical Data Processing—while maintaining a **cryptographically-verifiable audit trail** of every decision.
+
+---
+
+## The Sovereign Guarantee
+
+Holt provides absolute operational sovereignty for organizations that cannot tolerate data egress or dependency on external infrastructure:
+
+*   **Air-Gap Ready**: Compiled as a static Go binary with zero external dependencies. Runs in isolated environments without internet access—bunkers, private clouds, or on-premises infrastructure.
+*   **Zero Egress**: Your data never leaves your security perimeter. No SaaS API calls. No cloud processing. All computation happens within your controlled environment.
+*   **No 'Phone Home'**: No licensing servers, telemetry, or hidden upstreams. Absolute code sovereignty with full source availability.
 
 ---
 
@@ -10,8 +20,17 @@ Holt enables organizations to safely automate complex software engineering tasks
 
 Holt is an opinionated, integrated platform, purpose-built for secure and regulated environments. Its architecture provides enterprise-grade capabilities out-of-the-box.
 
-*   **Absolute Data Sovereignty**: Holt is self-hosted by default, allowing for deployment in **air-gapped environments**. The entire platform runs on your infrastructure, ensuring no data, metadata, or logs ever leave your security perimeter.
-*   **Unparalleled Auditability**: The central "Blackboard" acts as a chronological, append-only ledger, providing a complete audit trail of every action taken by every agent.
+```mermaid
+graph LR
+    A[Input Data] -->|Claim| B(Redis Blackboard)
+    C[Agent Swarm] -->|Bid| B
+    B -->|Grant| C
+    C -->|Execution| D[Immutable Audit Log]
+    style D fill:#f96,stroke:#333,stroke-width:2px
+```
+
+*   **Absolute Data Sovereignty**: Self-hosted by default, allowing for deployment in **air-gapped environments**. The entire platform runs on your infrastructure, ensuring no data, metadata, or logs ever leave your security perimeter.
+*   **Cryptographically-Verifiable Audit Trail**: The central "Blackboard" acts as a chronological, append-only ledger with temporal ordering guarantees, providing a complete audit trail of every action taken by every agent.
 
 ---
 
@@ -19,9 +38,9 @@ Holt is an opinionated, integrated platform, purpose-built for secure and regula
 
 Holt is architected to support the stringent security and compliance requirements of regulated industries. Its self-hosted nature, chronological audit trail, and declarative policies provide the foundation needed to build a compliant system.
 
-For a detailed guide on how Holt's features map to the technical controls of frameworks like **HIPAA, SOC 2, and ISO 27001**, please read our full compliance guide:
+For comprehensive regulatory assurance documentation—including controls mapping, audit defense theory, and enterprise architecture—see our compliance suite:
 
-**[➡️ Holt: A Guide to Compliance](./HOLT_COMPLIANCE_GUIDE.md)**
+**[➡️ Holt: Regulatory Assurance Suite](./docs/compliance/)**
 
 ---
 
@@ -250,13 +269,53 @@ The pup validates commit hashes exist before creating artefacts, ensuring integr
 
 ### Human-in-the-Loop
 
-Holt is designed for human oversight:
+Holt is designed for human oversight with first-class Question/Answer support (M4.1):
 
-- **Question artefacts**: Agents can ask humans for guidance (Phase 4)
-- **Review phase**: Humans or review agents can provide feedback before execution (Phase 3)
-- **Complete audit trail**: Every decision is traceable for compliance
-- **Manual intervention**: Humans can inspect state and intervene at any point
+- **Question artefacts**: Agents can ask for clarification when encountering ambiguous requirements. Questions trigger the M3.3 automated feedback loop, terminating the questioning agent's claim and assigning rework to the original author.
+- **Review phase**: Humans or review agents provide feedback before execution (M3.3)
+- **Complete audit trail**: Every question and answer is captured as immutable artefacts, creating a full compliance history
+- **Manual intervention**: Humans can inspect state and intervene at any point via CLI
+
+**Example Q&A Flow**:
+```bash
+# Agent encounters ambiguous requirement and produces Question artefact
+# Orchestrator emits HUMAN_INPUT_REQUIRED workflow event
+
+# Human checks for questions
+holt questions
+
+# Human provides clarified requirements
+holt answer abc-123 "Build REST API with JWT authentication"
+
+# Orchestrator creates new version of the questioned artefact with answer
+# New claim is created for the clarified requirements
 ```
+
+Questions are treated as "late review feedback" - rather than pausing workflows, the original artefact is superseded with a clarified version, maintaining agent statelessness and preventing Q&A chain pollution.
+
+### Interactive Debugging
+
+Holt provides traditional breakpoint-based debugging for AI agent workflows (M4.2):
+
+- **Breakpoint control**: Pause workflows at specific conditions (artefact types, claim states, agent roles)
+- **Real-time inspection**: Examine artefacts, claims, and workflow state while paused
+- **Single-stepping**: Step through orchestrator events one at a time
+- **Manual intervention**: Approve/reject reviews, terminate problematic claims
+- **Safe sessions**: Ephemeral breakpoints, automatic cleanup, complete audit trail
+
+**Key Commands**:
+```bash
+holt debug                             # Attach interactive debugger
+holt debug -b artefact.type=CodeCommit # Set breakpoints on startup
+```
+
+**Safety Features**:
+- Session heartbeat with 30-second TTL - auto-resumes if debugger crashes
+- Single active session - prevents conflicting commands
+- Complete audit trail - all manual interventions logged as immutable artefacts
+- Context-aware commands - prevents mistakes (e.g., terminate only when paused on claim)
+
+See **[docs/DEBUGGING_GUIDE.md](./docs/DEBUGGING_GUIDE.md)** for comprehensive workflows and examples.
 
 ---
 
@@ -311,11 +370,20 @@ holt hoard
 holt logs git-agent
 holt logs orchestrator
 
-# View questions requiring human input (Phase 4)
-holt questions --wait
+# View questions requiring human input (M4.1)
+holt questions                         # Show oldest or wait for new question
+holt questions --watch                 # Continuously stream questions
+holt questions --since 1h              # List all unanswered from last hour
+holt questions --watch --exit-on-complete --output jsonl  # Stream until Terminal
 
-# Answer a question (Phase 4)
-holt answer <question-id> "Use JWT tokens with RS256"
+# Answer a question (M4.1)
+holt answer abc-123 "Use JWT tokens with RS256 signing"
+holt answer def-456 "Build REST API with null handling" --then-questions
+
+# Interactive debugger (M4.2)
+holt debug                             # Attach to running instance
+holt debug -b artefact.type=CodeCommit # Set breakpoints on startup
+holt debug --name prod                 # Target specific instance
 ```
 
 ---
@@ -402,12 +470,12 @@ Simple agent demonstrating basic stdin/stdout contract. Reads goal, logs it, out
 
 **Use case:** Learning, testing, proof-of-concept
 
-### Git Agent
+### Standard Agent Patterns
 **Location:** `agents/example-git-agent/`
 
-Creates files in workspace and commits them, returning `CodeCommit` artefacts.
+Demonstrates the deterministic file generation pattern using Git-tracked artefacts. The agent creates files in the workspace and commits them, returning `CodeCommit` artefacts with cryptographic hashes.
 
-**Use case:** Code generation, file creation, project scaffolding
+**Use case:** Pattern for deterministic file generation in regulated workflows (e.g., generating Suspicious Activity Reports (SARs), legal contracts, or compliance documentation where provenance tracking is critical)
 
 **Example workflow:**
 ```bash
@@ -421,10 +489,14 @@ holt up
 holt forage --goal "implementation.go"
 
 # Verify result
-git log --oneline  # Shows commit by agent
+git log --oneline  # Shows commit by agent with hash
 ls implementation.go  # File exists
-holt hoard  # Shows CodeCommit artefact
+holt hoard  # Shows CodeCommit artefact in audit trail
 ```
+
+**Regulated Industry Example:**
+
+**AML Investigation Agent**: A specialized pattern for Financial Crime compliance. The agent reads transaction logs from a secure workspace, cross-references against sanctions lists (OFAC, UN, EU), applies risk-scoring algorithms, and drafts a Suspicious Activity Report (SAR). Every data source consulted, every decision threshold applied, and every output generated is recorded as an immutable artefact—providing regulators with a complete audit trail from raw data to filed report.
 
 ---
 
@@ -506,7 +578,7 @@ Agents can use any tool that can be containerized - not just Python functions. T
 
 ## Roadmap
 
-Holt is being developed through a series of well-defined phases, from the initial "Heartbeat" to a fully "Kubernetes-Native" platform. For a detailed overview of the project's phased delivery plan and future direction, please see our comprehensive roadmap:
+Holt is being developed through a series of well-defined phases, from the initial "Heartbeat" to a fully developed platform. For a detailed overview of the project's phased delivery plan and future direction, please see our comprehensive roadmap:
 
 **[➡️ View the Full Project Roadmap](./ROADMAP.md)**
 
@@ -517,27 +589,32 @@ For a detailed look at long-term, enterprise-focused ideas like RBAC, Secrets Ma
 
 ## Documentation
 
-- **[Agent Development Guide](./docs/agent-development.md)** - Build custom agents
+- **[Holt Compliance Suite](./docs/compliance/)** - Comprehensive regulatory assurance documentation including:
+  - **Controls Mapping**: Maps Holt's technical controls to SOC 2, ISO 27001, and HIPAA requirements
+  - **Audit Defense Theory**: Articulates the forensic argument for Internal Audit, explaining how deterministic orchestration resolves the "Audit Paradox"
+  - **Enterprise Architecture**: Deep dive into air-gap capabilities, data sovereignty, and security boundaries
+  - Reference architecture designed to support EU AI Act (Article 14) and NYDFS Part 504 compliance requirements
+- **[System Specification](./design/holt-system-specification.md)** - Complete technical architecture documenting the immutable ledger design and orchestration state machine
+- **[Agent Development Guide](./docs/agent-development.md)** - Build custom agents for your compliance workflows
+- **[Project Context](./docs/PROJECT_CONTEXT.md)** - Philosophy, principles, and vision for regulated AI
 - **[Troubleshooting Guide](./docs/troubleshooting.md)** - Common issues & solutions
-- **[Project Context](./PROJECT_CONTEXT.md)** - Philosophy, principles, vision
-- **[System Specification](./design/holt-system-specification.md)** - Complete architecture
 - **[Feature Design Template](./design/holt-feature-design-template.md)** - Development process
 
 ---
 
 ## Contributing
 
-Holt uses a systematic, template-driven feature design process. Every feature must be designed using the standardized template before implementation.
+Holt uses a systematic, template-driven feature design process suitable for enterprise architects and compliance teams implementing regulated AI workflows. Every feature must be designed using the standardized template before implementation.
 
 **Process:**
 
 1. **Design**: Create feature document using `design/holt-feature-design-template.md`
-2. **Review**: Iterate on design with human review
+2. **Review**: Iterate on design with human review (including compliance considerations)
 3. **Implement**: Build feature according to approved design
 4. **Test**: Comprehensive unit, integration, and E2E tests
-5. **Validate**: Verify against success criteria and Definition of Done
+5. **Validate**: Verify against success criteria, Definition of Done, and regulatory requirements
 
-See `DEVELOPMENT_PROCESS.md` for details.
+See `docs/DEVELOPMENT_PROCESS.md` for details. For regulated industry implementations, consult the Compliance Guide before beginning development.
 
 ---
 
@@ -557,8 +634,8 @@ MIT License - See [LICENSE](./LICENSE) for details.
 
 ## Acknowledgments
 
-Built by Cam McAllister as an enterprise-grade AI orchestration platform with auditability and compliance as first-class features.
+Built by Cam McAllister as a sovereign AI orchestration platform for regulated industries, with auditability and compliance as foundational principles—not afterthoughts.
 
 ---
 
-**Ready to build AI workflows with full audit trails? Start with the [Quick Start](#quick-start) above.**
+**Ready to deploy compliant AI workflows in your regulated environment? Start with the [Quick Start](#quick-start) above.**

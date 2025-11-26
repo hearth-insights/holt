@@ -26,6 +26,9 @@ type Artefact struct {
 	SourceArtefacts []string       `json:"source_artefacts"` // Array of artefact UUIDs this was derived from
 	ProducedByRole  string         `json:"produced_by_role"` // Agent's role from holt.yml or "user"
 	CreatedAtMs     int64          `json:"created_at_ms"`    // M3.9: Unix timestamp in milliseconds when artefact was created
+
+	// M4.3: Context caching - glob patterns for which agent roles should receive this Knowledge
+	ContextForRoles []string `json:"context_for_roles,omitempty"` // Only used for Knowledge artefacts
 }
 
 // StructuralType defines the role an artefact plays in the orchestration flow.
@@ -50,6 +53,9 @@ const (
 
 	// StructuralTypeTerminal represents workflow completion, stopping all processing
 	StructuralTypeTerminal StructuralType = "Terminal"
+
+	// StructuralTypeKnowledge represents cached context data ignored by orchestrator (M4.3)
+	StructuralTypeKnowledge StructuralType = "Knowledge"
 )
 
 // Claim represents the orchestrator's decision about an artefact.
@@ -191,7 +197,8 @@ func (a *Artefact) Validate() error {
 func (st StructuralType) Validate() error {
 	switch st {
 	case StructuralTypeStandard, StructuralTypeReview, StructuralTypeQuestion,
-		StructuralTypeAnswer, StructuralTypeFailure, StructuralTypeTerminal:
+		StructuralTypeAnswer, StructuralTypeFailure, StructuralTypeTerminal,
+		StructuralTypeKnowledge:
 		return nil
 	default:
 		return fmt.Errorf("unknown structural type: %q", st)

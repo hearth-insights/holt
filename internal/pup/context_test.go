@@ -149,3 +149,292 @@ func TestSortContextChronologically_SingleArtefact(t *testing.T) {
 		t.Errorf("Expected 'only' artefact, got %s", sorted[0].LogicalID)
 	}
 }
+
+// M4.3: Knowledge filtering and role matching tests
+
+// TestMatchesRole verifies glob pattern matching for role filtering
+func TestMatchesRole(t *testing.T) {
+	tests := []struct {
+		name            string
+		agentRole       string
+		contextForRoles []string
+		expected        bool
+	}{
+		{
+			name:            "wildcard matches all",
+			agentRole:       "any-agent",
+			contextForRoles: []string{"*"},
+			expected:        true,
+		},
+		{
+			name:            "empty array matches all",
+			agentRole:       "any-agent",
+			contextForRoles: []string{},
+			expected:        true,
+		},
+		{
+			name:            "exact match",
+			agentRole:       "coder-agent",
+			contextForRoles: []string{"coder-agent"},
+			expected:        true,
+		},
+		{
+			name:            "glob prefix match",
+			agentRole:       "coder-backend",
+			contextForRoles: []string{"coder-*"},
+			expected:        true,
+		},
+		{
+			name:            "glob suffix match",
+			agentRole:       "backend-coder",
+			contextForRoles: []string{"*-coder"},
+			expected:        true,
+		},
+		{
+			name:            "no match",
+			agentRole:       "reviewer",
+			contextForRoles: []string{"coder-*", "tester-*"},
+			expected:        false,
+		},
+		{
+			name:            "multiple patterns first matches",
+			agentRole:       "coder-go",
+			contextForRoles: []string{"coder-*", "reviewer-*"},
+			expected:        true,
+		},
+		{
+			name:            "multiple patterns second matches",
+			agentRole:       "reviewer-security",
+			contextForRoles: []string{"coder-*", "reviewer-*"},
+			expected:        true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			engine := &Engine{
+				config: &Config{AgentName: tt.agentRole},
+			}
+			result := engine.matchesRole(tt.contextForRoles)
+			if result != tt.expected {
+				t.Errorf("matchesRole(%v) = %v, expected %v for role %s",
+					tt.contextForRoles, result, tt.expected, tt.agentRole)
+			}
+		})
+	}
+}
+
+// TestFilterAndMergeKnowledge verifies role filtering and latest-version-wins strategy
+func TestFilterAndMergeKnowledge(t *testing.T) {
+	t.Run("filters by role", func(t *testing.T) {
+		engine := &Engine{
+			config: &Config{AgentName: "coder-backend"},
+		}
+
+		allKnowledge := []*blackboard.Artefact{
+			{
+				Type:            "go-sdk-docs",
+				Version:         1,
+				ContextForRoles: []string{"coder-*"},
+				Payload:         "Go SDK documentation",
+			},
+			{
+				Type:            "review-guidelines",
+				Version:         1,
+				ContextForRoles: []string{"reviewer-*"},
+				Payload:         "Review guidelines",
+			},
+			{
+				Type:            "global-config",
+				Version:         1,
+				ContextForRoles: []string{"*"},
+				Payload:         "Global config",
+			},
+		}
+
+		filtered, err := engine.filterAndMergeKnowledge(allKnowledge)
+		if err != nil {
+			t.Fatalf("filterAndMergeKnowledge failed: %v", err)
+		}
+
+		// Should match: go-sdk-docs (coder-*) and global-config (*)
+		// Should NOT match: review-guidelines (reviewer-*)
+		if len(filtered) != 2 {
+			t.Errorf("Expected 2 filtered knowledge, got %d", len(filtered))
+		}
+
+		found := make(map[string]bool)
+		for _, k := range filtered {
+			found[k.Type] = true
+		}
+
+		if !found["go-sdk-docs"] {
+			t.Error("Expected go-sdk-docs to be included")
+		}
+		if !found["global-config"] {
+			t.Error("Expected global-config to be included")
+		}
+		if found["review-guidelines"] {
+			t.Error("review-guidelines should have been filtered out")
+		}
+	})
+
+	t.Run("latest version wins", func(t *testing.T) {
+		engine := &Engine{
+			config: &Config{AgentName: "coder"},
+		}
+
+		allKnowledge := []*blackboard.Artefact{
+			{
+				Type:            "api-docs",
+				Version:         1,
+				ContextForRoles: []string{"*"},
+				Payload:         "Version 1",
+			},
+			{
+				Type:            "api-docs",
+				Version:         3,
+				ContextForRoles: []string{"*"},
+				Payload:         "Version 3",
+			},
+			{
+				Type:            "api-docs",
+				Version:         2,
+				ContextForRoles: []string{"*"},
+				Payload:         "Version 2",
+			},
+		}
+
+		filtered, err := engine.filterAndMergeKnowledge(allKnowledge)
+		if err != nil {
+			t.Fatalf("filterAndMergeKnowledge failed: %v", err)
+		}
+
+		// Should only have one result (latest version)
+		if len(filtered) != 1 {
+			t.Errorf("Expected 1 merged knowledge, got %d", len(filtered))
+		}
+
+		if filtered[0].Version != 3 {
+			t.Errorf("Expected version 3 (latest), got version %d", filtered[0].Version)
+		}
+
+		if filtered[0].Payload != "Version 3" {
+			t.Errorf("Expected 'Version 3' payload, got %s", filtered[0].Payload)
+		}
+	})
+
+	t.Run("multiple knowledge with different names", func(t *testing.T) {
+		engine := &Engine{
+			config: &Config{AgentName: "backend-coder"},
+		}
+
+		allKnowledge := []*blackboard.Artefact{
+			{
+				Type:            "api-docs",
+				Version:         2,
+				ContextForRoles: []string{"*-coder"},
+				Payload:         "API v2",
+			},
+			{
+				Type:            "api-docs",
+				Version:         1,
+				ContextForRoles: []string{"*-coder"},
+				Payload:         "API v1",
+			},
+			{
+				Type:            "db-schema",
+				Version:         3,
+				ContextForRoles: []string{"backend-*"},
+				Payload:         "Schema v3",
+			},
+			{
+				Type:            "db-schema",
+				Version:         1,
+				ContextForRoles: []string{"backend-*"},
+				Payload:         "Schema v1",
+			},
+		}
+
+		filtered, err := engine.filterAndMergeKnowledge(allKnowledge)
+		if err != nil {
+			t.Fatalf("filterAndMergeKnowledge failed: %v", err)
+		}
+
+		// Should have 2 results (latest of each name)
+		if len(filtered) != 2 {
+			t.Errorf("Expected 2 merged knowledge, got %d", len(filtered))
+		}
+
+		byName := make(map[string]*blackboard.Artefact)
+		for _, k := range filtered {
+			byName[k.Type] = k
+		}
+
+		if byName["api-docs"].Version != 2 {
+			t.Errorf("Expected api-docs version 2, got %d", byName["api-docs"].Version)
+		}
+
+		if byName["db-schema"].Version != 3 {
+			t.Errorf("Expected db-schema version 3, got %d", byName["db-schema"].Version)
+		}
+	})
+
+	t.Run("no matches returns empty", func(t *testing.T) {
+		engine := &Engine{
+			config: &Config{AgentName: "tester"},
+		}
+
+		allKnowledge := []*blackboard.Artefact{
+			{
+				Type:            "coder-only",
+				Version:         1,
+				ContextForRoles: []string{"coder-*"},
+			},
+		}
+
+		filtered, err := engine.filterAndMergeKnowledge(allKnowledge)
+		if err != nil {
+			t.Fatalf("filterAndMergeKnowledge failed: %v", err)
+		}
+
+		if len(filtered) != 0 {
+			t.Errorf("Expected 0 filtered knowledge, got %d", len(filtered))
+		}
+	})
+}
+
+// TestFilterContextArtefacts_FiltersOutKnowledge verifies Knowledge artefacts are excluded from context chain
+func TestFilterContextArtefacts_FiltersOutKnowledge(t *testing.T) {
+	contextMap := map[string]*blackboard.Artefact{
+		"log-1": {
+			LogicalID:      "log-1",
+			Type:           "GoalDefined",
+			StructuralType: blackboard.StructuralTypeStandard,
+		},
+		"log-2": {
+			LogicalID:      "log-2",
+			Type:           "api-docs",
+			StructuralType: blackboard.StructuralTypeKnowledge,
+		},
+		"log-3": {
+			LogicalID:      "log-3",
+			Type:           "CodeCommit",
+			StructuralType: blackboard.StructuralTypeStandard,
+		},
+	}
+
+	filtered := filterContextArtefacts(contextMap)
+
+	// Should include only Standard artefacts (2), not Knowledge
+	if len(filtered) != 2 {
+		t.Errorf("Expected 2 filtered artefacts (excluding Knowledge), got %d", len(filtered))
+	}
+
+	// Verify Knowledge was filtered out
+	for _, art := range filtered {
+		if art.StructuralType == blackboard.StructuralTypeKnowledge {
+			t.Errorf("Knowledge artefact should have been filtered out")
+		}
+	}
+}

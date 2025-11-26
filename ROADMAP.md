@@ -28,10 +28,6 @@ Holt is being developed through a series of well-defined phases, each delivering
 *Goal: Enable the orchestration of complex, non-linear workflows (DAGs).*
 - **Features:** Support for "fan-in" synchronization patterns and conditional workflow pathing based on agent bidding logic.
 
-### Phase 6: "Kubernetes-Native" 📋
-*Goal: Evolve Holt into a first-class, native Kubernetes platform.*
-- **Features:** A **Holt Operator** for managing instances via Custom Resource Definitions (CRDs), native integration with Kubernetes networking and storage, and **Prometheus metrics endpoints**.
-
 ---
 
 ## Future Enhancements

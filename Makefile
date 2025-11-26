@@ -11,6 +11,11 @@ BUILD_DATE := $(shell date -u '+%Y-%m-%d_%H:%M:%S')
 # Go build flags
 LDFLAGS := -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(BUILD_DATE)"
 
+# Test flags (can be overridden)
+TEST_FLAGS ?= -v
+
+# Default target
+
 # Default target
 help:
 	@echo "Holt Development Makefile"
@@ -29,12 +34,13 @@ help:
 	@echo "  build-linux-amd64   - Build for Linux AMD64"
 	@echo ""
 	@echo "Testing:"
-	@echo "  test                - Run all unit tests"
+	@echo "  test                - Run all unit tests"	
 	@echo "  test-verbose        - Run all unit tests with verbose output"
 	@echo "  test-pup            - Run pup unit and integration tests"
 	@echo "  test-integration    - Run orchestrator integration tests (requires Docker)"
 	@echo "  test-e2e            - Run Phase 2 E2E test suite (requires Docker)"
 	@echo "  test-all            - Run ALL tests (unit + pup + integration + e2e)"
+	@echo "  test-failed         - Run all tests, print out only the failures"
 	@echo "  coverage            - Run tests and show coverage report"
 	@echo "  coverage-html       - Generate HTML coverage report"
 	@echo "  lint                - Run go vet and staticcheck"
@@ -48,14 +54,14 @@ help:
 	@echo "  clean               - Remove build artifacts"
 
 # Run all tests (depends on binaries being built)
-test: build build-pup
+test:
 	@echo "Running tests..."
-	@$(GO) test ./...
+	@$(GO) test $(TEST_FLAGS) ./...
 
 # Run all tests with verbose output
-test-verbose: build build-pup
+test-verbose:
 	@echo "Running tests (verbose)..."
-	@$(GO) test -v ./...
+	@$(MAKE) test TEST_FLAGS="-v"
 
 # Run tests with coverage
 coverage: build build-pup
@@ -89,9 +95,9 @@ lint:
 	fi
 
 # Run orchestrator integration tests (requires Docker)
-test-integration: build-orchestrator
+test-integration:
 	@echo "Running orchestrator integration tests..."
-	@$(GO) test -v -tags=integration ./cmd/orchestrator
+	@$(GO) test $(TEST_FLAGS) -tags=integration ./cmd/orchestrator
 
 # Run Phase 2 E2E test suite (requires Docker)
 # M3.4: Now depends on docker-orchestrator to ensure latest orchestrator image is available
@@ -101,7 +107,7 @@ test-e2e: build build-pup docker-orchestrator
 	@docker build -q -t example-git-agent:latest -f agents/example-git-agent/Dockerfile . > /dev/null
 	@docker build -q -t example-agent:latest -f agents/example-agent/Dockerfile . > /dev/null
 	@echo "Running E2E tests..."
-	@$(GO) test -v -timeout 15m -tags=integration -run="TestE2E|TestPerformance" ./cmd/holt/commands
+	@$(GO) test $(TEST_FLAGS) -timeout 15m -tags=integration -run="TestE2E|TestPerformance" ./cmd/holt/commands
 	@echo "✓ All E2E tests passed"
 
 # Run all tests (unit + pup + integration + e2e)
@@ -115,6 +121,14 @@ test-all: test test-pup test-integration test-e2e
 	@echo "  Integration tests: ✓"
 	@echo "  E2E tests:         ✓"
 	@echo ""
+
+# Run all tests and show only the failures
+test-failed:
+	@echo "Running all tests and filtering for failures..."
+	@# This is a simple but robust approach using grep. It may show some extra
+	@# context from previous tests, but it will not swallow failure messages.
+	@# It looks for lines starting with "--- FAIL:" (for test failures) or "FAIL	" (for package/build failures).
+	@$(MAKE) test-all 2>&1 | grep -E -A 20 -B 20 "^--- FAIL:|^FAIL	" || true
 
 # Build the holt binary
 build:
@@ -166,16 +180,16 @@ build-pup:
 	@echo "✓ Built: bin/holt-pup"
 
 # Run pup unit and integration tests
-test-pup: build-pup
+test-pup:
 	@echo "Running pup tests..."
-	@$(GO) test -v -race ./internal/pup
-	@$(GO) test -v -timeout 60s ./cmd/pup
+	@$(GO) test $(TEST_FLAGS) -race ./internal/pup
+	@$(GO) test $(TEST_FLAGS) -timeout 60s ./cmd/pup
 	@echo "✓ All pup tests passed"
 
 # Build orchestrator Docker image
 docker-orchestrator:
 	@echo "Building orchestrator Docker image..."
-	@docker build -f Dockerfile.orchestrator -t holt-orchestrator:latest .
+	@docker build -f cmd/orchestrator/Dockerfile -t holt-orchestrator:latest .
 	@echo "✓ Built: holt-orchestrator:latest"
 
 # Build everything (CLI + orchestrator Docker image + pup)

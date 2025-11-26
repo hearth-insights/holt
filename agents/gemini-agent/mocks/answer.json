@@ -1,0 +1,6 @@
+{
+  "artefact_type": "Answer",
+  "artefact_payload": "Based on the Holt architecture documentation, you should use the M3.3 automated feedback loop for iterative refinement. The max_review_iterations configuration in holt.yml controls how many rework cycles are allowed before the workflow terminates with a Failure artefact. The default is 3 iterations, which balances quality improvement with preventing infinite loops.",
+  "summary": "ArchitectGemini: Answered technical question about rework limits",
+  "structural_type": "Answer"
+}

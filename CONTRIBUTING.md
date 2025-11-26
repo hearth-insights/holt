@@ -10,7 +10,7 @@ This guide will walk you through the process, which is a little different from m
 
 Holt is a platform for orchestrating AI agents. It is also a project that is **built using AI agents**. 
 
-All of our documentation and much of our core code has been developed through a process of close human-AI collaboration. Our **[DEVELOPMENT_PROCESS.md](./DEVELOPMENT_PROCESS.md)** outlines this lifecycle, and the **[AI_AGENT_GUIDE.md](./AI_AGENT_GUIDE.md)** shows how we expect AI agents to navigate the codebase. We "dogfood" our own philosophy.
+All of our documentation and much of our core code has been developed through a process of close human-AI collaboration. Our **[DEVELOPMENT_PROCESS.md](./docs/DEVELOPMENT_PROCESS.md)** outlines this lifecycle, and the **[AI_AGENT_GUIDE.md](./AI_AGENT_GUIDE.md)** shows how we expect AI agents to navigate the codebase. We "dogfood" our own philosophy.
 
 We encourage you to embrace this approach. Whether you are a seasoned Go developer or a student looking to get started, you can contribute to Holt. Use your favorite AI assistant (like Gemini, Claude, or ChatGPT) to help you!
 

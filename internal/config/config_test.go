@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -856,4 +857,83 @@ agents:
 	reviewer := config.Agents["reviewer"]
 	assert.Equal(t, "", reviewer.Mode)
 	assert.Nil(t, reviewer.Worker)
+}
+
+// M4.5: Test ExtractEnvVarNames function
+func TestExtractEnvVarNames(t *testing.T) {
+	tests := []struct {
+		name     string
+		yaml     string
+		expected []string
+	}{
+		{
+			name: "single env var",
+			yaml: `version: "1.0"
+agents:
+  test-agent:
+    image: "test:latest"
+    environment:
+      - API_KEY=${MY_API_KEY}`,
+			expected: []string{"MY_API_KEY"},
+		},
+		{
+			name: "multiple env vars",
+			yaml: `version: "1.0"
+agents:
+  test-agent:
+    image: "test:latest"
+    environment:
+      - API_KEY=${OPENAI_API_KEY}
+      - SECRET=${MY_SECRET}
+      - TOKEN=${AUTH_TOKEN}`,
+			expected: []string{"OPENAI_API_KEY", "MY_SECRET", "AUTH_TOKEN"},
+		},
+		{
+			name: "duplicate env vars",
+			yaml: `version: "1.0"
+agents:
+  agent1:
+    image: "test:latest"
+    environment:
+      - KEY=${SHARED_KEY}
+  agent2:
+    image: "test:latest"
+    environment:
+      - KEY=${SHARED_KEY}`,
+			expected: []string{"SHARED_KEY"}, // Should deduplicate
+		},
+		{
+			name: "no env vars",
+			yaml: `version: "1.0"
+agents:
+  test-agent:
+    image: "test:latest"
+    command: ["./run.sh"]`,
+			expected: []string{},
+		},
+		{
+			name: "env vars with underscores and numbers",
+			yaml: `version: "1.0"
+agents:
+  test-agent:
+    environment:
+      - VAR_1=${MY_VAR_123}
+      - VAR_2=${API_KEY_2}`,
+			expected: []string{"MY_VAR_123", "API_KEY_2"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ExtractEnvVarNames([]byte(tt.yaml))
+
+			// Sort both slices for comparison (map iteration order is non-deterministic)
+			sort.Strings(result)
+			expectedSorted := make([]string, len(tt.expected))
+			copy(expectedSorted, tt.expected)
+			sort.Strings(expectedSorted)
+
+			assert.Equal(t, expectedSorted, result)
+		})
+	}
 }

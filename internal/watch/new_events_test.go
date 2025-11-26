@@ -23,9 +23,10 @@ func TestNewWorkflowEvents(t *testing.T) {
 				Data: map[string]interface{}{
 					"reviewer_role":        "Validator",
 					"original_artefact_id": "def45678-1234-1234-1234-123456789012",
+					"review_artefact_id":   "abc12345-6789-1234-1234-123456789012",
 				},
 			},
-			expected: "✅ Review Approved: by=Validator for artefact def45678-1234-1234-1234-123456789012",
+			expected: "✅ Review Approved: by=Validator for artefact def45678 (review: abc12345)",
 		},
 		{
 			name: "review_rejected",
@@ -34,10 +35,11 @@ func TestNewWorkflowEvents(t *testing.T) {
 				Data: map[string]interface{}{
 					"reviewer_role":        "Validator",
 					"original_artefact_id": "def45678-1234-1234-1234-123456789012",
+					"review_artefact_id":   "abc12345-6789-1234-1234-123456789012",
 					"feedback":             "This needs improvement",
 				},
 			},
-			expected: "❌ Review Rejected: by=Validator for artefact def45678-1234-1234-1234-123456789012",
+			expected: "❌ Review Rejected: by=Validator for artefact def45678 (review: abc12345)",
 		},
 		{
 			name: "feedback_claim_created",
@@ -50,7 +52,7 @@ func TestNewWorkflowEvents(t *testing.T) {
 					"iteration":         2,
 				},
 			},
-			expected: "🔄 Rework Assigned: to=Writer for claim ghi78901-1234-1234-1234-123456789012 (iteration 2)",
+			expected: "🔄 Rework Assigned: to=Writer for claim ghi78901 (iteration 2)",
 		},
 		{
 			name: "artefact_reworked",
@@ -65,7 +67,7 @@ func TestNewWorkflowEvents(t *testing.T) {
 					"produced_by_role":    "Writer",
 				},
 			},
-			expected: "🔄 Artefact Reworked (v2): by=Writer, type=RecipeYAML, id=jkl34567-1234-1234-1234-123456789012",
+			expected: "🔄 Artefact Reworked (v2): by=Writer, type=RecipeYAML, id=jkl34567",
 		},
 		{
 			name: "artefact_reworked with iteration as float64 (JSON unmarshaling)",
@@ -80,7 +82,7 @@ func TestNewWorkflowEvents(t *testing.T) {
 					"produced_by_role":    "Writer",
 				},
 			},
-			expected: "🔄 Artefact Reworked (v3): by=Writer, type=RecipeYAML, id=jkl34567-1234-1234-1234-123456789012",
+			expected: "🔄 Artefact Reworked (v3): by=Writer, type=RecipeYAML, id=jkl34567",
 		},
 	}
 

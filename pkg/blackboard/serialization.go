@@ -13,7 +13,7 @@ import (
 // queryability (individual fields) and flexibility (complex structures).
 
 // ArtefactToHash converts an Artefact struct to a Redis hash format.
-// Array fields (source_artefacts) are JSON-encoded.
+// Array fields (source_artefacts, context_for_roles) are JSON-encoded.
 func ArtefactToHash(a *Artefact) (map[string]interface{}, error) {
 	// Encode source artefacts array as JSON
 	sourceArtefactsJSON, err := json.Marshal(a.SourceArtefacts)
@@ -21,16 +21,23 @@ func ArtefactToHash(a *Artefact) (map[string]interface{}, error) {
 		return nil, fmt.Errorf("failed to marshal source artefacts: %w", err)
 	}
 
+	// M4.3: Encode context_for_roles array as JSON (only for Knowledge artefacts)
+	contextForRolesJSON, err := json.Marshal(a.ContextForRoles)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal context_for_roles: %w", err)
+	}
+
 	hash := map[string]interface{}{
-		"id":               a.ID,
-		"logical_id":       a.LogicalID,
-		"version":          a.Version,
-		"structural_type":  string(a.StructuralType),
-		"type":             a.Type,
-		"payload":          a.Payload,
-		"source_artefacts": string(sourceArtefactsJSON),
-		"produced_by_role": a.ProducedByRole,
-		"created_at_ms":    a.CreatedAtMs, // M3.9
+		"id":                a.ID,
+		"logical_id":        a.LogicalID,
+		"version":           a.Version,
+		"structural_type":   string(a.StructuralType),
+		"type":              a.Type,
+		"payload":           a.Payload,
+		"source_artefacts":  string(sourceArtefactsJSON),
+		"produced_by_role":  a.ProducedByRole,
+		"created_at_ms":     a.CreatedAtMs,                   // M3.9
+		"context_for_roles": string(contextForRolesJSON), // M4.3
 	}
 
 	return hash, nil
@@ -58,6 +65,18 @@ func HashToArtefact(hash map[string]string) (*Artefact, error) {
 		sourceArtefacts = []string{}
 	}
 
+	// M4.3: Decode context_for_roles JSON array (only present for Knowledge artefacts)
+	var contextForRoles []string
+	if contextForRolesJSON := hash["context_for_roles"]; contextForRolesJSON != "" {
+		if err := json.Unmarshal([]byte(contextForRolesJSON), &contextForRoles); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal context_for_roles: %w", err)
+		}
+	}
+
+	if contextForRoles == nil {
+		contextForRoles = []string{}
+	}
+
 	// M3.9: Parse created_at_ms
 	createdAtMs, _ := strconv.ParseInt(hash["created_at_ms"], 10, 64)
 
@@ -70,7 +89,8 @@ func HashToArtefact(hash map[string]string) (*Artefact, error) {
 		Payload:         hash["payload"],
 		SourceArtefacts: sourceArtefacts,
 		ProducedByRole:  hash["produced_by_role"],
-		CreatedAtMs:     createdAtMs, // M3.9
+		CreatedAtMs:     createdAtMs,        // M3.9
+		ContextForRoles: contextForRoles, // M4.3
 	}
 
 	return artefact, nil
