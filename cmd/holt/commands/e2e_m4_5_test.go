@@ -141,6 +141,12 @@ services:
 		}
 	}
 
+	// Dump logs before assertion for debugging
+	if reviewArtefact == nil {
+		t.Log("Review artefact not found - dumping container logs for debugging")
+		env.DumpInstanceLogs()
+	}
+
 	require.NotNil(t, reviewArtefact, "Review artefact should have been created by HumanReviewer")
 	t.Logf("✓ Review artefact created: %s", reviewArtefact.ID)
 
@@ -224,7 +230,7 @@ agents:
     command: ["/app/run-tests.sh"]
     bidding_strategy: "review"
     workspace:
-      mode: ro
+      mode: rw
 services:
   redis:
     image: redis:7-alpine
@@ -314,6 +320,12 @@ services:
 		if reviewArtefact != nil {
 			break
 		}
+	}
+
+	// Dump logs before assertion for debugging
+	if reviewArtefact == nil {
+		t.Log("Review artefact not found - dumping container logs for debugging")
+		env.DumpInstanceLogs()
 	}
 
 	require.NotNil(t, reviewArtefact, "Review artefact should have been created by TestRunner")

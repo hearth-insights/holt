@@ -168,6 +168,21 @@ func SetupE2EEnvironment(t *testing.T, holtYML string) *E2EEnvironment {
 	exec.Command("git", "-C", tmpDir, "add", "holt.yml").Run()
 	exec.Command("git", "-C", tmpDir, "commit", "-m", "Add holt.yml").Run()
 
+	// Create a simple Makefile for test-runner agent tests
+	// This allows test-runner to successfully run `make test-failed`
+	makefileContent := `# Test Makefile for E2E tests
+
+.PHONY: test-failed
+test-failed:
+	@echo "Running tests..."
+	@echo "All tests passed!"
+	@exit 0
+`
+	makefilePath := filepath.Join(tmpDir, "Makefile")
+	require.NoError(t, os.WriteFile(makefilePath, []byte(makefileContent), 0644), "Failed to write Makefile")
+	exec.Command("git", "-C", tmpDir, "add", "Makefile").Run()
+	exec.Command("git", "-C", tmpDir, "commit", "-m", "Add Makefile for tests").Run()
+
 	// Fix permissions for Docker container access (critical for CI environments)
 	// Containers may run as different users, so we need world-readable/writable files
 	// a+rwX means: add read+write for all users, and execute for directories
@@ -777,4 +792,55 @@ func WaitForArtefactWithContext(ctx context.Context, client *blackboard.Client, 
 	}
 
 	return nil, fmt.Errorf("artefact of type '%s' with relatedArtefactID='%s' in thread_context not found within %v", artefactType, relatedArtefactID, timeout)
+}
+
+// DumpInstanceLogs retrieves and logs all container logs for an instance.
+// This is useful for debugging test failures - call it before cleanup.
+func (env *E2EEnvironment) DumpInstanceLogs() {
+	if env.DockerClient == nil {
+		return
+	}
+
+	env.T.Log("=== Dumping container logs for debugging ===")
+
+	// List all containers for this instance
+	containers, err := env.DockerClient.ContainerList(env.Ctx, container.ListOptions{All: true})
+	if err != nil {
+		env.T.Logf("Failed to list containers: %v", err)
+		return
+	}
+
+	for _, c := range containers {
+		// Check if container belongs to this instance
+		for _, name := range c.Names {
+			// Instance containers follow pattern: /holt-{component}-{instance} or /holt-{instance}-{agent}
+			if strings.Contains(name, env.InstanceName) {
+				containerName := strings.TrimPrefix(name, "/")
+				env.T.Logf("\n--- Logs for %s (state: %s) ---", containerName, c.State)
+
+				// Get container logs
+				logs, logErr := env.DockerClient.ContainerLogs(env.Ctx, containerName, container.LogsOptions{
+					ShowStdout: true,
+					ShowStderr: true,
+					Tail:       "100", // Last 100 lines
+				})
+				if logErr != nil {
+					env.T.Logf("Failed to get logs for %s: %v", containerName, logErr)
+					continue
+				}
+
+				logBytes, _ := io.ReadAll(logs)
+				logs.Close()
+
+				if len(logBytes) > 0 {
+					env.T.Logf("%s", string(logBytes))
+				} else {
+					env.T.Logf("(no logs)")
+				}
+				env.T.Logf("--- End logs for %s ---\n", containerName)
+			}
+		}
+	}
+
+	env.T.Log("=== End container logs ===")
 }
