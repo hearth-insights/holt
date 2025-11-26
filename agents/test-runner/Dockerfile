@@ -24,6 +24,10 @@ FROM alpine:latest
 # Install required tools: git (for checkout), make (for tests), jq (for JSON parsing)
 RUN apk --no-cache add git make jq ca-certificates
 
+# Configure git to trust /workspace directory (fixes "dubious ownership" errors in CI)
+# This is required when the workspace is owned by a different user than the container user
+RUN git config --global --add safe.directory /workspace
+
 WORKDIR /app
 
 # Copy pup binary from builder
