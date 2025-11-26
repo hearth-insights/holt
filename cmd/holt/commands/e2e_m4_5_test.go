@@ -31,6 +31,7 @@ func TestE2E_M4_5_HumanReviewer(t *testing.T) {
 
 	t.Log("Building human-reviewer Docker image...")
 	buildCmd := exec.Command("docker", "build",
+		"--no-cache", // Force rebuild to ensure latest Dockerfile changes are used
 		"-t", "holt/human-reviewer:test",
 		"-f", "agents/human-reviewer/Dockerfile",
 		".")
@@ -209,6 +210,7 @@ func TestE2E_M4_5_TestRunner(t *testing.T) {
 	// Step 0: Build test-runner Docker image
 	t.Log("Building test-runner Docker image...")
 	buildCmd := exec.Command("docker", "build",
+		"--no-cache", // Force rebuild to ensure latest Dockerfile changes are used
 		"-t", "holt/test-runner:test",
 		"-f", "agents/test-runner/Dockerfile",
 		".")
