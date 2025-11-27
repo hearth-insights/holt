@@ -28,10 +28,10 @@ func TestE2E_M4_6_VerifyCommand(t *testing.T) {
 	// Setup: Create test environment with minimal config
 	holtYML := `version: "1.0"
 agents:
-  test-agent:
+  TestAgent:
     role: "Test Agent"
-    image: "test:latest"
-    command: ["/bin/sh", "-c", "echo test"]
+    image: "example-agent:latest"
+    command: ["/app/run.sh"]
     bidding_strategy: "exclusive"
 services:
   redis:
@@ -45,6 +45,15 @@ services:
 		downInstanceName = env.InstanceName
 		runDown(downCmd, []string{})
 	}()
+
+	// Start Holt instance
+	upCmd := &cobra.Command{}
+	upInstanceName = env.InstanceName
+	err := runUp(upCmd, []string{})
+	require.NoError(t, err, "holt up failed")
+
+	// Wait for orchestrator to be ready
+	env.WaitForContainer("orchestrator")
 
 	// Initialize blackboard client
 	env.InitializeBlackboardClient()
@@ -236,10 +245,10 @@ func TestE2E_M4_6_SecurityAlerts(t *testing.T) {
 	// Setup
 	holtYML := `version: "1.0"
 agents:
-  test-agent:
+  TestAgent:
     role: "Test Agent"
-    image: "test:latest"
-    command: ["/bin/sh", "-c", "echo test"]
+    image: "example-agent:latest"
+    command: ["/app/run.sh"]
     bidding_strategy: "exclusive"
 services:
   redis:
@@ -253,6 +262,15 @@ services:
 		downInstanceName = env.InstanceName
 		runDown(downCmd, []string{})
 	}()
+
+	// Start Holt instance
+	upCmd := &cobra.Command{}
+	upInstanceName = env.InstanceName
+	err := runUp(upCmd, []string{})
+	require.NoError(t, err, "holt up failed")
+
+	// Wait for orchestrator to be ready
+	env.WaitForContainer("orchestrator")
 
 	// Initialize blackboard client
 	env.InitializeBlackboardClient()

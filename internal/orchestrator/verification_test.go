@@ -104,7 +104,7 @@ func TestVerifyArtefact_OrphanBlock(t *testing.T) {
 	locked, alert, err := client.IsInLockdown(ctx)
 	require.NoError(t, err)
 	assert.True(t, locked, "System should be in lockdown after orphan block")
-	assert.Equal(t, blackboard.SecurityAlertOrphanBlock, alert.Type, "Alert type should be orphan_block")
+	assert.Equal(t, blackboard.AlertTypeOrphanBlock, alert.Type, "Alert type should be orphan_block")
 	assert.Equal(t, "global_lockdown", alert.OrchestratorAction)
 }
 
@@ -221,7 +221,7 @@ func TestVerifyArtefact_HashMismatch(t *testing.T) {
 	locked, alert, err := client.IsInLockdown(ctx)
 	require.NoError(t, err)
 	assert.True(t, locked, "System should be in lockdown after hash mismatch")
-	assert.Equal(t, blackboard.SecurityAlertHashMismatch, alert.Type, "Alert type should be hash_mismatch")
+	assert.Equal(t, blackboard.AlertTypeHashMismatch, alert.Type, "Alert type should be hash_mismatch")
 	assert.Equal(t, "global_lockdown", alert.OrchestratorAction)
 }
 
@@ -301,7 +301,7 @@ func TestLockdownCheck_EventLoop(t *testing.T) {
 
 	// Trigger lockdown manually
 	alert := &blackboard.SecurityAlert{
-		Type:               blackboard.SecurityAlertHashMismatch,
+		Type:               blackboard.AlertTypeHashMismatch,
 		TimestampMs:        time.Now().UnixMilli(),
 		ArtefactIDClaimed:  "test-artefact-123",
 		HashExpected:       "expected-hash",
@@ -317,7 +317,7 @@ func TestLockdownCheck_EventLoop(t *testing.T) {
 	locked, retrievedAlert, err := client.IsInLockdown(ctx)
 	require.NoError(t, err)
 	assert.True(t, locked)
-	assert.Equal(t, blackboard.SecurityAlertHashMismatch, retrievedAlert.Type)
+	assert.Equal(t, blackboard.AlertTypeHashMismatch, retrievedAlert.Type)
 
 	// Clear lockdown
 	err = client.ClearLockdown(ctx, "Test completed", "test-operator")

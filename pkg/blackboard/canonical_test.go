@@ -241,3 +241,36 @@ func createTestArtefact() *VerifiableArtefact {
 		},
 	}
 }
+
+// BenchmarkHashComputation_1KB benchmarks hash computation for 1KB payload.
+// Target: <1ms per operation (informational only, not enforced).
+func BenchmarkHashComputation_1KB(b *testing.B) {
+	artefact := createTestArtefact()
+	// Create 1KB payload (1,024 bytes)
+	artefact.Payload.Content = strings.Repeat("a", 1024)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := ComputeArtefactHash(artefact)
+		if err != nil {
+			b.Fatalf("hash computation failed: %v", err)
+		}
+	}
+}
+
+// BenchmarkHashComputation_1MB benchmarks hash computation for 1MB payload.
+// Target: <5ms per operation (informational only, not enforced).
+// This represents the maximum allowed payload size for V2 artefacts.
+func BenchmarkHashComputation_1MB(b *testing.B) {
+	artefact := createTestArtefact()
+	// Create 1MB payload (1,048,576 bytes - the hard limit)
+	artefact.Payload.Content = strings.Repeat("a", 1024*1024)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := ComputeArtefactHash(artefact)
+		if err != nil {
+			b.Fatalf("hash computation failed: %v", err)
+		}
+	}
+}
