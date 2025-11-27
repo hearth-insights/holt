@@ -6,18 +6,53 @@
 
 ## **Core Data Structures**
 
-### **Artefact (Redis Hash)**
+### **Artefact Versions**
+
+Holt supports two artefact formats:
+
+#### **V1 Artefact (UUID-based, legacy)**
 ```
-id: UUID
+id: UUID (36 characters)
 logical_id: UUID (groups versions)
 version: int
-structural_type: Standard|Review|Question|Answer|Failure|Terminal
+structural_type: Standard|Review|Question|Answer|Failure|Terminal|Knowledge
 type: user-defined string (e.g., "CodeCommit", "DesignSpec")
 payload: string (git hash, JSON, text)
 source_artefacts: JSON array of UUIDs
 produced_by_role: string (agent key from holt.yml, which IS the role, or 'user')
 created_at_ms: int64 (Unix milliseconds) # M3.9
+context_for_roles: JSON array of role globs # M4.3: For Knowledge artefacts
 ```
+
+#### **V2 VerifiableArtefact (Hash-based, M4.6+)**
+
+Content-addressable artefacts identified by SHA-256 hash:
+
+```json
+{
+  "id": "a3f2b9c4e8d6f1a7b5c3e9d2f4a8b6c1e7d3f9a2b8c4e6d1f7a3b9c5e2d8f4a1",
+  "header": {
+    "parent_hashes": ["b8c4e6d1f7a3..."],  // Array of parent SHA-256 hashes
+    "logical_thread_id": "550e8400-e29b-41d4-a716-446655440000",  // Groups versions
+    "version": 2,
+    "created_at_ms": 1704067200000,  // CRITICAL: Part of hash computation
+    "produced_by_role": "go-coder-agent",
+    "structural_type": "Standard",
+    "type": "CodeCommit",
+    "context_for_roles": []  // Optional, omitted if empty
+  },
+  "payload": {
+    "content": "e3b0c442..."  // Max 1MB (1,048,576 bytes)
+  }
+}
+```
+
+**Key Differences**:
+- **ID Format**: 64-char hex hash (SHA-256) vs 36-char UUID
+- **Parent References**: `parent_hashes` (array of hashes) vs `source_artefacts` (array of UUIDs)
+- **Hash Computation**: ID = SHA-256(RFC 8785 canonical JSON of header + payload)
+- **Payload Limit**: Hard 1MB limit for V2 (unlimited for V1)
+- **Integrity**: V2 provides cryptographic tamper-evidence
 
 ### **Claim (Redis Hash)**
 ```
@@ -44,24 +79,43 @@ A Redis Hash (`holt:{instance_name}:claim:{uuid}:bids`) where each key-value pai
 holt:instance_counter                          # Atomic counter for instance naming
 holt:instances                                 # HASH of active instance metadata
 
-# Instance-specific keys
-holt:{instance_name}:artefact:{uuid}           # Artefact data
+# Instance-specific keys - Artefacts
+holt:{instance_name}:artefact:{uuid}           # V1 Artefact data (UUID-based)
+holt:{instance_name}:artefact:{hash}           # V2 Artefact data (SHA-256 hash-based, M4.6)
+
+# Instance-specific keys - Claims & Bids
 holt:{instance_name}:claim:{uuid}              # Claim data
 holt:{instance_name}:claim:{uuid}:bids         # Bid data
+
+# Instance-specific keys - Versioning & Management
 holt:{instance_name}:thread:{logical_id}       # Version tracking (ZSET)
 holt:{instance_name}:lock                      # Instance lock (TTL-based, heartbeat)
 holt:{instance_name}:agent_images              # HASH of role -> image_id mapping (M3.9)
 holt:{instance_name}:grant_queue:{role}        # ZSET for paused grants (M3.5)
+
+# Instance-specific keys - Security (M4.6)
+holt:{instance_name}:security:alerts:log       # Security alert audit trail (LIST, LPUSH newest first)
+holt:{instance_name}:security:lockdown         # Global lockdown circuit breaker (STRING)
 ```
+
+**V2 Artefact ID Format**:
+- V1: 36 characters (e.g., `550e8400-e29b-41d4-a716-446655440000`)
+- V2: 64 characters (e.g., `a3f2b9c4e8d6f1a7b5c3e9d2f4a8b6c1e7d3f9a2b8c4e6d1f7a3b9c5e2d8f4a1`)
 
 ## **Pub/Sub Channels**
 
 ```
-holt:{instance_name}:artefact_events    # Orchestrator watches for new artefacts
-holt:{instance_name}:claim_events       # Agents watch for new claims
-holt:{instance_name}:workflow_events    # Bids and grants for real-time watch (M2.6)
+holt:{instance_name}:artefact_events     # Orchestrator watches for new artefacts
+holt:{instance_name}:claim_events        # Agents watch for new claims
+holt:{instance_name}:workflow_events     # Bids and grants for real-time watch (M2.6)
 holt:{instance_name}:agent:{role}:events # Agent-specific grant notifications (M2.2)
+holt:{instance_name}:security:alerts     # Real-time security alerts (M4.6)
 ```
+
+**Security Alerts Channel (M4.6)**:
+- Publishes: `hash_mismatch`, `orphan_block`, `timestamp_drift`, `security_override` events
+- Used by: `holt security --alerts --watch` for real-time monitoring
+- Ephemeral: Not stored (use `security:alerts:log` LIST for persistence)
 
 ## **Claim Lifecycle**
 
@@ -178,6 +232,77 @@ Retrieves and displays the full details for a single artefact.
 **`holt logs <agent-role|orchestrator>`**
 
 Views the logs for a specific running or stopped container (e.g., `holt logs Coder`).
+
+### **Cryptographic Verification & Security (M4.6+)**
+
+**`holt verify <artefact-id>`**
+
+Independently verify a V2 artefact's cryptographic hash. Recomputes SHA-256 hash using RFC 8785 canonicalization and compares with stored ID.
+
+Supports short hash IDs (minimum 8 characters if unique).
+
+Examples:
+```bash
+# Verify with full hash
+holt verify a3f2b9c4e8d6f1a7b5c3e9d2f4a8b6c1e7d3f9a2b8c4e6d1f7a3b9c5e2d8f4a1
+
+# Verify with short hash (resolves to full hash)
+holt verify a3f2b9c4
+
+# Verify in specific instance
+holt verify --name prod a3f2b9c4
+```
+
+**`holt security --alerts [flags]`**
+
+Monitor security events from permanent audit log and/or real-time stream.
+
+Flags:
+- `--since <duration>` - Show historical alerts (e.g., `1h`, `24h`)
+- `--watch` - Stream live alerts in real-time
+- Both flags: Historical replay then live stream
+
+Alert Types:
+- `hash_mismatch` - Tampering detected (triggers global lockdown)
+- `orphan_block` - DAG corruption (triggers global lockdown)
+- `timestamp_drift` - Clock skew >5min (rejected, no lockdown)
+- `security_override` - Lockdown cleared by operator
+
+Examples:
+```bash
+# View all historical alerts
+holt security --alerts
+
+# View alerts from last hour
+holt security --alerts --since=1h
+
+# Stream live alerts
+holt security --alerts --watch
+
+# Historical + live
+holt security --alerts --since=24h --watch
+```
+
+**`holt security --unlock --reason "<text>"`**
+
+Clear global lockdown after forensic investigation. Creates audited `security_override` event.
+
+**Required**: Explicit reason for compliance audit trail.
+
+Examples:
+```bash
+# Clear lockdown with investigation summary
+holt security --unlock --reason "Investigation complete: memory corruption detected, container replaced"
+
+# Unlock after false positive
+holt security --unlock --reason "Alert was triggered by test data, no actual tampering"
+```
+
+**Global Lockdown Behavior**:
+- Triggered by: `hash_mismatch` or `orphan_block` alerts
+- Effect: All claim creation and grant operations halted
+- Containers: Remain running for forensic investigation
+- Recovery: Manual unlock required with `--reason`
 
 ### **Human-in-the-Loop (M4.1+)**
 
