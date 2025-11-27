@@ -102,6 +102,19 @@ func (e *Engine) Run(ctx context.Context) error {
 				return nil
 			}
 
+			// M4.6: Check for global lockdown before ALL operations
+			locked, alert, err := e.client.IsInLockdown(ctx)
+			if err != nil {
+				log.Printf("[Orchestrator] Error checking lockdown status: %v", err)
+				// Continue - lockdown check failure shouldn't halt orchestrator
+			}
+			if locked {
+				log.Printf("[Orchestrator] SYSTEM IN LOCKDOWN - refusing to process events (type=%s, instance=%s)",
+					alert.Type, e.instanceName)
+				// Skip processing this event - remain in lockdown until manual unlock
+				continue
+			}
+
 			e.logEvent("artefact_received", map[string]interface{}{
 				"artefact_id":     artefact.ID,
 				"type":            artefact.Type,

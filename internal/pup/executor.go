@@ -345,6 +345,97 @@ func (e *Engine) createResultArtefact(ctx context.Context, claim *blackboard.Cla
 	return artefact, nil
 }
 
+// createVerifiableResultArtefact creates a V2 VerifiableArtefact with cryptographic hash ID.
+// M4.6: This is the hash-based artefact creation path for Phase 3.
+// Unlike V1 (UUID-based), this:
+//  1. Assembles Header + Payload
+//  2. Validates payload size (1MB limit)
+//  3. Computes SHA-256 hash via RFC 8785 canonicalization
+//  4. Submits to blackboard with hash as ID
+func (e *Engine) createVerifiableResultArtefact(ctx context.Context, claim *blackboard.Claim, output *ToolOutput, targetArtefact *blackboard.Artefact) (*blackboard.VerifiableArtefact, error) {
+	// M2.4: Validate git commit for CodeCommit artefacts
+	if output.ArtefactType == "CodeCommit" {
+		log.Printf("[INFO] Validating git commit: hash=%s", output.ArtefactPayload)
+		if err := validateCommitExists(output.ArtefactPayload); err != nil {
+			return nil, fmt.Errorf("git commit validation failed for hash %s: %w",
+				output.ArtefactPayload, err)
+		}
+		log.Printf("[DEBUG] Git commit validation passed: hash=%s", output.ArtefactPayload)
+	}
+
+	// Extract parent hashes from target artefact
+	// In V1, target artefact has ID (UUID). In V2, it will be a hash.
+	// For now, we're in transitional mode where target is V1 but we're creating V2 output.
+	parentHashes := []string{targetArtefact.ID}
+
+	// M4.6: Determine LogicalThreadID inheritance
+	// V1: New artefacts get new UUID
+	// V2: If parent has LogicalThreadID, inherit it; otherwise generate new UUID
+	logicalThreadID := uuid.New().String() // For derivative work, always new thread
+
+	// Assemble payload
+	payload := blackboard.ArtefactPayload{
+		Content: output.ArtefactPayload,
+	}
+
+	// M4.6: Validate payload size BEFORE hashing (1MB hard limit)
+	if err := payload.Validate(); err != nil {
+		return nil, fmt.Errorf("payload validation failed: %w", err)
+	}
+
+	// Assemble header
+	header := blackboard.ArtefactHeader{
+		ParentHashes:    parentHashes,
+		LogicalThreadID: logicalThreadID,
+		Version:         1, // First version of new thread
+		CreatedAtMs:     time.Now().UnixMilli(),
+		ProducedByRole:  e.config.AgentName, // M3.7: AgentName IS the role
+		StructuralType:  output.GetStructuralType(),
+		Type:            output.ArtefactType,
+		ContextForRoles: nil, // Not used for standard work artefacts
+	}
+
+	// Create verifiable artefact (ID will be set after hash computation)
+	artefact := &blackboard.VerifiableArtefact{
+		Header:  header,
+		Payload: payload,
+	}
+
+	// M4.6: Compute SHA-256 hash using RFC 8785 canonicalization
+	hash, err := blackboard.ComputeArtefactHash(artefact)
+	if err != nil {
+		return nil, fmt.Errorf("failed to compute artefact hash: %w", err)
+	}
+
+	// Set hash as artefact ID (this is the Prover step)
+	artefact.ID = hash
+
+	log.Printf("[INFO] M4.6: Computed artefact hash: %s (Prover step)", hash)
+
+	// Create artefact in Redis (Orchestrator will verify hash - Verifier step)
+	if err := e.bbClient.WriteVerifiableArtefact(ctx, artefact); err != nil {
+		return nil, fmt.Errorf("failed to create verifiable artefact: %w", err)
+	}
+
+	// Publish artefact event (so orchestrator picks it up)
+	// Note: In full V2, this would be integrated into WriteVerifiableArtefact
+	// For now, we manually publish to maintain compatibility
+	artefactJSON, err := json.Marshal(artefact)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal artefact for event: %w", err)
+	}
+
+	channel := fmt.Sprintf("holt:%s:artefact_events", e.config.InstanceName)
+	if err := e.bbClient.PublishRaw(ctx, channel, string(artefactJSON)); err != nil {
+		return nil, fmt.Errorf("failed to publish artefact event: %w", err)
+	}
+
+	log.Printf("[INFO] Created verifiable artefact: id=%s type=%s logical_id=%s version=%d",
+		artefact.ID, artefact.Header.Type, artefact.Header.LogicalThreadID, artefact.Header.Version)
+
+	return artefact, nil
+}
+
 // processCheckpoints handles declarative context caching (M4.3).
 // For each checkpoint in the tool output, this function:
 //  1. Calls the blackboard's CreateOrVersionKnowledge method (uses Lua script for atomicity)
