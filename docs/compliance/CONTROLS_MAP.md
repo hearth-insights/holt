@@ -35,8 +35,9 @@ The HIPAA Security Rule establishes national standards for protecting electronic
 
 *   **Requirement**: Implement policies and procedures to protect ePHI from improper alteration or destruction.
 *   **Holt's Features**:
-    *   **Git-Native Integrity**: For all code-related work, Holt uses Git commit hashes as the payload for `CodeCommit` artefacts. This leverages Git's cryptographic hashing to ensure the integrity of the work product cannot be tampered with.
-    *   **Orchestration Integrity**: The append-only nature of the Blackboard ensures that the record of the workflow itself is protected from unauthorized modification at the application level.
+    *   **Merkle DAG Architecture**: Holt uses a content-addressable storage model. Every artefact is identified by a SHA-256 hash of its content and its parent's hash. This provides a mathematical guarantee that the audit trail has not been altered.
+    *   **Tamper Detection**: The Orchestrator acts as a "Verifier," re-computing hashes for every submission. If a mismatch is detected, the system enters a "Global Lockdown" state for forensic preservation.
+    *   **Git-Native Integrity**: For code payloads, Holt leverages Git's internal object hashing, linking the orchestration ledger directly to the source control ledger.
 
 #### **Transmission Security (`§164.312(e)`)**
 
