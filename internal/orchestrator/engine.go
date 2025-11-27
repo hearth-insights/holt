@@ -161,6 +161,15 @@ func (e *Engine) processArtefact(ctx context.Context, artefact *blackboard.Artef
 		return nil
 	}
 
+	// M4.6: Cryptographic verification for V2 artefacts
+	// Must verify parent existence, timestamp drift, and content hash before claim creation
+	if err := e.verifyArtefactV1(ctx, artefact); err != nil {
+		log.Printf("[Orchestrator] Artefact %s failed verification: %v", artefact.ID, err)
+		// Verification failed - lockdown may have been triggered inside verifyArtefact
+		// Do NOT create claim for invalid artefacts
+		return err
+	}
+
 	// Check if a claim already exists (idempotency)
 	existingClaim, err := e.client.GetClaimByArtefactID(ctx, artefact.ID)
 	if err != nil && !blackboard.IsNotFound(err) {

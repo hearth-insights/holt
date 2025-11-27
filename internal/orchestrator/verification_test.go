@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -327,6 +328,142 @@ func TestLockdownCheck_EventLoop(t *testing.T) {
 	locked, _, err = client.IsInLockdown(ctx)
 	require.NoError(t, err)
 	assert.False(t, locked)
+}
+
+// TestProcessArtefact_RejectsTamperedArtefact is a CRITICAL integration test that verifies
+// the orchestrator rejects tampered artefacts BEFORE creating claims.
+// This test ensures the verification hook is properly integrated into the main execution path.
+func TestProcessArtefact_RejectsTamperedArtefact(t *testing.T) {
+	ctx := context.Background()
+
+	// Setup test engine with real orchestrator flow
+	engine, client := setupVerificationTestEngine(t, "test-tamper-integration", 300000)
+
+	// Create a tampered V2 artefact (hash doesn't match content)
+	artefact := &blackboard.VerifiableArtefact{
+		Header: blackboard.ArtefactHeader{
+			ParentHashes:    []string{},
+			LogicalThreadID: "thread-123",
+			Version:         1,
+			CreatedAtMs:     time.Now().UnixMilli(),
+			ProducedByRole:  "malicious-agent",
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "MaliciousCode",
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "legitimate content",
+		},
+	}
+
+	// Compute correct hash
+	correctHash, err := blackboard.ComputeArtefactHash(artefact)
+	require.NoError(t, err)
+
+	// TAMPER: Set incorrect hash ID (simulating malicious agent)
+	artefact.ID = strings.Repeat("f", 64) // Wrong hash!
+
+	// Write tampered artefact to Redis (bypassing normal checks)
+	err = client.WriteVerifiableArtefact(ctx, artefact)
+	require.NoError(t, err, "Setup: Write tampered artefact to Redis")
+
+	// Convert to V1 format for processArtefact (which expects V1)
+	v1Artefact := &blackboard.Artefact{
+		ID:              artefact.ID,
+		LogicalID:       artefact.Header.LogicalThreadID,
+		Version:         artefact.Header.Version,
+		StructuralType:  artefact.Header.StructuralType,
+		Type:            artefact.Header.Type,
+		Payload:         artefact.Payload.Content,
+		SourceArtefacts: artefact.Header.ParentHashes,
+		ProducedByRole:  artefact.Header.ProducedByRole,
+		CreatedAtMs:     artefact.Header.CreatedAtMs,
+	}
+
+	// CRITICAL TEST: Call processArtefact (main orchestrator flow)
+	// This MUST reject the tampered artefact
+	err = engine.processArtefact(ctx, v1Artefact)
+	assert.Error(t, err, "processArtefact MUST reject tampered artefact")
+	assert.Contains(t, err.Error(), "hash mismatch", "Error should indicate hash mismatch")
+
+	// Verify NO claim was created (artefact rejected before claim creation)
+	claim, err := client.GetClaimByArtefactID(ctx, artefact.ID)
+	// Expect "not found" error or nil claim
+	if err != nil && !blackboard.IsNotFound(err) {
+		t.Fatalf("Unexpected error checking for claim: %v", err)
+	}
+	assert.Nil(t, claim, "CRITICAL: No claim should exist for tampered artefact")
+
+	// Verify global lockdown was triggered
+	locked, alert, err := client.IsInLockdown(ctx)
+	require.NoError(t, err)
+	assert.True(t, locked, "System should be in global lockdown")
+	assert.Equal(t, blackboard.AlertTypeHashMismatch, alert.Type)
+	assert.Equal(t, artefact.ID, alert.ArtefactIDClaimed)
+	assert.Equal(t, correctHash, alert.HashExpected, "Alert should contain correct hash")
+	assert.Equal(t, artefact.ID, alert.HashActual, "Alert should contain tampered hash")
+}
+
+// TestProcessArtefact_RejectsOrphanBlock verifies orphan block detection in main flow.
+func TestProcessArtefact_RejectsOrphanBlock(t *testing.T) {
+	ctx := context.Background()
+
+	engine, client := setupVerificationTestEngine(t, "test-orphan-integration", 300000)
+
+	// Create artefact with non-existent parent (must be valid 64-char hex hash)
+	artefact := &blackboard.VerifiableArtefact{
+		Header: blackboard.ArtefactHeader{
+			ParentHashes:    []string{strings.Repeat("a", 64)}, // Valid format but doesn't exist
+			LogicalThreadID: "thread-456",
+			Version:         2,
+			CreatedAtMs:     time.Now().UnixMilli(),
+			ProducedByRole:  "test-agent",
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "TestArtefact",
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "test content",
+		},
+	}
+
+	// Compute correct hash
+	hash, err := blackboard.ComputeArtefactHash(artefact)
+	require.NoError(t, err)
+	artefact.ID = hash
+
+	// Write to Redis
+	err = client.WriteVerifiableArtefact(ctx, artefact)
+	require.NoError(t, err)
+
+	// Convert to V1 for processArtefact
+	v1Artefact := &blackboard.Artefact{
+		ID:              artefact.ID,
+		LogicalID:       artefact.Header.LogicalThreadID,
+		Version:         artefact.Header.Version,
+		StructuralType:  artefact.Header.StructuralType,
+		Type:            artefact.Header.Type,
+		Payload:         artefact.Payload.Content,
+		SourceArtefacts: artefact.Header.ParentHashes,
+		ProducedByRole:  artefact.Header.ProducedByRole,
+		CreatedAtMs:     artefact.Header.CreatedAtMs,
+	}
+
+	// Process artefact - should reject orphan block
+	err = engine.processArtefact(ctx, v1Artefact)
+	assert.Error(t, err, "processArtefact MUST reject orphan block")
+	assert.Contains(t, err.Error(), "orphan block", "Error should indicate orphan block")
+
+	// Verify NO claim created
+	claim, err := client.GetClaimByArtefactID(ctx, artefact.ID)
+	if err != nil && !blackboard.IsNotFound(err) {
+		t.Fatalf("Unexpected error checking for claim: %v", err)
+	}
+	assert.Nil(t, claim, "No claim should exist for orphan artefact")
+
+	// Verify lockdown triggered
+	locked, alert, err := client.IsInLockdown(ctx)
+	require.NoError(t, err)
+	assert.True(t, locked, "System should be in lockdown")
+	assert.Equal(t, blackboard.AlertTypeOrphanBlock, alert.Type)
 }
 
 // Helper function to create int pointer for config
