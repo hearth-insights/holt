@@ -383,6 +383,11 @@ func (e *Engine) createVerifiableResultArtefact(ctx context.Context, claim *blac
 		return nil, fmt.Errorf("payload validation failed: %w", err)
 	}
 
+	// M4.6 Security Addendum: Inject HOLT_CLAIM_ID into header for topology validation
+	// The orchestrator sets this env var when granting work. Without it, the artefact
+	// will fail topology validation and trigger global lockdown.
+	claimID := os.Getenv("HOLT_CLAIM_ID")
+
 	// Assemble header
 	header := blackboard.ArtefactHeader{
 		ParentHashes:    parentHashes,
@@ -393,6 +398,7 @@ func (e *Engine) createVerifiableResultArtefact(ctx context.Context, claim *blac
 		StructuralType:  output.GetStructuralType(),
 		Type:            output.ArtefactType,
 		ContextForRoles: nil, // Not used for standard work artefacts
+		ClaimID:         claimID, // M4.6 Security Addendum: Grant Linkage
 	}
 
 	// Create verifiable artefact (ID will be set after hash computation)

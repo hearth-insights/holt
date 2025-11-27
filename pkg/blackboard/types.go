@@ -29,6 +29,12 @@ type Artefact struct {
 
 	// M4.3: Context caching - glob patterns for which agent roles should receive this Knowledge
 	ContextForRoles []string `json:"context_for_roles,omitempty"` // Only used for Knowledge artefacts
+
+	// M4.6 Security Addendum: Grant Linkage & Topology Validation
+	// ClaimID cryptographically binds this artefact to the authorization that permitted its creation
+	// MUST be present for agent-produced artefacts (unless root artefact with SourceArtefacts=[])
+	// Empty for root artefacts (CLI-generated) and some orchestrator-generated artefacts
+	ClaimID string `json:"claim_id,omitempty"`
 }
 
 // StructuralType defines the role an artefact plays in the orchestration flow.

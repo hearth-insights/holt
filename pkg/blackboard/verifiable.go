@@ -47,6 +47,13 @@ type ArtefactHeader struct {
 	// M4.3: Context caching - INCLUDED in hash for security/visibility scope
 	// Uses omitempty: empty/nil slice excluded from canonical JSON to save space
 	ContextForRoles []string `json:"context_for_roles,omitempty"`
+
+	// M4.6 Security Addendum: Grant Linkage & Topology Validation
+	// ClaimID cryptographically binds this artefact to the authorization that permitted its creation
+	// MUST be present for agent-produced artefacts (unless root artefact with ParentHashes=[])
+	// Empty for root artefacts (CLI-generated) and some orchestrator-generated artefacts
+	// Uses omitempty: empty string excluded from canonical JSON
+	ClaimID string `json:"claim_id,omitempty"`
 }
 
 // ArtefactPayload is the actual content.

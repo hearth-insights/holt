@@ -34,6 +34,13 @@ type SecurityAlert struct {
 	Reason   string `json:"reason,omitempty"`   // Human-provided justification
 	Operator string `json:"operator,omitempty"` // Who cleared the lockdown
 
+	// M4.6 Security Addendum: Topology validation fields
+	ViolationType          string   `json:"violation_type,omitempty"`           // "missing_claim_id", "invalid_claim_reference", "parent_linkage_violation", "root_artefact_with_claim"
+	ClaimIDProvided        string   `json:"claim_id_provided,omitempty"`        // The ClaimID in the artefact header
+	ClaimStatus            string   `json:"claim_status,omitempty"`             // Status of the referenced claim (if invalid)
+	ExpectedParentArtefact string   `json:"expected_parent_artefact,omitempty"` // The artefact ID from the claim (parent linkage check)
+	ActualParentHashes     []string `json:"actual_parent_hashes,omitempty"`     // The ParentHashes in the artefact (parent linkage check)
+
 	// Common fields
 	AgentRole string `json:"agent_role,omitempty"`
 	ClaimID   string `json:"claim_id,omitempty"`
@@ -41,10 +48,11 @@ type SecurityAlert struct {
 
 // Alert type constants for easy use
 const (
-	AlertTypeHashMismatch    = "hash_mismatch"
-	AlertTypeOrphanBlock     = "orphan_block"
-	AlertTypeTimestampDrift  = "timestamp_drift"
-	AlertTypeSecurityOverride = "security_override"
+	AlertTypeHashMismatch      = "hash_mismatch"
+	AlertTypeOrphanBlock       = "orphan_block"
+	AlertTypeTimestampDrift    = "timestamp_drift"
+	AlertTypeSecurityOverride  = "security_override"
+	AlertTypeUnauthorizedTopology = "unauthorized_topology" // M4.6 Security Addendum
 )
 
 // NewHashMismatchAlert creates a hash mismatch security alert.
