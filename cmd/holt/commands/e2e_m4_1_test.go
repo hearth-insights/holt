@@ -12,7 +12,6 @@ import (
 
 	"github.com/dyluth/holt/internal/testutil"
 	"github.com/dyluth/holt/pkg/blackboard"
-	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )
@@ -50,6 +49,7 @@ func TestE2E_M4_1_AgentToHumanQA(t *testing.T) {
 	holtYML := `version: "1.0"
 orchestrator:
   max_review_iterations: 3
+  timestamp_drift_tolerance_ms: 600000 # 10 minutes for E2E tests
 agents:
   QuestionAgent:
     image: "question-agent:latest"
@@ -93,19 +93,18 @@ services:
 
 	// Step 4: Create initial GoalDefined artefact (from "user")
 	t.Log("Step 4: Creating GoalDefined artefact...")
-	goalArtefact := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
+
+	goalArtefact := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
+		ParentHashes:    []string{},
+		LogicalThreadID: blackboard.NewID(),
 		Version:         1,
+		CreatedAtMs:     time.Now().UnixMilli(),
+		ProducedByRole:  "user",
 		StructuralType:  blackboard.StructuralTypeStandard,
 		Type:            "GoalDefined",
-		Payload:         "Build a REST API",
-		ProducedByRole:  "user",
-		SourceArtefacts: []string{},
-		CreatedAtMs:     time.Now().UnixMilli(),
-	}
-	err = bbClient.CreateArtefact(ctx, goalArtefact)
-	require.NoError(t, err)
+		ClaimID:         "",
+	}, "Build a REST API")
+
 	t.Logf("✓ GoalDefined created: %s", goalArtefact.ID)
 
 	// Step 5: Wait for Question artefact to be produced
@@ -140,6 +139,10 @@ services:
 		if questionArtefact != nil {
 			break
 		}
+	}
+
+	if questionArtefact == nil {
+		env.DumpInstanceLogs()
 	}
 
 	require.NotNil(t, questionArtefact, "Question artefact should have been created")
@@ -180,20 +183,17 @@ services:
 	t.Log("Step 8: Answering question with clarified goal...")
 	clarifiedGoal := "Build a REST API with JWT authentication and null handling"
 
-	// Create the answer artefact (simulating `holt answer`)
-	answerArtefact := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       goalArtefact.LogicalID, // Same logical thread
+	answerArtefact := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
+		ParentHashes:    []string{goalArtefact.ID, questionArtefact.ID},
+		LogicalThreadID: goalArtefact.LogicalID, // Same logical thread
 		Version:         goalArtefact.Version + 1, // Incremented version
+		CreatedAtMs:     time.Now().UnixMilli(),
+		ProducedByRole:  "user",
 		StructuralType:  blackboard.StructuralTypeStandard,
 		Type:            "GoalDefined",
-		Payload:         clarifiedGoal,
-		SourceArtefacts: []string{goalArtefact.ID, questionArtefact.ID},
-		ProducedByRole:  "user",
-		CreatedAtMs:     time.Now().UnixMilli(),
-	}
-	err = bbClient.CreateArtefact(ctx, answerArtefact)
-	require.NoError(t, err)
+		ClaimID:         "",
+	}, clarifiedGoal)
+
 	t.Logf("✓ Clarified goal created: %s v%d", answerArtefact.ID, answerArtefact.Version)
 
 	// Step 9: Verify new claim is created for clarified goal
@@ -208,6 +208,10 @@ services:
 			newClaim = claim
 			break
 		}
+	}
+
+	if newClaim == nil {
+		env.DumpInstanceLogs()
 	}
 
 	require.NotNil(t, newClaim, "New claim should have been created for clarified goal")
@@ -236,6 +240,7 @@ func TestE2E_M4_1_IterationLimit(t *testing.T) {
 	holtYML := `version: "1.0"
 orchestrator:
   max_review_iterations: 1
+  timestamp_drift_tolerance_ms: 600000 # 10 minutes
 agents:
   QuestionAgent:
     image: "question-agent:latest"
@@ -272,19 +277,17 @@ services:
 
 	// Create artefact at version 2 (iteration count = 1, at limit)
 	// Must be GoalDefined for question-agent to ask a question
-	targetArtefact := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
+	targetArtefact := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
+		ParentHashes:    []string{},
+		LogicalThreadID: blackboard.NewID(),
 		Version:         2, // Already at iteration limit
+		CreatedAtMs:     time.Now().UnixMilli(),
+		ProducedByRole:  "user",
 		StructuralType:  blackboard.StructuralTypeStandard,
 		Type:            "GoalDefined",
-		Payload:         "Build API v2",
-		ProducedByRole:  "user",
-		SourceArtefacts: []string{},
-		CreatedAtMs:     time.Now().UnixMilli(),
-	}
-	err = bbClient.CreateArtefact(ctx, targetArtefact)
-	require.NoError(t, err)
+		ClaimID:         "",
+	}, "Build API v2")
+
 	t.Logf("✓ Created artefact at version 2: %s", targetArtefact.ID)
 
 	// Wait for Question (agent will try to question it)

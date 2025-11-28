@@ -239,3 +239,8 @@ func TestPublishClaimGrantedEvent(t *testing.T) {
 		}
 	})
 }
+
+// intPtr returns a pointer to an int (test helper)
+func intPtr(i int) *int {
+	return &i
+}

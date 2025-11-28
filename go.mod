@@ -9,6 +9,7 @@ require (
 
 require (
 	github.com/c-bata/go-prompt v0.2.6 // indirect
+	github.com/gibson042/canonicaljson-go v1.0.3 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect

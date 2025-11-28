@@ -3,7 +3,6 @@ package docker
 import (
 	"testing"
 
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -41,12 +40,9 @@ func TestGenerateRunID(t *testing.T) {
 	runID1 := GenerateRunID()
 	runID2 := GenerateRunID()
 
-	// Verify they are valid UUIDs
-	_, err1 := uuid.Parse(runID1)
-	assert.NoError(t, err1)
-
-	_, err2 := uuid.Parse(runID2)
-	assert.NoError(t, err2)
+	// Verify they are valid 64-char hex strings (SHA-256 compatible)
+	assert.Len(t, runID1, 64)
+	assert.Len(t, runID2, 64)
 
 	// Verify they are different
 	assert.NotEqual(t, runID1, runID2)

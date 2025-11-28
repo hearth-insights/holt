@@ -87,8 +87,22 @@ func TestPerformance_ClaimToExecution(t *testing.T) {
 	buildCmd.Dir = testutil.GetProjectRoot()
 	buildCmd.Run()
 
-	// Setup environment with echo agent
-	env := testutil.SetupE2EEnvironment(t, testutil.EchoAgentHoltYML())
+	// Setup environment with echo agent and drift tolerance
+	echoAgentYML := `version: "1.0"
+orchestrator:
+  timestamp_drift_tolerance_ms: 600000 # 10 minutes
+agents:
+  EchoAgent:
+    image: "example-agent:latest"
+    command: ["/app/run.sh"]
+    bidding_strategy: "exclusive"
+    workspace:
+      mode: ro
+services:
+  redis:
+    image: redis:7-alpine
+`
+	env := testutil.SetupE2EEnvironment(t, echoAgentYML)
 	defer func() {
 		downCmd := &cobra.Command{}
 		downInstanceName = env.InstanceName
@@ -273,8 +287,22 @@ func TestPerformance_GitCommit(t *testing.T) {
 	}
 	require.NoError(t, err)
 
-	// Setup environment
-	env := testutil.SetupE2EEnvironment(t, testutil.GitAgentHoltYML())
+	// Setup environment with increased drift tolerance
+	gitAgentYML := `version: "1.0"
+orchestrator:
+  timestamp_drift_tolerance_ms: 600000 # 10 minutes
+agents:
+  GitAgent:
+    image: "example-git-agent:latest"
+    command: ["/app/run.sh"]
+    bidding_strategy: "exclusive"
+    workspace:
+      mode: rw
+services:
+  redis:
+    image: redis:7-alpine
+`
+	env := testutil.SetupE2EEnvironment(t, gitAgentYML)
 	defer func() {
 		downCmd := &cobra.Command{}
 		downInstanceName = env.InstanceName
@@ -346,8 +374,22 @@ func TestPerformance_FullWorkflowE2E(t *testing.T) {
 	buildCmd.Dir = testutil.GetProjectRoot()
 	buildCmd.Run()
 
-	// Setup environment
-	env := testutil.SetupE2EEnvironment(t, testutil.GitAgentHoltYML())
+	// Setup environment with increased drift tolerance
+	gitAgentYML := `version: "1.0"
+orchestrator:
+  timestamp_drift_tolerance_ms: 600000 # 10 minutes
+agents:
+  GitAgent:
+    image: "example-git-agent:latest"
+    command: ["/app/run.sh"]
+    bidding_strategy: "exclusive"
+    workspace:
+      mode: rw
+services:
+  redis:
+    image: redis:7-alpine
+`
+	env := testutil.SetupE2EEnvironment(t, gitAgentYML)
 	defer func() {
 		downCmd := &cobra.Command{}
 		downInstanceName = env.InstanceName

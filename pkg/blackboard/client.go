@@ -1011,6 +1011,18 @@ func IsNotFound(err error) bool {
 	return errors.Is(err, redis.Nil)
 }
 
+// IsHashMismatchError checks if an error is a HashMismatchError and optionally extracts it.
+// M4.6 Phase 4: Used by CLI verify command to distinguish hash mismatches from other errors.
+// Returns true if err wraps a *HashMismatchError.
+// If target is non-nil, the HashMismatchError is extracted into it (like errors.As).
+func IsHashMismatchError(err error, target **HashMismatchError) bool {
+	if target != nil {
+		return errors.As(err, target)
+	}
+	var mismatchErr *HashMismatchError
+	return errors.As(err, &mismatchErr)
+}
+
 // GetRedisClient returns the underlying Redis client for advanced operations.
 // M4.1: Used by CLI commands to scan for artefacts (e.g., holt questions).
 // Warning: This exposes the raw Redis client - use carefully to avoid breaking instance namespacing.
@@ -1022,4 +1034,325 @@ func (c *Client) GetRedisClient() *redis.Client {
 // M4.1: Used by CLI commands for key pattern construction.
 func (c *Client) GetInstanceName() string {
 	return c.instanceName
+}
+
+// TriggerGlobalLockdown executes the three-step alert mechanism for M4.6 security events.
+//
+// Step 1: LPUSH to holt:{instance}:security:alerts:log (permanent audit trail)
+// Step 2: SET holt:{instance}:security:lockdown with alert payload (circuit breaker)
+// Step 3: PUBLISH to holt:{instance}:security:alerts (real-time notification)
+//
+// This is called when hash mismatches or orphan blocks are detected.
+// The orchestrator will halt ALL operations until manual unlock.
+func (c *Client) TriggerGlobalLockdown(ctx context.Context, alert *SecurityAlert) error {
+	alertJSON, err := json.Marshal(alert)
+	if err != nil {
+		return fmt.Errorf("failed to marshal security alert: %w", err)
+	}
+
+	// Step 1: LPUSH to permanent audit log (newest first)
+	logKey := SecurityAlertsLogKey(c.instanceName)
+	if err := c.rdb.LPush(ctx, logKey, alertJSON).Err(); err != nil {
+		return fmt.Errorf("failed to persist alert to log: %w", err)
+	}
+
+	// Step 2: SET lockdown key (circuit breaker state)
+	lockdownKey := SecurityLockdownKey(c.instanceName)
+	if err := c.rdb.Set(ctx, lockdownKey, alertJSON, 0).Err(); err != nil {
+		return fmt.Errorf("failed to set lockdown key: %w", err)
+	}
+
+	// Step 3: PUBLISH to real-time notification channel
+	channel := SecurityAlertsChannel(c.instanceName)
+	if err := c.rdb.Publish(ctx, channel, alertJSON).Err(); err != nil {
+		return fmt.Errorf("failed to publish alert: %w", err)
+	}
+
+	return nil
+}
+
+// IsInLockdown checks if the instance is currently in global lockdown.
+// Returns (true, alert) if locked down, (false, nil) if operational.
+// Used by orchestrator to check lockdown state before processing events.
+func (c *Client) IsInLockdown(ctx context.Context) (bool, *SecurityAlert, error) {
+	lockdownKey := SecurityLockdownKey(c.instanceName)
+	alertJSON, err := c.rdb.Get(ctx, lockdownKey).Result()
+	if errors.Is(err, redis.Nil) {
+		// No lockdown key = system operational
+		return false, nil, nil
+	}
+	if err != nil {
+		return false, nil, fmt.Errorf("failed to check lockdown status: %w", err)
+	}
+
+	// Lockdown key exists - unmarshal alert
+	var alert SecurityAlert
+	if err := json.Unmarshal([]byte(alertJSON), &alert); err != nil {
+		return true, nil, fmt.Errorf("failed to unmarshal lockdown alert: %w", err)
+	}
+
+	return true, &alert, nil
+}
+
+// ClearLockdown removes the lockdown circuit breaker and logs the override.
+// Creates a security_override alert in the audit log before clearing.
+// Used by `holt security --unlock` command.
+func (c *Client) ClearLockdown(ctx context.Context, reason, operator string) error {
+	// Create override alert for audit trail
+	overrideAlert := NewSecurityOverrideAlert(reason, operator)
+
+	alertJSON, err := json.Marshal(overrideAlert)
+	if err != nil {
+		return fmt.Errorf("failed to marshal override alert: %w", err)
+	}
+
+	// LPUSH override to audit log
+	logKey := SecurityAlertsLogKey(c.instanceName)
+	if err := c.rdb.LPush(ctx, logKey, alertJSON).Err(); err != nil {
+		return fmt.Errorf("failed to log security override: %w", err)
+	}
+
+	// DELETE lockdown key (clear circuit breaker)
+	lockdownKey := SecurityLockdownKey(c.instanceName)
+	if err := c.rdb.Del(ctx, lockdownKey).Err(); err != nil {
+		return fmt.Errorf("failed to clear lockdown key: %w", err)
+	}
+
+	// PUBLISH override alert
+	channel := SecurityAlertsChannel(c.instanceName)
+	if err := c.rdb.Publish(ctx, channel, alertJSON).Err(); err != nil {
+		return fmt.Errorf("failed to publish override alert: %w", err)
+	}
+
+	return nil
+}
+
+// PublishSecurityAlert logs and publishes a security alert WITHOUT triggering lockdown.
+// Used for non-critical security events like timestamp drift warnings.
+// Step 1: LPUSH to holt:{instance}:security:alerts:log (permanent audit trail)
+// Step 2: PUBLISH to holt:{instance}:security:alerts (real-time notification)
+// Does NOT set lockdown key (no circuit breaker activation).
+func (c *Client) PublishSecurityAlert(ctx context.Context, alert *SecurityAlert) error {
+	alertJSON, err := json.Marshal(alert)
+	if err != nil {
+		return fmt.Errorf("failed to marshal security alert: %w", err)
+	}
+
+	// Step 1: LPUSH to permanent audit log (newest first)
+	logKey := SecurityAlertsLogKey(c.instanceName)
+	if err := c.rdb.LPush(ctx, logKey, alertJSON).Err(); err != nil {
+		return fmt.Errorf("failed to persist alert to log: %w", err)
+	}
+
+	// Step 2: PUBLISH to real-time notification channel
+	channel := SecurityAlertsChannel(c.instanceName)
+	if err := c.rdb.Publish(ctx, channel, alertJSON).Err(); err != nil {
+		return fmt.Errorf("failed to publish alert: %w", err)
+	}
+
+	return nil
+}
+
+// WriteVerifiableArtefact writes a VerifiableArtefact to Redis.
+// M4.6: This is used for V2 hash-based artefacts during testing and eventual migration.
+// Similar to CreateArtefact but for the VerifiableArtefact type.
+//
+// Stores the artefact as a Redis Hash (HSET) to be compatible with existing GetArtefact (HGETALL) calls.
+func (c *Client) WriteVerifiableArtefact(ctx context.Context, a *VerifiableArtefact) error {
+	// Validate artefact structure
+	if err := a.Validate(); err != nil {
+		return fmt.Errorf("invalid verifiable artefact: %w", err)
+	}
+
+	// Convert V2 VerifiableArtefact to V1 Artefact for backwards compatibility with HGETALL
+	// This ensures GetArtefact works for both V1 (UUID) and V2 (Hash) artefacts
+	v1Artefact := &Artefact{
+		ID:              a.ID,
+		LogicalID:       a.Header.LogicalThreadID,
+		Version:         a.Header.Version,
+		StructuralType:  a.Header.StructuralType,
+		Type:            a.Header.Type,
+		Payload:         a.Payload.Content,
+		SourceArtefacts: a.Header.ParentHashes,
+		ProducedByRole:  a.Header.ProducedByRole,
+		CreatedAtMs:     a.Header.CreatedAtMs,
+		ClaimID:         a.Header.ClaimID,
+		ContextForRoles: a.Header.ContextForRoles,
+	}
+
+	// Convert to Redis hash
+	hash, err := ArtefactToHash(v1Artefact)
+	if err != nil {
+		return fmt.Errorf("failed to serialize verifiable artefact to hash: %w", err)
+	}
+
+	// Write to Redis using hash ID as key (HSET)
+	key := ArtefactKey(c.instanceName, a.ID)
+	if err := c.rdb.HSet(ctx, key, hash).Err(); err != nil {
+		return fmt.Errorf("failed to write verifiable artefact to Redis: %w", err)
+	}
+
+	// Note: We don't publish to artefact_events channel here because this is test-only.
+	// When V2 is fully implemented, the pup will write and publish.
+
+	return nil
+}
+
+// GetVerifiableArtefact retrieves a V2 VerifiableArtefact by its hash ID.
+// Returns (nil, redis.Nil) if the artefact doesn't exist.
+// Use IsNotFound() to check for not-found errors.
+// M4.6 Phase 4: Used by CLI verify command for independent hash verification.
+func (c *Client) GetVerifiableArtefact(ctx context.Context, hashID string) (*VerifiableArtefact, error) {
+	key := ArtefactKey(c.instanceName, hashID)
+
+	// Read hash from Redis (HGETALL)
+	hashData, err := c.rdb.HGetAll(ctx, key).Result()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read verifiable artefact from Redis: %w", err)
+	}
+
+	// Check if key exists
+	if len(hashData) == 0 {
+		return nil, redis.Nil
+	}
+
+	// Convert Hash to V1 Artefact first (reusing existing deserialization logic)
+	v1Artefact, err := HashToArtefact(hashData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to deserialize verifiable artefact from hash: %w", err)
+	}
+
+	// Convert V1 Artefact to V2 VerifiableArtefact structure
+	v2Artefact := &VerifiableArtefact{
+		ID: v1Artefact.ID,
+		Header: ArtefactHeader{
+			ParentHashes:    v1Artefact.SourceArtefacts,
+			LogicalThreadID: v1Artefact.LogicalID,
+			Version:         v1Artefact.Version,
+			CreatedAtMs:     v1Artefact.CreatedAtMs,
+			ProducedByRole:  v1Artefact.ProducedByRole,
+			StructuralType:  v1Artefact.StructuralType,
+			Type:            v1Artefact.Type,
+			ContextForRoles: v1Artefact.ContextForRoles,
+			ClaimID:         v1Artefact.ClaimID,
+		},
+		Payload: ArtefactPayload{
+			Content: v1Artefact.Payload,
+		},
+	}
+
+	return v2Artefact, nil
+}
+
+// ScanKeys scans for Redis keys matching the given pattern.
+// Returns an array of matching key strings (sorted for consistency).
+// Uses Redis SCAN for efficient iteration without blocking.
+// M4.6 Phase 4: Used for short hash resolution in verify command.
+func (c *Client) ScanKeys(ctx context.Context, pattern string) ([]string, error) {
+	var matches []string
+	iter := c.rdb.Scan(ctx, 0, pattern, 0).Iterator()
+
+	for iter.Next(ctx) {
+		matches = append(matches, iter.Val())
+	}
+
+	if err := iter.Err(); err != nil {
+		return nil, fmt.Errorf("failed to scan keys: %w", err)
+	}
+
+	// Sort for consistent ordering
+	sort.Strings(matches)
+
+	return matches, nil
+}
+
+// GetSecurityAlerts retrieves historical security alerts from the permanent audit log.
+// Returns alerts filtered by timestamp (sinceMs=0 returns all alerts).
+// Alerts are returned in reverse chronological order (newest first).
+// M4.6 Phase 4: Used by CLI security --alerts command.
+func (c *Client) GetSecurityAlerts(ctx context.Context, sinceMs int64) ([]SecurityAlert, error) {
+	key := SecurityAlertsLogKey(c.instanceName)
+
+	// LRANGE 0 -1 gets all elements (newest first due to LPUSH)
+	alertsJSON, err := c.rdb.LRange(ctx, key, 0, -1).Result()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read security alerts log: %w", err)
+	}
+
+	var alerts []SecurityAlert
+	for _, alertJSON := range alertsJSON {
+		var alert SecurityAlert
+		if err := json.Unmarshal([]byte(alertJSON), &alert); err != nil {
+			// Log parse error but continue (don't fail entire query for one bad entry)
+			continue
+		}
+
+		// Apply timestamp filter
+		if sinceMs > 0 && alert.TimestampMs < sinceMs {
+			continue
+		}
+
+		alerts = append(alerts, alert)
+	}
+
+	return alerts, nil
+}
+
+// GetLockdownState checks if the orchestrator is in global lockdown.
+// Returns the lockdown alert if active, or (nil, redis.Nil) if not in lockdown.
+// M4.6 Phase 4: Used by CLI security --unlock command.
+func (c *Client) GetLockdownState(ctx context.Context) (SecurityAlert, error) {
+	key := SecurityLockdownKey(c.instanceName)
+
+	data, err := c.rdb.Get(ctx, key).Result()
+	if err != nil {
+		return SecurityAlert{}, err
+	}
+
+	var alert SecurityAlert
+	if err := json.Unmarshal([]byte(data), &alert); err != nil {
+		return SecurityAlert{}, fmt.Errorf("failed to parse lockdown alert: %w", err)
+	}
+
+	return alert, nil
+}
+
+// SubscribeSecurityAlerts subscribes to the security alerts Pub/Sub channel.
+// Returns a PubSub object for receiving live alerts.
+// Caller must call Close() on the returned PubSub when done.
+// M4.6 Phase 4: Used by CLI security --alerts --watch command.
+func (c *Client) SubscribeSecurityAlerts(ctx context.Context) *redis.PubSub {
+	channel := SecurityAlertsChannel(c.instanceName)
+	return c.rdb.Subscribe(ctx, channel)
+}
+
+// UnlockGlobalLockdown clears the global lockdown state and logs the override.
+// Performs three operations: (1) LPUSH override to audit log, (2) DEL lockdown key, (3) PUBLISH override alert.
+// M4.6 Phase 4: Used by CLI security --unlock command.
+func (c *Client) UnlockGlobalLockdown(ctx context.Context, overrideAlert SecurityAlert) error {
+	// Serialize alert
+	alertJSON, err := json.Marshal(overrideAlert)
+	if err != nil {
+		return fmt.Errorf("failed to marshal override alert: %w", err)
+	}
+
+	// Step 1: LPUSH to audit log
+	logKey := SecurityAlertsLogKey(c.instanceName)
+	if err := c.rdb.LPush(ctx, logKey, alertJSON).Err(); err != nil {
+		return fmt.Errorf("failed to log override alert: %w", err)
+	}
+
+	// Step 2: DEL lockdown key (clear circuit breaker)
+	lockdownKey := SecurityLockdownKey(c.instanceName)
+	if err := c.rdb.Del(ctx, lockdownKey).Err(); err != nil {
+		return fmt.Errorf("failed to clear lockdown key: %w", err)
+	}
+
+	// Step 3: PUBLISH override alert (real-time notification)
+	channel := SecurityAlertsChannel(c.instanceName)
+	if err := c.rdb.Publish(ctx, channel, alertJSON).Err(); err != nil {
+		return fmt.Errorf("failed to publish override alert: %w", err)
+	}
+
+	return nil
 }

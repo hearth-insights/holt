@@ -2,21 +2,19 @@ package blackboard
 
 import (
 	"testing"
-
-	"github.com/google/uuid"
 )
 
 // TestArtefactValidate_Valid tests that valid artefacts pass validation
 func TestArtefactValidate_Valid(t *testing.T) {
 	artefact := &Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
+		ID:              NewID(),
+		LogicalID:       NewID(),
 		Version:         1,
 		StructuralType:  StructuralTypeStandard,
 		Type:            "CodeCommit",
-			ProducedByRole:  "test-agent",
+		ProducedByRole:  "test-agent",
 		Payload:         "abc123",
-		SourceArtefacts: []string{uuid.New().String(), uuid.New().String()},
+		SourceArtefacts: []string{NewID(), NewID()},
 	}
 
 	if err := artefact.Validate(); err != nil {
@@ -27,52 +25,18 @@ func TestArtefactValidate_Valid(t *testing.T) {
 // TestArtefactValidate_EmptySourceArtefacts tests that empty source artefacts array is valid
 func TestArtefactValidate_EmptySourceArtefacts(t *testing.T) {
 	artefact := &Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
+		ID:              NewID(),
+		LogicalID:       NewID(),
 		Version:         1,
 		StructuralType:  StructuralTypeStandard,
 		Type:            "GoalDefined",
-			ProducedByRole:  "test-agent",
+		ProducedByRole:  "test-agent",
 		Payload:         "Create a REST API",
 		SourceArtefacts: []string{}, // Empty is valid for root artefacts
 	}
 
 	if err := artefact.Validate(); err != nil {
 		t.Errorf("artefact with empty source artefacts failed validation: %v", err)
-	}
-}
-
-// TestArtefactValidate_InvalidID tests that invalid artefact ID fails validation
-func TestArtefactValidate_InvalidID(t *testing.T) {
-	artefact := &Artefact{
-		ID:             "not-a-uuid",
-		LogicalID:      uuid.New().String(),
-		Version:        1,
-		StructuralType: StructuralTypeStandard,
-		Type:           "CodeCommit",
-			ProducedByRole:  "test-agent",
-		Payload:        "abc123",
-	}
-
-	if err := artefact.Validate(); err == nil {
-		t.Error("expected validation to fail for invalid ID, but it passed")
-	}
-}
-
-// TestArtefactValidate_InvalidLogicalID tests that invalid logical ID fails validation
-func TestArtefactValidate_InvalidLogicalID(t *testing.T) {
-	artefact := &Artefact{
-		ID:             uuid.New().String(),
-		LogicalID:      "not-a-uuid",
-		Version:        1,
-		StructuralType: StructuralTypeStandard,
-		Type:           "CodeCommit",
-			ProducedByRole:  "test-agent",
-		Payload:        "abc123",
-	}
-
-	if err := artefact.Validate(); err == nil {
-		t.Error("expected validation to fail for invalid logical ID, but it passed")
 	}
 }
 
@@ -89,11 +53,11 @@ func TestArtefactValidate_InvalidVersion(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			artefact := &Artefact{
-				ID:             uuid.New().String(),
+				ID:             NewID(),
 				Version:        tc.version,
 				StructuralType: StructuralTypeStandard,
 				Type:           "CodeCommit",
-			ProducedByRole:  "test-agent",
+				ProducedByRole: "test-agent",
 				Payload:        "abc123",
 			}
 
@@ -107,8 +71,8 @@ func TestArtefactValidate_InvalidVersion(t *testing.T) {
 // TestArtefactValidate_InvalidStructuralType tests that invalid structural type fails validation
 func TestArtefactValidate_InvalidStructuralType(t *testing.T) {
 	artefact := &Artefact{
-		ID:             uuid.New().String(),
-		LogicalID:      uuid.New().String(),
+		ID:             NewID(),
+		LogicalID:      NewID(),
 		Version:        1,
 		StructuralType: "InvalidType",
 		Type:           "CodeCommit",
@@ -124,11 +88,12 @@ func TestArtefactValidate_InvalidStructuralType(t *testing.T) {
 // TestArtefactValidate_EmptyType tests that empty type fails validation
 func TestArtefactValidate_EmptyType(t *testing.T) {
 	artefact := &Artefact{
-		LogicalID:      uuid.New().String(),
+		ID:             NewID(),
+		LogicalID:      NewID(),
 		Version:        1,
 		StructuralType: StructuralTypeStandard,
 		Type:           "",
-			ProducedByRole:  "test-agent",
+		ProducedByRole: "test-agent",
 		Payload:        "abc123",
 	}
 
@@ -140,34 +105,17 @@ func TestArtefactValidate_EmptyType(t *testing.T) {
 // TestArtefactValidate_EmptyProducedByRole tests that empty produced_by_role fails validation
 func TestArtefactValidate_EmptyProducedByRole(t *testing.T) {
 	artefact := &Artefact{
-		LogicalID:      uuid.New().String(),
+		ID:             NewID(),
+		LogicalID:      NewID(),
 		Version:        1,
 		StructuralType: StructuralTypeStandard,
 		Type:           "CodeCommit",
-			ProducedByRole:  "test-agent",
+		ProducedByRole: "",
 		Payload:        "abc123",
 	}
 
 	if err := artefact.Validate(); err == nil {
 		t.Error("expected validation to fail for empty produced_by_role, but it passed")
-	}
-}
-
-// TestArtefactValidate_InvalidSourceArtefact tests that invalid UUID in source artefacts fails validation
-func TestArtefactValidate_InvalidSourceArtefact(t *testing.T) {
-	artefact := &Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  StructuralTypeStandard,
-		Type:            "CodeCommit",
-			ProducedByRole:  "test-agent",
-		Payload:         "abc123",
-		SourceArtefacts: []string{uuid.New().String(), "not-a-uuid", uuid.New().String()},
-	}
-
-	if err := artefact.Validate(); err == nil {
-		t.Error("expected validation to fail for invalid source artefact UUID, but it passed")
 	}
 }
 
@@ -202,8 +150,8 @@ func TestStructuralTypeValidate_Invalid(t *testing.T) {
 // TestClaimValidate_Valid tests that valid claims pass validation
 func TestClaimValidate_Valid(t *testing.T) {
 	claim := &Claim{
-		ID:                    uuid.New().String(),
-		ArtefactID:            uuid.New().String(),
+		ID:                    NewID(),
+		ArtefactID:            NewID(),
 		Status:                ClaimStatusPendingReview,
 		GrantedReviewAgents:   []string{"agent-1", "agent-2"},
 		GrantedParallelAgents: []string{"agent-3"},
@@ -218,8 +166,8 @@ func TestClaimValidate_Valid(t *testing.T) {
 // TestClaimValidate_EmptyAgentArrays tests that empty agent arrays are valid
 func TestClaimValidate_EmptyAgentArrays(t *testing.T) {
 	claim := &Claim{
-		ID:                    uuid.New().String(),
-		ArtefactID:            uuid.New().String(),
+		ID:                    NewID(),
+		ArtefactID:            NewID(),
 		Status:                ClaimStatusPendingReview,
 		GrantedReviewAgents:   []string{},
 		GrantedParallelAgents: []string{},
@@ -231,37 +179,11 @@ func TestClaimValidate_EmptyAgentArrays(t *testing.T) {
 	}
 }
 
-// TestClaimValidate_InvalidID tests that invalid claim ID fails validation
-func TestClaimValidate_InvalidID(t *testing.T) {
-	claim := &Claim{
-		ID:         "not-a-uuid",
-		ArtefactID: uuid.New().String(),
-		Status:     ClaimStatusPendingReview,
-	}
-
-	if err := claim.Validate(); err == nil {
-		t.Error("expected validation to fail for invalid claim ID, but it passed")
-	}
-}
-
-// TestClaimValidate_InvalidArtefactID tests that invalid artefact ID fails validation
-func TestClaimValidate_InvalidArtefactID(t *testing.T) {
-	claim := &Claim{
-		ID:         uuid.New().String(),
-		ArtefactID: "not-a-uuid",
-		Status:     ClaimStatusPendingReview,
-	}
-
-	if err := claim.Validate(); err == nil {
-		t.Error("expected validation to fail for invalid artefact ID, but it passed")
-	}
-}
-
 // TestClaimValidate_InvalidStatus tests that invalid status fails validation
 func TestClaimValidate_InvalidStatus(t *testing.T) {
 	claim := &Claim{
-		ID:         uuid.New().String(),
-		ArtefactID: uuid.New().String(),
+		ID:         NewID(),
+		ArtefactID: NewID(),
 		Status:     "invalid-status",
 	}
 
@@ -320,31 +242,5 @@ func TestBidTypeValidate_Invalid(t *testing.T) {
 	invalidBidType := BidType("invalid-bid")
 	if err := invalidBidType.Validate(); err == nil {
 		t.Error("expected validation to fail for invalid bid type, but it passed")
-	}
-}
-
-// TestIsValidUUID tests the UUID validation helper
-func TestIsValidUUID(t *testing.T) {
-	testCases := []struct {
-		name     string
-		input    string
-		expected bool
-	}{
-		{"valid UUID v4", uuid.New().String(), true},
-		{"valid UUID with hyphens", "550e8400-e29b-41d4-a716-446655440000", true},
-		{"valid UUID without hyphens", "550e8400e29b41d4a716446655440000", true}, // google/uuid accepts this format
-		{"invalid - not a UUID", "not-a-uuid", false},
-		{"invalid - empty string", "", false},
-		{"invalid - random string", "abc123", false},
-		{"invalid - too short", "550e8400", false},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			result := isValidUUID(tc.input)
-			if result != tc.expected {
-				t.Errorf("isValidUUID(%q) = %v, expected %v", tc.input, result, tc.expected)
-			}
-		})
 	}
 }

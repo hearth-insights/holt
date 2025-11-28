@@ -11,7 +11,6 @@ import (
 	"github.com/dyluth/holt/internal/instance"
 	"github.com/dyluth/holt/internal/printer"
 	"github.com/dyluth/holt/pkg/blackboard"
-	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"github.com/spf13/cobra"
 )
@@ -171,16 +170,41 @@ func runAnswer(cmd *cobra.Command, args []string) error {
 	}
 
 	// Phase 8: Create new artefact version with answer
+	// Construct V2-compatible artefact to compute hash
+	v2Artefact := &blackboard.VerifiableArtefact{
+		Header: blackboard.ArtefactHeader{
+			ParentHashes:    []string{targetArtefact.ID, questionArtefact.ID}, // Link both
+			LogicalThreadID: targetArtefact.LogicalID,                         // Same logical thread
+			Version:         targetArtefact.Version + 1,                       // Incremented version
+			CreatedAtMs:     now(),
+			ProducedByRole:  "user", // Human-produced
+			StructuralType:  targetArtefact.StructuralType,
+			Type:            targetArtefact.Type,
+			ClaimID:         "", // User answer, no claim
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: answerText, // Clarified text replaces old payload
+		},
+	}
+
+	hash, err := blackboard.ComputeArtefactHash(v2Artefact)
+	if err != nil {
+		return fmt.Errorf("failed to compute hash: %w", err)
+	}
+	v2Artefact.ID = hash
+
+	// Convert to V1 for client.CreateArtefact
 	newArtefact := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       targetArtefact.LogicalID,  // Same logical thread
-		Version:         targetArtefact.Version + 1, // Incremented version
-		StructuralType:  targetArtefact.StructuralType,
-		Type:            targetArtefact.Type,
-		Payload:         answerText, // Clarified text replaces old payload
-		SourceArtefacts: []string{targetArtefact.ID, questionArtefact.ID}, // Link both
-		ProducedByRole:  "user",                                           // Human-produced
-		CreatedAtMs:     now(),
+		ID:              v2Artefact.ID,
+		LogicalID:       v2Artefact.Header.LogicalThreadID,
+		Version:         v2Artefact.Header.Version,
+		StructuralType:  v2Artefact.Header.StructuralType,
+		Type:            v2Artefact.Header.Type,
+		Payload:         v2Artefact.Payload.Content,
+		SourceArtefacts: v2Artefact.Header.ParentHashes,
+		ProducedByRole:  v2Artefact.Header.ProducedByRole,
+		CreatedAtMs:     v2Artefact.Header.CreatedAtMs,
+		ClaimID:         v2Artefact.Header.ClaimID,
 	}
 
 	if err := bbClient.CreateArtefact(ctx, newArtefact); err != nil {

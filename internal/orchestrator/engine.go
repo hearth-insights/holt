@@ -10,7 +10,6 @@ import (
 	"github.com/dyluth/holt/internal/config"
 	"github.com/dyluth/holt/internal/orchestrator/debug"
 	"github.com/dyluth/holt/pkg/blackboard"
-	"github.com/google/uuid"
 )
 
 // Engine is the core orchestrator that watches for artefacts and creates claims.
@@ -102,6 +101,19 @@ func (e *Engine) Run(ctx context.Context) error {
 				return nil
 			}
 
+			// M4.6: Check for global lockdown before ALL operations
+			locked, alert, err := e.client.IsInLockdown(ctx)
+			if err != nil {
+				log.Printf("[Orchestrator] Error checking lockdown status: %v", err)
+				// Continue - lockdown check failure shouldn't halt orchestrator
+			}
+			if locked {
+				log.Printf("[Orchestrator] SYSTEM IN LOCKDOWN - refusing to process events (type=%s, instance=%s)",
+					alert.Type, e.instanceName)
+				// Skip processing this event - remain in lockdown until manual unlock
+				continue
+			}
+
 			e.logEvent("artefact_received", map[string]interface{}{
 				"artefact_id":     artefact.ID,
 				"type":            artefact.Type,
@@ -148,6 +160,15 @@ func (e *Engine) processArtefact(ctx context.Context, artefact *blackboard.Artef
 		return nil
 	}
 
+	// M4.6: Cryptographic verification for V2 artefacts
+	// Must verify parent existence, timestamp drift, and content hash before claim creation
+	if err := e.verifyArtefactV1(ctx, artefact); err != nil {
+		log.Printf("[Orchestrator] Artefact %s failed verification: %v", artefact.ID, err)
+		// Verification failed - lockdown may have been triggered inside verifyArtefact
+		// Do NOT create claim for invalid artefacts
+		return err
+	}
+
 	// Check if a claim already exists (idempotency)
 	existingClaim, err := e.client.GetClaimByArtefactID(ctx, artefact.ID)
 	if err != nil && !blackboard.IsNotFound(err) {
@@ -164,7 +185,7 @@ func (e *Engine) processArtefact(ctx context.Context, artefact *blackboard.Artef
 
 	// Create new claim
 	startTime := time.Now()
-	claimID := uuid.New().String()
+	claimID := blackboard.NewID()
 
 	claim := &blackboard.Claim{
 		ID:         claimID,

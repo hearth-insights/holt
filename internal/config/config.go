@@ -10,9 +10,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// OrchestratorConfig specifies orchestrator behavior holtings (M3.3)
+// OrchestratorConfig specifies orchestrator behavior settings (M3.3, M4.6)
 type OrchestratorConfig struct {
-	MaxReviewIterations *int `yaml:"max_review_iterations,omitempty"` // How many times an artefact can be rejected and reworked (0 = unlimited, default = 3)
+	MaxReviewIterations       *int `yaml:"max_review_iterations,omitempty"`        // How many times an artefact can be rejected and reworked (0 = unlimited, default = 3)
+	TimestampDriftToleranceMs *int `yaml:"timestamp_drift_tolerance_ms,omitempty"` // M4.6: Max allowed timestamp drift in milliseconds (default = 300000 = 5 minutes)
 }
 
 // HoltConfig represents the top-level holt.yml configuration
@@ -134,18 +135,31 @@ func (c *HoltConfig) Validate() error {
 	// M3.3: Apply default orchestrator config if missing
 	if c.Orchestrator == nil {
 		defaultIterations := 3
+		defaultDriftMs := 300000 // 5 minutes
 		c.Orchestrator = &OrchestratorConfig{
-			MaxReviewIterations: &defaultIterations,
+			MaxReviewIterations:       &defaultIterations,
+			TimestampDriftToleranceMs: &defaultDriftMs,
 		}
-	} else if c.Orchestrator.MaxReviewIterations == nil {
-		// Orchestrator section exists but max_review_iterations not specified - apply default
-		defaultIterations := 3
-		c.Orchestrator.MaxReviewIterations = &defaultIterations
+	} else {
+		// Orchestrator section exists but fields may be missing - apply defaults
+		if c.Orchestrator.MaxReviewIterations == nil {
+			defaultIterations := 3
+			c.Orchestrator.MaxReviewIterations = &defaultIterations
+		}
+		if c.Orchestrator.TimestampDriftToleranceMs == nil {
+			defaultDriftMs := 300000 // 5 minutes
+			c.Orchestrator.TimestampDriftToleranceMs = &defaultDriftMs
+		}
 	}
 
 	// M3.3: Validate orchestrator config
 	if *c.Orchestrator.MaxReviewIterations < 0 {
 		return fmt.Errorf("orchestrator.max_review_iterations must be >= 0 (0 = unlimited), got %d", *c.Orchestrator.MaxReviewIterations)
+	}
+
+	// M4.6: Validate timestamp drift tolerance
+	if *c.Orchestrator.TimestampDriftToleranceMs < 0 {
+		return fmt.Errorf("orchestrator.timestamp_drift_tolerance_ms must be >= 0, got %d", *c.Orchestrator.TimestampDriftToleranceMs)
 	}
 
 	// M4.4: Validate Redis configuration

@@ -12,7 +12,6 @@ import (
 
 	"github.com/dyluth/holt/internal/testutil"
 	"github.com/dyluth/holt/pkg/blackboard"
-	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )
@@ -91,21 +90,20 @@ services:
 	bbClient := env.BBClient
 	t.Logf("✓ Connected to blackboard (Redis port: %d)", env.RedisPort)
 
-	// Step 4: Create a DesignSpecDraft artefact to be reviewed
+	// Step 4: Create a DesignSpecDraft artefact for review
 	t.Log("Step 4: Creating DesignSpecDraft artefact for review...")
-	draftArtefact := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
+
+	draftArtefact := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
+		ParentHashes:    []string{},
+		LogicalThreadID: blackboard.NewID(),
 		Version:         1,
+		CreatedAtMs:     time.Now().UnixMilli(),
+		ProducedByRole:  "user", // "user" allows skipping ClaimID check
 		StructuralType:  blackboard.StructuralTypeStandard,
 		Type:            "DesignSpecDraft",
-		Payload:         "# Design Proposal\nThis is a test design draft.",
-		ProducedByRole:  "Designer",
-		SourceArtefacts: []string{},
-		CreatedAtMs:     time.Now().UnixMilli(),
-	}
-	err = bbClient.CreateArtefact(ctx, draftArtefact)
-	require.NoError(t, err)
+		ClaimID:         "",
+	}, "# Design Proposal\nThis is a test design draft.")
+
 	t.Logf("✓ DesignSpecDraft created: %s", draftArtefact.ID)
 
 	// Step 5: Wait for Review artefact (auto-approval)
@@ -276,19 +274,17 @@ services:
 	}
 	payloadJSON, _ := json.Marshal(changeSetPayload)
 
-	changeSetArtefact := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
+	changeSetArtefact := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
+		ParentHashes:    []string{},
+		LogicalThreadID: blackboard.NewID(),
 		Version:         1,
+		CreatedAtMs:     time.Now().UnixMilli(),
+		ProducedByRole:  "user", // "user" allows skipping ClaimID check
 		StructuralType:  blackboard.StructuralTypeStandard,
 		Type:            "ChangeSet",
-		Payload:         string(payloadJSON),
-		ProducedByRole:  "Coder",
-		SourceArtefacts: []string{},
-		CreatedAtMs:     time.Now().UnixMilli(),
-	}
-	err = bbClient.CreateArtefact(ctx, changeSetArtefact)
-	require.NoError(t, err)
+		ClaimID:         "",
+	}, string(payloadJSON))
+
 	t.Logf("✓ ChangeSet created: %s", changeSetArtefact.ID)
 
 	// Step 5: Wait for Review artefact from TestRunner

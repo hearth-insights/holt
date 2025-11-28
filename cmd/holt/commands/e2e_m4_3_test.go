@@ -13,7 +13,6 @@ import (
 
 	"github.com/dyluth/holt/internal/testutil"
 	"github.com/dyluth/holt/pkg/blackboard"
-	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )
@@ -132,6 +131,7 @@ ENTRYPOINT ["/app/pup"]
 	holtYML := `version: "1.0"
 orchestrator:
   max_review_iterations: 3
+  timestamp_drift_tolerance_ms: 600000 # 10 minutes
 agents:
   CachingAgent:
     image: "caching-agent:latest"
@@ -171,19 +171,17 @@ services:
 	// ========== FIRST RUN: context_is_declared=false ==========
 	t.Log("\n=== FIRST RUN: Agent should see context_is_declared=false ===")
 
-	goalArtefact := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
+	_ = env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
+		ParentHashes:    []string{},
+		LogicalThreadID: blackboard.NewID(),
 		Version:         1,
+		CreatedAtMs:     time.Now().UnixMilli(),
+		ProducedByRole:  "user",
 		StructuralType:  blackboard.StructuralTypeStandard,
 		Type:            "GoalDefined",
-		Payload:         "Build SDK wrapper library",
-		SourceArtefacts: []string{},
-		ProducedByRole:  "user",
-	}
+		ClaimID:         "",
+	}, "Build SDK wrapper library")
 
-	err = bbClient.CreateArtefact(ctx, goalArtefact)
-	require.NoError(t, err)
 	t.Log("✓ Created GoalDefined artefact")
 
 	// Wait for agent to process
@@ -192,14 +190,20 @@ services:
 	// Verify DesignSpec was created (from first run)
 	// First, get the Knowledge artefact (it's created before we can check for DesignSpec)
 	knowledge, err := testutil.WaitForArtefactOfType(ctx, bbClient, "go-sdk-docs", 10*time.Second)
-	require.NoError(t, err, "Agent should have created Knowledge checkpoint")
+	if err != nil {
+		env.DumpInstanceLogs()
+		require.NoError(t, err, "Agent should have created Knowledge checkpoint")
+	}
 
 	// Now find the DesignSpec that has this Knowledge attached to its thread_context
 	// NOTE: We use WaitForArtefactWithContext instead of WaitForArtefactOfType because
 	// the orchestrator may create multiple DesignSpecs, and we need the specific one
 	// that produced the checkpoint we're verifying
 	designSpec, err := testutil.WaitForArtefactWithContext(ctx, bbClient, "DesignSpec", knowledge.ID, env.InstanceName, 10*time.Second)
-	require.NoError(t, err, "Should find a DesignSpec with Knowledge attached")
+	if err != nil {
+		env.DumpInstanceLogs()
+		require.NoError(t, err, "Should find a DesignSpec with Knowledge attached")
+	}
 
 	require.Contains(t, designSpec.Payload, "first-time context discovery")
 	t.Log("✓ First run: Agent produced DesignSpec")

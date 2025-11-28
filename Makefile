@@ -34,8 +34,9 @@ help:
 	@echo "  build-linux-amd64   - Build for Linux AMD64"
 	@echo ""
 	@echo "Testing:"
-	@echo "  test                - Run all unit tests"	
+	@echo "  test                - Run all unit tests"
 	@echo "  test-verbose        - Run all unit tests with verbose output"
+	@echo "  test-crypto         - Run cryptographic verification tests (M4.6)"
 	@echo "  test-pup            - Run pup unit and integration tests"
 	@echo "  test-integration    - Run orchestrator integration tests (requires Docker)"
 	@echo "  test-e2e            - Run Phase 2 E2E test suite (requires Docker)"
@@ -62,6 +63,12 @@ test:
 test-verbose:
 	@echo "Running tests (verbose)..."
 	@$(MAKE) test TEST_FLAGS="-v"
+
+# Run cryptographic verification tests (M4.6)
+test-crypto:
+	@echo "Running cryptographic verification tests..."
+	@$(GO) test -v ./pkg/blackboard -run 'Test(Hash|Canonical|Validate|Payload)'
+	@echo "✓ All cryptographic tests passed"
 
 # Run tests with coverage
 coverage: build build-pup

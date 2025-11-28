@@ -12,7 +12,6 @@ import (
 	"github.com/dyluth/holt/internal/printer"
 	"github.com/dyluth/holt/internal/watch"
 	"github.com/dyluth/holt/pkg/blackboard"
-	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"github.com/spf13/cobra"
 )
@@ -205,22 +204,44 @@ func runForage(cmd *cobra.Command, args []string) error {
 		// Give subscription time to set up before publishing artefact
 		time.Sleep(100 * time.Millisecond)
 
-		// Now create the artefact - all subsequent events will be captured
-		artefactID := uuid.New().String()
-		logicalID := uuid.New().String()
-
-		artefact := &blackboard.Artefact{
-			ID:              artefactID,
-			LogicalID:       logicalID,
-			Version:         1,
-			StructuralType:  blackboard.StructuralTypeStandard,
-			Type:            "GoalDefined",
-			Payload:         forageGoal,
-			SourceArtefacts: []string{},
-			ProducedByRole:  "user",
+		// Create V2-compatible artefact to compute hash
+		v2Artefact := &blackboard.VerifiableArtefact{
+			Header: blackboard.ArtefactHeader{
+				ParentHashes:    []string{},
+				LogicalThreadID: blackboard.NewID(), // New thread
+				Version:         1,
+				CreatedAtMs:     time.Now().UnixMilli(),
+				ProducedByRole:  "user",
+				StructuralType:  blackboard.StructuralTypeStandard,
+				Type:            "GoalDefined",
+				ClaimID:         "", // Root artefact has no claim
+			},
+			Payload: blackboard.ArtefactPayload{
+				Content: forageGoal,
+			},
 		}
 
-		if err := bbClient.CreateArtefact(ctx, artefact); err != nil {
+		hash, err := blackboard.ComputeArtefactHash(v2Artefact)
+		if err != nil {
+			return fmt.Errorf("failed to compute hash: %w", err)
+		}
+		v2Artefact.ID = hash
+
+		// Convert to V1 for client.CreateArtefact
+		v1Artefact := &blackboard.Artefact{
+			ID:              v2Artefact.ID,
+			LogicalID:       v2Artefact.Header.LogicalThreadID,
+			Version:         v2Artefact.Header.Version,
+			StructuralType:  v2Artefact.Header.StructuralType,
+			Type:            v2Artefact.Header.Type,
+			Payload:         v2Artefact.Payload.Content,
+			SourceArtefacts: v2Artefact.Header.ParentHashes,
+			ProducedByRole:  v2Artefact.Header.ProducedByRole,
+			CreatedAtMs:     v2Artefact.Header.CreatedAtMs,
+			ClaimID:         v2Artefact.Header.ClaimID,
+		}
+
+		if err := bbClient.CreateArtefact(ctx, v1Artefact); err != nil {
 			return fmt.Errorf("failed to create artefact: %w", err)
 		}
 
@@ -229,28 +250,50 @@ func runForage(cmd *cobra.Command, args []string) error {
 	}
 
 	// Non-watch mode: create artefact and return
-	artefactID := uuid.New().String()
-	logicalID := uuid.New().String()
-
-	artefact := &blackboard.Artefact{
-		ID:              artefactID,
-		LogicalID:       logicalID,
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "GoalDefined",
-		Payload:         forageGoal,
-		SourceArtefacts: []string{},
-		ProducedByRole:  "user",
+	// Create V2-compatible artefact to compute hash
+	v2Artefact := &blackboard.VerifiableArtefact{
+		Header: blackboard.ArtefactHeader{
+			ParentHashes:    []string{},
+			LogicalThreadID: blackboard.NewID(), // New thread
+			Version:         1,
+			CreatedAtMs:     time.Now().UnixMilli(),
+			ProducedByRole:  "user",
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "GoalDefined",
+			ClaimID:         "", // Root artefact has no claim
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: forageGoal,
+		},
 	}
 
-	if err := bbClient.CreateArtefact(ctx, artefact); err != nil {
+	hash, err := blackboard.ComputeArtefactHash(v2Artefact)
+	if err != nil {
+		return fmt.Errorf("failed to compute hash: %w", err)
+	}
+	v2Artefact.ID = hash
+
+	// Convert to V1 for client.CreateArtefact
+	v1Artefact := &blackboard.Artefact{
+		ID:              v2Artefact.ID,
+		LogicalID:       v2Artefact.Header.LogicalThreadID,
+		Version:         v2Artefact.Header.Version,
+		StructuralType:  v2Artefact.Header.StructuralType,
+		Type:            v2Artefact.Header.Type,
+		Payload:         v2Artefact.Payload.Content,
+		SourceArtefacts: v2Artefact.Header.ParentHashes,
+		ProducedByRole:  v2Artefact.Header.ProducedByRole,
+		CreatedAtMs:     v2Artefact.Header.CreatedAtMs,
+		ClaimID:         v2Artefact.Header.ClaimID,
+	}
+
+	if err := bbClient.CreateArtefact(ctx, v1Artefact); err != nil {
 		return fmt.Errorf("failed to create artefact: %w", err)
 	}
 
-	printer.Success("Goal artefact created: %s\n", artefactID)
+	printer.Success("Goal artefact created: %s\n", v1Artefact.ID)
 
 	printer.Info("\nNext steps:\n")
-	printer.Info("  • Agents will process this goal in Phase 2+\n")
 	printer.Info("  • View all artefacts: holt hoard --name %s\n", targetInstanceName)
 	printer.Info("  • Monitor workflow: holt watch --name %s\n", targetInstanceName)
 

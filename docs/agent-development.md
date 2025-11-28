@@ -861,6 +861,114 @@ cat <<EOF
 EOF
 ```
 
+### Pattern 5: Handling Large Content (>1MB)
+
+**Background:** V2 artefacts (M4.6+) enforce a **1MB hard limit** on the `artefact_payload` field. This ensures cryptographic hash computation remains fast and Redis performance stays optimal.
+
+**When to use this pattern:**
+- Generated content >1MB (large JSON, code files, reports)
+- Binary data (PDFs, images, compiled artifacts)
+- Datasets or analysis results
+
+**The Solution:** Write large content to the workspace filesystem, commit to Git, and store the **file reference + hash** in the payload instead of raw content.
+
+**Complete Example:**
+
+```bash
+#!/bin/sh
+set -e
+
+input=$(cat)
+
+# Generate large content (e.g., from LLM API call)
+large_content=$(curl -s "https://api.example.com/generate")
+
+# Check content size (payload size in bytes)
+content_size=${#large_content}
+MAX_SIZE=1048576  # 1MB = 1,048,576 bytes
+
+echo "Generated content size: $content_size bytes" >&2
+
+if [ "$content_size" -gt "$MAX_SIZE" ]; then
+  echo "Content exceeds 1MB limit - writing to file..." >&2
+
+  # Step 1: Write content to workspace file
+  output_file="output/generated-report.json"
+  mkdir -p "$(dirname "$output_file")"
+  echo "$large_content" > "/workspace/$output_file"
+
+  # Step 2: Compute file hash for integrity verification
+  file_hash=$(sha256sum "/workspace/$output_file" | cut -d' ' -f1)
+  echo "File hash: $file_hash" >&2
+
+  # Step 3: Commit to Git for persistence
+  cd /workspace
+  git add "$output_file"
+  git commit -m "[holt-agent: data-generator] Generated large report
+
+Claim-ID: $(echo "$input" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+File size: $content_size bytes
+File hash: $file_hash"
+
+  commit_hash=$(git rev-parse HEAD)
+  echo "Committed as: $commit_hash" >&2
+
+  # Step 4: Output artefact with file reference
+  cat <<EOF
+{
+  "artefact_type": "LargeDataCommit",
+  "artefact_payload": "{\"file\": \"$output_file\", \"size_bytes\": $content_size, \"sha256\": \"$file_hash\", \"commit\": \"$commit_hash\"}",
+  "summary": "Generated large report ($content_size bytes) - stored in $output_file"
+}
+EOF
+
+else
+  echo "Content is small enough - using direct payload" >&2
+
+  # Small content: use payload directly
+  cat <<EOF
+{
+  "artefact_type": "DataGenerated",
+  "artefact_payload": "$large_content",
+  "summary": "Generated small content ($content_size bytes)"
+}
+EOF
+
+fi
+```
+
+**Key Points:**
+
+1. **Size Detection:** Use `${#variable}` to check content size before creating artefact
+2. **File Storage:** Write to `/workspace/` (mounted Git repository)
+3. **Hash Verification:** `sha256sum` provides content integrity proof
+4. **Git Persistence:** Commit ensures content survives container restarts
+5. **Structured Payload:** Store JSON with `file`, `sha256`, and `commit` fields
+6. **Downstream Usage:** Other agents can read the file via:
+   ```bash
+   git checkout $commit_hash
+   cat /workspace/$file_path
+   # Verify integrity
+   echo "$expected_sha256  /workspace/$file_path" | sha256sum -c
+   ```
+
+**Payload Schema for Large Files:**
+
+```json
+{
+  "file": "output/report.json",
+  "size_bytes": 2048576,
+  "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "commit": "abc123def456..."
+}
+```
+
+**Troubleshooting:**
+
+- **Error: "payload exceeds 1MB limit"** → Implement this pattern
+- **Error: "file not found"** → Ensure Git commit succeeded before returning
+- **Hash mismatch** → Verify `sha256sum` runs AFTER file is written
+
 ---
 
 ## Testing Your Agent

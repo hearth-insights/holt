@@ -162,9 +162,11 @@ func (wm *WorkerManager) LaunchWorker(ctx context.Context, claim *blackboard.Cla
 		// Note: Image has ENTRYPOINT ["/app/pup"], so Cmd only contains arguments
 		Cmd: []string{"--execute-claim", claim.ID},
 		// M3.7: ONLY HOLT_AGENT_NAME is set (to the role), HOLT_AGENT_ROLE removed
+		// M4.6 Security Addendum: HOLT_CLAIM_ID binds the worker to the authorization
 		Env: []string{
 			fmt.Sprintf("HOLT_INSTANCE_NAME=%s", wm.instanceName),
 			fmt.Sprintf("HOLT_AGENT_NAME=%s", agentRole),
+			fmt.Sprintf("HOLT_CLAIM_ID=%s", claim.ID), // M4.6: Grant Linkage for topology validation
 			fmt.Sprintf("REDIS_URL=%s", redisURL),
 			fmt.Sprintf("HOLT_BIDDING_STRATEGY=%s", agent.BiddingStrategy),
 			// NOTE: No HOLT_MODE for workers - the --execute-claim flag is sufficient

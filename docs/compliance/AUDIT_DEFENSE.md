@@ -10,12 +10,13 @@ Legacy automation was rule-based (*If X, then Y*). Modern AI is probabilistic (*
 Holt resolves this paradox via **Deterministic Orchestration**. While the *agent* inside the container may be probabilistic, the *harness* (the Holt engine) is a rigid, append-only state machine. This document outlines the theoretical basis for using Holt as a system of record for regulated decisioning.
 
 ## 2. Theoretical basis: The immutable blackboard
-Traditional systems log *outputs*. Holt logs *state transitions*.
+Traditional systems log *outputs*. Holt logs *state transitions* in a cryptographically verifiable structure.
 
-### 2.1 The event-sourced ledger
-The "Blackboard" is not a temporary message queue; it is a chronological database of record.
-* **Principle of non-repudiation**: Once an agent writes an `Artefact` (e.g., a drafted SAR), it cannot be deleted or modified. It can only be superseded by a new version.
-* **Temporal ordering**: The Redis-backed sequence ensures that the "Chain of Events" is preserved. We can prove that *Event A* (Sanctions Check) happened before *Event B* (Transaction Clearance).
+### 2.1 The Cryptographic Merkle Ledger
+The "Blackboard" is not just a chronological database; it is a **Merkle Directed Acyclic Graph (DAG)**.
+*   **Content Addressing**: Every record (`Artefact`) is identified not by a random ID, but by the SHA-256 hash of its own content.
+*   **Cryptographic Chaining**: Every child record includes the hash of its parent. It is mathematically impossible to alter a historical record (e.g., changing a prompt or a decision) without invalidating the hashes of all subsequent records.
+*   **Principle of Non-Repudiation**: Once an agent writes an artefact, the cryptographic chain prevents it from being deleted or surreptitiously modified.
 
 ### 2.2 Forensic replayability
 Because the state is immutable, the system supports "Forensic Time-Travel." An auditor can replay the exact state of the workflow as it existed at 14:03 PM on a specific date. This satisfies the regulatory requirement to reconstruct the decision environment long after the transaction has settled.
