@@ -21,8 +21,8 @@ RUN CGO_ENABLED=0 go build -ldflags="-w -s" -o holt-orchestrator ./cmd/orchestra
 # Runtime stage
 FROM alpine:latest
 
-# Install ca-certificates for HTTPS (if needed in future)
-RUN apk --no-cache add ca-certificates
+# Install ca-certificates for HTTPS and git for M4.7 System Spine
+RUN apk --no-cache add ca-certificates git
 
 # M3.4: Create holt user with known UID for Docker socket access
 # The container will be launched with GroupAdd to match host's docker GID

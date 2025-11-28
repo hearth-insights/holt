@@ -1,4 +1,4 @@
-.PHONY: help test test-verbose test-integration test-e2e test-all coverage coverage-html lint build build-orchestrator build-pup docker-orchestrator build-all clean install test-pup
+.PHONY: help test test-verbose test-integration test-e2e test-all coverage coverage-html lint build build-orchestrator build-pup docker-orchestrator build-all clean install test-pup cleanup-docker
 
 # Use Go 1.24 if available in /usr/local/go, otherwise use system go
 GO := $(shell [ -x /usr/local/go/bin/go ] && echo /usr/local/go/bin/go || echo go)
@@ -49,6 +49,7 @@ help:
 	@echo "Development:"
 	@echo "  build-orchestrator  - Build orchestrator binary (for debugging only)"
 	@echo "  build-pup           - Build agent pup binary"
+	@echo "  cleanup-docker      - Remove all Holt Docker containers and networks"
 	@echo "  install             - Install holt binary to user bin directory"
 	@echo "                        (tries /usr/local/bin, ~/.local/bin, or GOPATH/bin)"
 	@echo "                        Use PREFIX=/custom/path for custom location"
@@ -130,12 +131,28 @@ test-all: test test-pup test-integration test-e2e
 	@echo ""
 
 # Run all tests and show only the failures
-test-failed:
-	@echo "Running all tests and filtering for failures..."
-	@# This is a simple but robust approach using grep. It may show some extra
-	@# context from previous tests, but it will not swallow failure messages.
-	@# It looks for lines starting with "--- FAIL:" (for test failures) or "FAIL	" (for package/build failures).
-	@$(MAKE) test-all 2>&1 | grep -E -A 20 -B 20 "^--- FAIL:|^FAIL	" || true
+# Uses `go test -json` and a custom awk script to extract complete failure output
+test-failed: build build-pup docker-orchestrator
+	@echo "Running all tests with failure filtering..."
+	@echo "Building Docker images for E2E tests..."
+	@docker build -q -t example-git-agent:latest -f agents/example-git-agent/Dockerfile . > /dev/null 2>&1 || true
+	@docker build -q -t example-agent:latest -f agents/example-agent/Dockerfile . > /dev/null 2>&1 || true
+	@echo ""
+	@echo "Running unit tests..."
+	@$(GO) test $(TEST_FLAGS) -json ./pkg/... ./internal/... ./cmd/holt/... 2>&1 | bash scripts/filter-test-failures.sh || true
+	@echo ""
+	@echo "Running pup tests..."
+	@$(GO) test $(TEST_FLAGS) -json ./cmd/pup 2>&1 | bash scripts/filter-test-failures.sh || true
+	@echo ""
+	@echo "Running integration tests..."
+	@$(GO) test $(TEST_FLAGS) -json -tags=integration ./cmd/orchestrator 2>&1 | bash scripts/filter-test-failures.sh || true
+	@echo ""
+	@echo "Running E2E tests..."
+	@$(GO) test $(TEST_FLAGS) -json -timeout 15m -tags=integration -run="TestE2E|TestPerformance" ./cmd/holt/commands 2>&1 | bash scripts/filter-test-failures.sh || true
+	@echo ""
+	@echo "========================================"
+	@echo "Test failure summary complete"
+	@echo "========================================"
 
 # Build the holt binary
 build:
@@ -239,3 +256,11 @@ clean:
 	@rm -rf bin/
 	@rm -f coverage.out coverage.html
 	@echo "✓ Clean complete"
+
+# Cleanup all Holt Docker resources
+cleanup-docker:
+	@echo "Cleaning up Holt Docker containers..."
+	@docker rm -f $$(docker ps -a -q -f "label=holt.project=true") 2>/dev/null || true
+	@echo "Cleaning up Holt Docker networks..."
+	@docker network rm $$(docker network ls -q -f "label=holt.project=true") 2>/dev/null || true
+	@echo "✓ Cleanup complete"

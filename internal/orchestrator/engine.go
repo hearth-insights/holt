@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	"github.com/dyluth/holt/internal/config"
 	"github.com/dyluth/holt/internal/orchestrator/debug"
+	"github.com/dyluth/holt/internal/orchestrator/identity"
 	"github.com/dyluth/holt/pkg/blackboard"
 )
 
@@ -24,6 +26,8 @@ type Engine struct {
 	pendingAssignmentClaims map[string]string      // claimID -> targetArtefactID (M3.3: feedback claim tracking)
 	workerManager           *WorkerManager         // M3.4: Worker lifecycle management
 	debugSession            *debugSession          // M4.2: Debug session state
+	activeManifestID        string                 // M4.7: Current SystemManifest hash for anchoring workflows
+	spineThreadID           string                 // M4.7: LogicalThreadID for system spine
 }
 
 // NewEngine creates a new orchestrator engine.
@@ -77,6 +81,11 @@ func (e *Engine) Run(ctx context.Context) error {
 	// M4.2: Initialize debug monitoring
 	if err := e.initializeDebugMonitoring(ctx); err != nil {
 		return fmt.Errorf("failed to initialize debug monitoring: %w", err)
+	}
+
+	// M4.7: Initialize System Spine
+	if err := e.initializeSystemSpine(ctx); err != nil {
+		return fmt.Errorf("failed to initialize System Spine: %w", err)
 	}
 
 	// Subscribe to artefact events
@@ -459,4 +468,72 @@ func (e *Engine) checkPendingAssignmentClaims(ctx context.Context, artefact *bla
 		log.Printf("[Orchestrator] Feedback claim %s completed by agent %s (artefact: %s)",
 			claimID, claim.GrantedExclusiveAgent, artefact.ID)
 	}
+}
+
+// initializeSystemSpine performs M4.7 System Spine initialization.
+// Creates or updates the SystemManifest based on current configuration state.
+func (e *Engine) initializeSystemSpine(ctx context.Context) error {
+	// Skip spine initialization if config is nil (test mode)
+	if e.config == nil {
+		log.Printf("[Orchestrator] Skipping System Spine initialization (no config provided - test mode)")
+		e.activeManifestID = "" // No active manifest in test mode
+		e.spineThreadID = ""    // No spine thread in test mode
+		return nil
+	}
+
+	log.Printf("[Orchestrator] Initializing System Spine...")
+
+	// Determine config path and workspace root
+	// Use environment variable if set, otherwise use default /workspace paths
+	configPath := os.Getenv("HOLT_CONFIG_PATH")
+	if configPath == "" {
+		configPath = "/workspace/holt.yml"
+	}
+
+	workspaceRoot := os.Getenv("HOLT_WORKSPACE_ROOT")
+	if workspaceRoot == "" {
+		workspaceRoot = "/workspace"
+	}
+
+	// Create identity provider (defaults to Local strategy)
+	identityProvider, err := blackboard.NewIdentityProvider(configPath, workspaceRoot)
+	if err != nil {
+		return fmt.Errorf("failed to create identity provider: %w", err)
+	}
+
+	// Load or generate spine thread ID
+	// First check if spine thread ID exists in Redis
+	spineThreadKey := fmt.Sprintf("holt:%s:spine_thread_id", e.instanceName)
+	existingThreadID, err := e.client.GetRedisClient().Get(ctx, spineThreadKey).Result()
+
+	if err != nil && err.Error() != "redis: nil" {
+		return fmt.Errorf("failed to query spine thread ID: %w", err)
+	}
+
+	if existingThreadID != "" {
+		// Reuse existing spine thread ID
+		e.spineThreadID = existingThreadID
+		log.Printf("[Orchestrator] Using existing spine thread ID: %s", e.spineThreadID[:8]+"...")
+	} else {
+		// Generate new spine thread ID and persist it
+		e.spineThreadID = identity.GenerateSpineThreadID()
+		if err := e.client.GetRedisClient().Set(ctx, spineThreadKey, e.spineThreadID, 0).Err(); err != nil {
+			return fmt.Errorf("failed to persist spine thread ID: %w", err)
+		}
+		log.Printf("[Orchestrator] Generated new spine thread ID: %s", e.spineThreadID[:8]+"...")
+	}
+
+	// Create spine manager
+	spineManager := identity.NewSpineManager(e.client, identityProvider, e.instanceName, e.spineThreadID)
+
+	// Initialize spine (drift detection + manifest creation/reuse)
+	activeManifestID, err := spineManager.InitializeSpine(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to initialize spine: %w", err)
+	}
+
+	e.activeManifestID = activeManifestID
+	log.Printf("[Orchestrator] System Spine initialized - active manifest: %s", activeManifestID[:16]+"...")
+
+	return nil
 }

@@ -154,27 +154,121 @@ func (e *Engine) verifyArtefact(ctx context.Context, artefact *blackboard.Verifi
 	// Rule 1: Root/User artefacts (CLI/user-generated) validation
 	if artefact.Header.ProducedByRole == "user" || artefact.Header.ProducedByRole == "cli" {
 		// User/CLI artefacts must have empty claim (they operate outside grant system)
-		// Note: They CAN have parents (e.g., answering a question via 'holt answer'), so we don't enforce empty ParentHashes.
-		if artefact.Header.ClaimID == "" {
-			// Valid user artefact - skip further topology checks
+		if artefact.Header.ClaimID != "" {
+			// SECURITY EVENT: Root artefact with invalid topology
+			alert := &blackboard.SecurityAlert{
+				Type:                "unauthorized_topology",
+				TimestampMs:         time.Now().UnixMilli(),
+				ArtefactID:          artefact.ID,
+				AgentRole:           artefact.Header.ProducedByRole,
+				ViolationType:       "root_artefact_with_claim",
+				OrchestratorAction:  "global_lockdown",
+			}
+
+			if lockdownErr := e.client.TriggerGlobalLockdown(ctx, alert); lockdownErr != nil {
+				log.Printf("[Orchestrator] CRITICAL: Failed to trigger lockdown for topology violation: %v", lockdownErr)
+			}
+
+			return fmt.Errorf("topology violation: user/cli artefact must have empty ClaimID (artefact %s)", artefact.ID)
+		}
+
+		// M4.7: Root Artefact Manifest Anchoring
+		// TRUE root artefacts (Version=1, starting new threads) MUST have exactly one parent: the SystemManifest
+		// Continuations (Version>1) may have additional semantic parents (e.g., answer to question)
+		// Backward compatibility: Pre-M4.7 artefacts may have empty ParentHashes
+
+		if len(artefact.Header.ParentHashes) == 0 {
+			// Pre-M4.7 artefact (no manifest anchor) - accept with warning
+			log.Printf("[Orchestrator] Warning: Pre-M4.7 root artefact detected (no manifest anchor): %s", artefact.ID[:16]+"...")
 			goto hashVerification
 		}
 
-		// SECURITY EVENT: Root artefact with invalid topology
-		alert := &blackboard.SecurityAlert{
-			Type:                "unauthorized_topology",
-			TimestampMs:         time.Now().UnixMilli(),
-			ArtefactID:          artefact.ID,
-			AgentRole:           artefact.Header.ProducedByRole,
-			ViolationType:       "root_artefact_with_claim",
-			OrchestratorAction:  "global_lockdown",
-		}
+		// M4.7+: Apply manifest anchor validation ONLY to true roots (Version=1)
+		if artefact.Header.Version == 1 {
+			// This is a workflow-initiating artefact - must have exactly ONE parent (the manifest)
+			if len(artefact.Header.ParentHashes) != 1 {
+				// Invalid: root artefact must have exactly ONE parent (the manifest)
+				alert := &blackboard.SecurityAlert{
+					Type:                "unauthorized_topology",
+					TimestampMs:         time.Now().UnixMilli(),
+					ArtefactID:          artefact.ID,
+					AgentRole:           artefact.Header.ProducedByRole,
+					ViolationType:       "root_missing_manifest_anchor",
+					OrchestratorAction:  "global_lockdown",
+				}
 
-		if lockdownErr := e.client.TriggerGlobalLockdown(ctx, alert); lockdownErr != nil {
-			log.Printf("[Orchestrator] CRITICAL: Failed to trigger lockdown for topology violation: %v", lockdownErr)
-		}
+				if lockdownErr := e.client.TriggerGlobalLockdown(ctx, alert); lockdownErr != nil {
+					log.Printf("[Orchestrator] CRITICAL: Failed to trigger lockdown for topology violation: %v", lockdownErr)
+				}
 
-		return fmt.Errorf("topology violation: user/cli artefact must have empty ClaimID (artefact %s)", artefact.ID)
+				return fmt.Errorf("topology violation: root artefact (Version=1) must have exactly one parent (active manifest), got %d (artefact %s)",
+					len(artefact.Header.ParentHashes), artefact.ID)
+			}
+
+			// Verify the single parent is a valid SystemManifest
+			parentHash := artefact.Header.ParentHashes[0]
+			parentManifest, err := e.client.GetVerifiableArtefact(ctx, parentHash)
+			if err != nil {
+				// Parent doesn't exist - this is caught by orphan block check (Stage 1)
+				// But we provide a more specific error message here
+				alert := &blackboard.SecurityAlert{
+					Type:                "unauthorized_topology",
+					TimestampMs:         time.Now().UnixMilli(),
+					ArtefactID:          artefact.ID,
+					MissingParentHash:   parentHash,
+					AgentRole:           artefact.Header.ProducedByRole,
+					ViolationType:       "root_invalid_manifest_reference",
+					OrchestratorAction:  "global_lockdown",
+				}
+
+				if lockdownErr := e.client.TriggerGlobalLockdown(ctx, alert); lockdownErr != nil {
+					log.Printf("[Orchestrator] CRITICAL: Failed to trigger lockdown for topology violation: %v", lockdownErr)
+				}
+
+				return fmt.Errorf("topology violation: root artefact references non-existent manifest: %s (artefact %s)", parentHash, artefact.ID)
+			}
+
+			// Verify parent is actually a SystemManifest
+			if parentManifest.Header.StructuralType != blackboard.StructuralTypeSystemManifest {
+				alert := &blackboard.SecurityAlert{
+					Type:                "unauthorized_topology",
+					TimestampMs:         time.Now().UnixMilli(),
+					ArtefactID:          artefact.ID,
+					AgentRole:           artefact.Header.ProducedByRole,
+					ViolationType:       "root_parent_not_manifest",
+					OrchestratorAction:  "global_lockdown",
+				}
+
+				if lockdownErr := e.client.TriggerGlobalLockdown(ctx, alert); lockdownErr != nil {
+					log.Printf("[Orchestrator] CRITICAL: Failed to trigger lockdown for topology violation: %v", lockdownErr)
+				}
+
+				return fmt.Errorf("topology violation: root artefact parent must be SystemManifest, got %s (artefact %s)",
+					parentManifest.Header.StructuralType, artefact.ID)
+			}
+
+			// SOFT CHECK: Warn if anchored to old manifest (continuity rule - M4.7 design section 3.1)
+			// This can happen during config drift race conditions
+			if e.activeManifestID != "" && parentHash != e.activeManifestID {
+				log.Printf("[Orchestrator] Warning: Root artefact anchored to old manifest (config drift race condition)")
+				log.Printf("[Orchestrator]   Artefact: %s", artefact.ID[:16]+"...")
+				log.Printf("[Orchestrator]   Expected manifest: %s", e.activeManifestID[:16]+"...")
+				log.Printf("[Orchestrator]   Actual manifest: %s", parentHash[:16]+"...")
+				// Accept the artefact - valid historical manifest
+			}
+
+			// Valid root artefact with manifest anchor
+			goto hashVerification
+		} else {
+			// Version>1: Continuation artefact (e.g., answer to question)
+			// Must have at least one parent (verified in Stage 1)
+			// No strict manifest anchoring required for continuations
+			log.Printf("[Orchestrator] Info: User continuation artefact (Version=%d) with %d parents: %s",
+				artefact.Header.Version, len(artefact.Header.ParentHashes), artefact.ID[:16]+"...")
+
+			// Valid user continuation artefact
+			goto hashVerification
+		}
 	}
 
 	// Rule 2: Orchestrator artefacts (Failure/Terminal) validation
