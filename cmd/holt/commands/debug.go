@@ -18,7 +18,6 @@ import (
 	"github.com/dyluth/holt/internal/printer"
 	"github.com/dyluth/holt/internal/watch"
 	"github.com/dyluth/holt/pkg/blackboard"
-	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"github.com/spf13/cobra"
 )
@@ -252,7 +251,7 @@ func NewDebugger(ctx context.Context, client *blackboard.Client, instanceName st
 		ctx:          ctx,
 		client:       client,
 		instanceName: instanceName,
-		sessionID:    uuid.New().String(),
+		sessionID:    blackboard.NewID(), // Unique session ID
 		redisClient:  client.GetRedisClient(),
 		cancelCtx:    cancelCtx,
 		cancelFunc:   cancelFunc,
@@ -808,7 +807,7 @@ func (d *Debugger) cmdPrint(artefactID string) {
 	}
 
 	// Handle shortened IDs - try both artefact and claim
-	if len(artefactID) < 36 { // UUID is 36 chars with hyphens
+	if len(artefactID) < 64 { // Full ID is 64 chars (SHA-256 hex)
 		// Try artefact first
 		fullID, errArtefact := d.expandShortID(artefactID, "artefact")
 		if errArtefact == nil {
@@ -966,34 +965,56 @@ func (d *Debugger) cmdForage(args []string) {
 		return
 	}
 
-	// Create GoalDefined artefact
-	artefactID := uuid.New().String()
-	logicalID := uuid.New().String()
-
-	artefact := &blackboard.Artefact{
-		ID:              artefactID,
-		LogicalID:       logicalID,
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "GoalDefined",
-		Payload:         goal,
-		SourceArtefacts: []string{},
-		ProducedByRole:  "user",
-		// CreatedAtMs auto-populated by CreateArtefact
+	// Create GoalDefined artefact using V2 content addressing
+	v2Artefact := &blackboard.VerifiableArtefact{
+		Header: blackboard.ArtefactHeader{
+			ParentHashes:    []string{},
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			CreatedAtMs:     time.Now().UnixMilli(),
+			ProducedByRole:  "user",
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "GoalDefined",
+			ClaimID:         "", // Root artefact
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: goal,
+		},
 	}
 
-	if err := d.client.CreateArtefact(d.ctx, artefact); err != nil {
+	hash, err := blackboard.ComputeArtefactHash(v2Artefact)
+	if err != nil {
+		printer.Error("failed to compute hash", err.Error(), nil)
+		return
+	}
+	v2Artefact.ID = hash
+
+	// Convert to V1 for creation
+	v1Artefact := &blackboard.Artefact{
+		ID:              v2Artefact.ID,
+		LogicalID:       v2Artefact.Header.LogicalThreadID,
+		Version:         v2Artefact.Header.Version,
+		StructuralType:  v2Artefact.Header.StructuralType,
+		Type:            v2Artefact.Header.Type,
+		Payload:         v2Artefact.Payload.Content,
+		SourceArtefacts: v2Artefact.Header.ParentHashes,
+		ProducedByRole:  v2Artefact.Header.ProducedByRole,
+		CreatedAtMs:     v2Artefact.Header.CreatedAtMs,
+		ClaimID:         v2Artefact.Header.ClaimID,
+	}
+
+	if err := d.client.CreateArtefact(d.ctx, v1Artefact); err != nil {
 		printer.Error("failed to create artefact", err.Error(), []string{"Ensure instance is running and Redis is accessible"})
 		return
 	}
 
 	// Show success with both short and full ID
-	shortID := artefactID
+	shortID := v1Artefact.ID
 	if len(shortID) > 8 {
 		shortID = shortID[:8] + "..."
 	}
 	printer.Success("✓ GoalDefined artefact created: %s\n", shortID)
-	printer.Info("Full ID: %s\n", artefactID)
+	printer.Info("Full ID: %s\n", v1Artefact.ID)
 
 	// Auto-continue if we're paused (workflow should start immediately)
 	d.mu.RLock()

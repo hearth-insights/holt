@@ -21,7 +21,7 @@ import (
 	"github.com/dyluth/holt/internal/git"
 	"github.com/dyluth/holt/internal/instance"
 	"github.com/dyluth/holt/internal/printer"
-	"github.com/google/uuid"
+	"github.com/dyluth/holt/pkg/blackboard"
 	"github.com/redis/go-redis/v9"
 	"github.com/spf13/cobra"
 )
@@ -183,7 +183,7 @@ func runUp(cmd *cobra.Command, args []string) error {
 	}
 
 	// Phase 6: Resource Creation
-	runID := uuid.New().String()
+	runID := blackboard.NewID()
 	if err := createInstance(ctx, cli, cfg, targetInstanceName, runID, workspacePath); err != nil {
 		// Attempt rollback on failure
 		printer.Info("\nResource creation failed: %v\nRolling back...\n", err)

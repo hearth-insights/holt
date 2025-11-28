@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"os/exec"
 	"strings"
 	"testing"
 
@@ -49,11 +48,14 @@ func TestHoardCommand_Integration(t *testing.T) {
 
 		ctx := context.Background()
 
+		id1 := blackboard.NewID()
+		id2 := blackboard.NewID()
+
 		// Create test artefacts
 		artefacts := []*blackboard.Artefact{
 			{
-				ID:              "550e8400-e29b-41d4-a716-446655440001",
-				LogicalID:       "650e8400-e29b-41d4-a716-446655440001",
+				ID:              id1,
+				LogicalID:       blackboard.NewID(),
 				Version:         1,
 				StructuralType:  blackboard.StructuralTypeStandard,
 				Type:            "GoalDefined",
@@ -62,14 +64,14 @@ func TestHoardCommand_Integration(t *testing.T) {
 				SourceArtefacts: []string{},
 			},
 			{
-				ID:              "550e8400-e29b-41d4-a716-446655440002",
-				LogicalID:       "650e8400-e29b-41d4-a716-446655440002",
+				ID:              id2,
+				LogicalID:       blackboard.NewID(),
 				Version:         1,
 				StructuralType:  blackboard.StructuralTypeStandard,
 				Type:            "CodeCommit",
 				ProducedByRole:  "test-agent",
 				Payload:         "a3f5b8c91d2e4f7a9b1c3d5e6f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6",
-				SourceArtefacts: []string{"550e8400-e29b-41d4-a716-446655440001"},
+				SourceArtefacts: []string{id1},
 			},
 		}
 
@@ -98,12 +100,12 @@ func TestHoardCommand_Integration(t *testing.T) {
 
 		// Create test artefact
 		artefact := &blackboard.Artefact{
-			ID:              "550e8400-e29b-41d4-a716-446655440000",
-			LogicalID:       "650e8400-e29b-41d4-a716-446655440000",
+			ID:              blackboard.NewID(),
+			LogicalID:       blackboard.NewID(),
 			Version:         1,
 			StructuralType:  blackboard.StructuralTypeStandard,
 			Type:            "GoalDefined",
-				ProducedByRole:  "test-agent",
+			ProducedByRole:  "test-agent",
 			Payload:         "hello-from-holt.txt",
 			SourceArtefacts: []string{},
 		}
@@ -132,7 +134,7 @@ func TestHoardCommand_Integration(t *testing.T) {
 		ctx := context.Background()
 
 		// Try to get non-existent artefact
-		_, err = bbClient.GetArtefact(ctx, "550e8400-e29b-41d4-a716-446655440000")
+		_, err = bbClient.GetArtefact(ctx, blackboard.NewID())
 		assert.Error(t, err)
 		assert.True(t, blackboard.IsNotFound(err))
 	})
@@ -149,11 +151,14 @@ func TestHoardCommand_Integration(t *testing.T) {
 
 		ctx := context.Background()
 
+		id1 := blackboard.NewID()
+		id2 := blackboard.NewID()
+
 		// Create test artefacts
 		artefacts := []*blackboard.Artefact{
 			{
-				ID:              "550e8400-e29b-41d4-a716-446655440001",
-				LogicalID:       "650e8400-e29b-41d4-a716-446655440001",
+				ID:              id1,
+				LogicalID:       blackboard.NewID(),
 				Version:         1,
 				StructuralType:  blackboard.StructuralTypeStandard,
 				Type:            "GoalDefined",
@@ -162,14 +167,14 @@ func TestHoardCommand_Integration(t *testing.T) {
 				SourceArtefacts: []string{},
 			},
 			{
-				ID:              "550e8400-e29b-41d4-a716-446655440002",
-				LogicalID:       "650e8400-e29b-41d4-a716-446655440002",
+				ID:              id2,
+				LogicalID:       blackboard.NewID(),
 				Version:         1,
 				StructuralType:  blackboard.StructuralTypeStandard,
 				Type:            "CodeCommit",
 				ProducedByRole:  "test-agent",
 				Payload:         "abc123",
-				SourceArtefacts: []string{"550e8400-e29b-41d4-a716-446655440001"},
+				SourceArtefacts: []string{id1},
 			},
 		}
 
@@ -210,12 +215,12 @@ func TestHoardCommand_Integration(t *testing.T) {
 
 		// Create a valid artefact
 		validArtefact := &blackboard.Artefact{
-			ID:              "550e8400-e29b-41d4-a716-446655440000",
-			LogicalID:       "650e8400-e29b-41d4-a716-446655440000",
+			ID:              blackboard.NewID(),
+			LogicalID:       blackboard.NewID(),
 			Version:         1,
 			StructuralType:  blackboard.StructuralTypeStandard,
 			Type:            "Valid",
-				ProducedByRole:  "test-agent",
+			ProducedByRole:  "test-agent",
 			Payload:         "valid",
 			SourceArtefacts: []string{},
 		}
@@ -266,12 +271,12 @@ func TestHoardCommand_OutputValidation(t *testing.T) {
 
 		// Create artefact
 		artefact := &blackboard.Artefact{
-			ID:              "550e8400-e29b-41d4-a716-446655440000",
-			LogicalID:       "650e8400-e29b-41d4-a716-446655440000",
+			ID:              blackboard.NewID(),
+			LogicalID:       blackboard.NewID(),
 			Version:         1,
 			StructuralType:  blackboard.StructuralTypeStandard,
 			Type:            "Test",
-				ProducedByRole:  "test-agent",
+			ProducedByRole:  "test-agent",
 			Payload:         "test",
 			SourceArtefacts: []string{},
 		}
@@ -290,25 +295,6 @@ func TestHoardCommand_OutputValidation(t *testing.T) {
 		err = json.Unmarshal(buf.Bytes(), &decoded)
 		require.NoError(t, err)
 		assert.Equal(t, artefact.ID, decoded.ID)
-	})
-}
-
-func TestHoardCommand_InvalidUUID(t *testing.T) {
-	t.Run("rejects invalid UUID format", func(t *testing.T) {
-		invalidUUIDs := []string{
-			"not-a-uuid",
-			"12345",
-			"",
-			"abc-def-ghi",
-			"550e8400-e29b-41d4-a716", // incomplete UUID
-		}
-
-		for _, invalidID := range invalidUUIDs {
-			// UUID validation would happen in the get.go function
-			// which rejects non-UUID formats
-			_, err := exec.Command("echo", invalidID).Output()
-			require.NoError(t, err) // Just testing the test setup
-		}
 	})
 }
 
@@ -360,7 +346,7 @@ func TestHoardCommand_SortingBehavior(t *testing.T) {
 		for _, id := range ids {
 			artefact := &blackboard.Artefact{
 				ID:              id,
-				LogicalID:       "650e8400-e29b-41d4-a716-446655440000",
+				LogicalID:       blackboard.NewID(),
 				Version:         1,
 				StructuralType:  blackboard.StructuralTypeStandard,
 				Type:            "Test",

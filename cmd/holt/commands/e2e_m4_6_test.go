@@ -10,7 +10,6 @@ import (
 
 	"github.com/dyluth/holt/internal/testutil"
 	"github.com/dyluth/holt/pkg/blackboard"
-	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -65,7 +64,7 @@ services:
 		artefact := &blackboard.VerifiableArtefact{
 			Header: blackboard.ArtefactHeader{
 				ParentHashes:    []string{}, // Root artefact
-				LogicalThreadID: uuid.New().String(),
+				LogicalThreadID: blackboard.NewID(),
 				Version:         1,
 				CreatedAtMs:     time.Now().UnixMilli(),
 				ProducedByRole:  "test-agent",
@@ -115,7 +114,7 @@ services:
 		artefact := &blackboard.VerifiableArtefact{
 			Header: blackboard.ArtefactHeader{
 				ParentHashes:    []string{},
-				LogicalThreadID: uuid.New().String(),
+				LogicalThreadID: blackboard.NewID(),
 				Version:         1,
 				CreatedAtMs:     time.Now().UnixMilli(),
 				ProducedByRole:  "malicious-agent",
@@ -153,7 +152,7 @@ services:
 		artefact := &blackboard.VerifiableArtefact{
 			Header: blackboard.ArtefactHeader{
 				ParentHashes:    []string{nonExistentParent}, // Parent doesn't exist
-				LogicalThreadID: uuid.New().String(),
+				LogicalThreadID: blackboard.NewID(),
 				Version:         2,
 				CreatedAtMs:     time.Now().UnixMilli(),
 				ProducedByRole:  "test-agent",
@@ -187,7 +186,7 @@ services:
 		futureArtefact := &blackboard.VerifiableArtefact{
 			Header: blackboard.ArtefactHeader{
 				ParentHashes:    []string{},
-				LogicalThreadID: uuid.New().String(),
+				LogicalThreadID: blackboard.NewID(),
 				Version:         1,
 				CreatedAtMs:     now + (10 * 60 * 1000), // 10 minutes in future
 				ProducedByRole:  "time-traveling-agent",
@@ -213,7 +212,7 @@ services:
 		pastArtefact := &blackboard.VerifiableArtefact{
 			Header: blackboard.ArtefactHeader{
 				ParentHashes:    []string{},
-				LogicalThreadID: uuid.New().String(),
+				LogicalThreadID: blackboard.NewID(),
 				Version:         1,
 				CreatedAtMs:     now - (10 * 60 * 1000), // 10 minutes in past
 				ProducedByRole:  "ancient-agent",

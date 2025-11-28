@@ -227,6 +227,44 @@ test-failed:
 	return env
 }
 
+// CreateVerifiableArtefact helper creates a V2-compliant artefact (hashed ID) and writes it to the blackboard.
+// It handles the hashing, V1 conversion, and error checking to reduce boilerplate in E2E tests.
+func (env *E2EEnvironment) CreateVerifiableArtefact(ctx context.Context, header blackboard.ArtefactHeader, payload string) *blackboard.Artefact {
+	// Construct V2 artefact
+	v2Art := &blackboard.VerifiableArtefact{
+		Header: header,
+		Payload: blackboard.ArtefactPayload{
+			Content: payload,
+		},
+	}
+
+	// Compute hash
+	hash, err := blackboard.ComputeArtefactHash(v2Art)
+	require.NoError(env.T, err, "Failed to compute artefact hash")
+	v2Art.ID = hash
+
+	// Convert to V1 for client compatibility
+	v1Art := &blackboard.Artefact{
+		ID:              v2Art.ID,
+		LogicalID:       v2Art.Header.LogicalThreadID,
+		Version:         v2Art.Header.Version,
+		StructuralType:  v2Art.Header.StructuralType,
+		Type:            v2Art.Header.Type,
+		Payload:         v2Art.Payload.Content,
+		ProducedByRole:  v2Art.Header.ProducedByRole,
+		SourceArtefacts: v2Art.Header.ParentHashes,
+		CreatedAtMs:     v2Art.Header.CreatedAtMs,
+		ClaimID:         v2Art.Header.ClaimID,
+		ContextForRoles: v2Art.Header.ContextForRoles,
+	}
+
+	// Create in Redis
+	err = env.BBClient.CreateArtefact(ctx, v1Art)
+	require.NoError(env.T, err, "Failed to create verifiable artefact")
+
+	return v1Art
+}
+
 // InitializeBlackboardClient connects to the blackboard for this environment
 // and waits for Redis to be ready
 func (env *E2EEnvironment) InitializeBlackboardClient() {
@@ -349,7 +387,7 @@ func (env *E2EEnvironment) WaitForArtefactByType(artefactType string) *blackboar
 
 			// Track this artefact
 			if data["type"] != "" {
-				allArtefacts = append(allArtefacts, fmt.Sprintf("%s (id=%s)", data["type"], data["id"][:8]))
+				allArtefacts = append(allArtefacts, fmt.Sprintf("%s (id=%s, claim_id=%s)", data["type"], data["id"][:8], data["claim_id"]))
 			}
 
 			// Check if type matches
@@ -362,7 +400,8 @@ func (env *E2EEnvironment) WaitForArtefactByType(artefactType string) *blackboar
 					Type:            data["type"],
 					Payload:         data["payload"],
 					ProducedByRole:  data["produced_by_role"],
-					SourceArtefacts: []string{}, // Simplified for now
+					ClaimID:         data["claim_id"], // M4.6: Capture ClaimID
+					SourceArtefacts: []string{},       // Simplified for now
 				}
 
 				if versionStr, ok := data["version"]; ok {
@@ -371,12 +410,13 @@ func (env *E2EEnvironment) WaitForArtefactByType(artefactType string) *blackboar
 					}
 				}
 
-				env.T.Logf("✓ Found artefact: type=%s, id=%s, payload=%s", artefact.Type, artefact.ID, artefact.Payload)
+				env.T.Logf("✓ Found artefact: type=%s, id=%s, claim_id=%s, payload=%s", artefact.Type, artefact.ID, artefact.ClaimID, artefact.Payload)
 				return artefact
 			} else {
-				env.T.Logf("✗ other artefact: type=%s, id=%s, v=%s payload=%s",
+				env.T.Logf("✗ other artefact: type=%s, id=%s, claim_id=%s, v=%s payload=%s",
 					data["type"],
 					data["id"],
+					data["claim_id"],
 					data["version"],
 					data["payload"])
 			}
@@ -410,26 +450,7 @@ func (env *E2EEnvironment) WaitForArtefactByType(artefactType string) *blackboar
 	}
 
 	// Try to get container logs for debugging
-	for _, containerSuffix := range []string{"orchestrator", "agent-git-agent"} {
-		var fullName string
-		if containerSuffix == "orchestrator" {
-			fullName = fmt.Sprintf("holt-orchestrator-%s", env.InstanceName)
-		} else {
-			// M3.7: Agent container naming changed from holt-agent-{instance}-{role} to holt-{instance}-{role}
-			fullName = fmt.Sprintf("holt-%s-git-agent", env.InstanceName)
-		}
-
-		logs, logErr := env.DockerClient.ContainerLogs(env.Ctx, fullName, container.LogsOptions{
-			ShowStdout: true,
-			ShowStderr: true,
-			Tail:       "30",
-		})
-		if logErr == nil {
-			defer logs.Close()
-			logBytes, _ := io.ReadAll(logs)
-			failMsg += fmt.Sprintf("\n\n%s logs:\n%s", containerSuffix, string(logBytes))
-		}
-	}
+	env.DumpInstanceLogs()
 
 	require.Fail(env.T, failMsg)
 	return nil

@@ -10,7 +10,6 @@ import (
 	"github.com/dyluth/holt/internal/config"
 	"github.com/dyluth/holt/internal/orchestrator/debug"
 	"github.com/dyluth/holt/pkg/blackboard"
-	"github.com/google/uuid"
 )
 
 // Engine is the core orchestrator that watches for artefacts and creates claims.
@@ -186,7 +185,7 @@ func (e *Engine) processArtefact(ctx context.Context, artefact *blackboard.Artef
 
 	// Create new claim
 	startTime := time.Now()
-	claimID := uuid.New().String()
+	claimID := blackboard.NewID()
 
 	claim := &blackboard.Claim{
 		ID:         claimID,

@@ -151,11 +151,12 @@ func (e *Engine) verifyArtefact(ctx context.Context, artefact *blackboard.Verifi
 	var claim *blackboard.Claim
 	var err error
 
-	// Rule 1: Root artefacts (CLI/user-generated) validation
+	// Rule 1: Root/User artefacts (CLI/user-generated) validation
 	if artefact.Header.ProducedByRole == "user" || artefact.Header.ProducedByRole == "cli" {
-		// Root artefacts must have empty parents AND empty claim
-		if len(artefact.Header.ParentHashes) == 0 && artefact.Header.ClaimID == "" {
-			// Valid root artefact - skip further topology checks
+		// User/CLI artefacts must have empty claim (they operate outside grant system)
+		// Note: They CAN have parents (e.g., answering a question via 'holt answer'), so we don't enforce empty ParentHashes.
+		if artefact.Header.ClaimID == "" {
+			// Valid user artefact - skip further topology checks
 			goto hashVerification
 		}
 
@@ -173,7 +174,7 @@ func (e *Engine) verifyArtefact(ctx context.Context, artefact *blackboard.Verifi
 			log.Printf("[Orchestrator] CRITICAL: Failed to trigger lockdown for topology violation: %v", lockdownErr)
 		}
 
-		return fmt.Errorf("topology violation: root artefact must have empty ParentHashes and ClaimID (artefact %s)", artefact.ID)
+		return fmt.Errorf("topology violation: user/cli artefact must have empty ClaimID (artefact %s)", artefact.ID)
 	}
 
 	// Rule 2: Orchestrator artefacts (Failure/Terminal) validation

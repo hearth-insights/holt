@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/google/uuid"
+	"github.com/dyluth/holt/pkg/blackboard"
 )
 
 // Label keys used for Holt resources
@@ -36,10 +36,10 @@ func BuildLabels(instanceName, runID, workspacePath, component string) map[strin
 	return labels
 }
 
-// GenerateRunID creates a new UUID for an instance run.
+// GenerateRunID creates a new unique ID for an instance run.
 // Each invocation of `holt up` gets a unique run ID.
 func GenerateRunID() string {
-	return uuid.New().String()
+	return blackboard.NewID()
 }
 
 // Resource naming conventions for Holt components

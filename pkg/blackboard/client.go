@@ -1156,21 +1156,39 @@ func (c *Client) PublishSecurityAlert(ctx context.Context, alert *SecurityAlert)
 // WriteVerifiableArtefact writes a VerifiableArtefact to Redis.
 // M4.6: This is used for V2 hash-based artefacts during testing and eventual migration.
 // Similar to CreateArtefact but for the VerifiableArtefact type.
+//
+// Stores the artefact as a Redis Hash (HSET) to be compatible with existing GetArtefact (HGETALL) calls.
 func (c *Client) WriteVerifiableArtefact(ctx context.Context, a *VerifiableArtefact) error {
 	// Validate artefact structure
 	if err := a.Validate(); err != nil {
 		return fmt.Errorf("invalid verifiable artefact: %w", err)
 	}
 
-	// Serialize to JSON for Redis storage
-	artefactJSON, err := json.Marshal(a)
-	if err != nil {
-		return fmt.Errorf("failed to marshal verifiable artefact: %w", err)
+	// Convert V2 VerifiableArtefact to V1 Artefact for backwards compatibility with HGETALL
+	// This ensures GetArtefact works for both V1 (UUID) and V2 (Hash) artefacts
+	v1Artefact := &Artefact{
+		ID:              a.ID,
+		LogicalID:       a.Header.LogicalThreadID,
+		Version:         a.Header.Version,
+		StructuralType:  a.Header.StructuralType,
+		Type:            a.Header.Type,
+		Payload:         a.Payload.Content,
+		SourceArtefacts: a.Header.ParentHashes,
+		ProducedByRole:  a.Header.ProducedByRole,
+		CreatedAtMs:     a.Header.CreatedAtMs,
+		ClaimID:         a.Header.ClaimID,
+		ContextForRoles: a.Header.ContextForRoles,
 	}
 
-	// Write to Redis using hash ID as key
+	// Convert to Redis hash
+	hash, err := ArtefactToHash(v1Artefact)
+	if err != nil {
+		return fmt.Errorf("failed to serialize verifiable artefact to hash: %w", err)
+	}
+
+	// Write to Redis using hash ID as key (HSET)
 	key := ArtefactKey(c.instanceName, a.ID)
-	if err := c.rdb.Set(ctx, key, artefactJSON, 0).Err(); err != nil {
+	if err := c.rdb.HSet(ctx, key, hash).Err(); err != nil {
 		return fmt.Errorf("failed to write verifiable artefact to Redis: %w", err)
 	}
 
@@ -1187,22 +1205,43 @@ func (c *Client) WriteVerifiableArtefact(ctx context.Context, a *VerifiableArtef
 func (c *Client) GetVerifiableArtefact(ctx context.Context, hashID string) (*VerifiableArtefact, error) {
 	key := ArtefactKey(c.instanceName, hashID)
 
-	// Read JSON from Redis
-	data, err := c.rdb.Get(ctx, key).Result()
+	// Read hash from Redis (HGETALL)
+	hashData, err := c.rdb.HGetAll(ctx, key).Result()
 	if err != nil {
-		if err == redis.Nil {
-			return nil, redis.Nil
-		}
 		return nil, fmt.Errorf("failed to read verifiable artefact from Redis: %w", err)
 	}
 
-	// Unmarshal JSON
-	var artefact VerifiableArtefact
-	if err := json.Unmarshal([]byte(data), &artefact); err != nil {
-		return nil, fmt.Errorf("failed to deserialize verifiable artefact: %w", err)
+	// Check if key exists
+	if len(hashData) == 0 {
+		return nil, redis.Nil
 	}
 
-	return &artefact, nil
+	// Convert Hash to V1 Artefact first (reusing existing deserialization logic)
+	v1Artefact, err := HashToArtefact(hashData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to deserialize verifiable artefact from hash: %w", err)
+	}
+
+	// Convert V1 Artefact to V2 VerifiableArtefact structure
+	v2Artefact := &VerifiableArtefact{
+		ID: v1Artefact.ID,
+		Header: ArtefactHeader{
+			ParentHashes:    v1Artefact.SourceArtefacts,
+			LogicalThreadID: v1Artefact.LogicalID,
+			Version:         v1Artefact.Version,
+			CreatedAtMs:     v1Artefact.CreatedAtMs,
+			ProducedByRole:  v1Artefact.ProducedByRole,
+			StructuralType:  v1Artefact.StructuralType,
+			Type:            v1Artefact.Type,
+			ContextForRoles: v1Artefact.ContextForRoles,
+			ClaimID:         v1Artefact.ClaimID,
+		},
+		Payload: ArtefactPayload{
+			Content: v1Artefact.Payload,
+		},
+	}
+
+	return v2Artefact, nil
 }
 
 // ScanKeys scans for Redis keys matching the given pattern.

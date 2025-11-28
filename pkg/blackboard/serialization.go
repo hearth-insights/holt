@@ -38,6 +38,7 @@ func ArtefactToHash(a *Artefact) (map[string]interface{}, error) {
 		"produced_by_role":  a.ProducedByRole,
 		"created_at_ms":     a.CreatedAtMs,                   // M3.9
 		"context_for_roles": string(contextForRolesJSON), // M4.3
+		"claim_id":          a.ClaimID,                       // M4.6
 	}
 
 	return hash, nil
@@ -90,7 +91,8 @@ func HashToArtefact(hash map[string]string) (*Artefact, error) {
 		SourceArtefacts: sourceArtefacts,
 		ProducedByRole:  hash["produced_by_role"],
 		CreatedAtMs:     createdAtMs,        // M3.9
-		ContextForRoles: contextForRoles, // M4.3
+		ContextForRoles: contextForRoles,    // M4.3
+		ClaimID:         hash["claim_id"],   // M4.6
 	}
 
 	return artefact, nil

@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/dyluth/holt/pkg/blackboard"
-	"github.com/google/uuid"
 )
 
 const (
@@ -85,8 +84,8 @@ func (e *Engine) executeWork(ctx context.Context, claim *blackboard.Claim) {
 		return
 	}
 
-	// Create result artefact
-	artefact, err := e.createResultArtefact(ctx, claim, output)
+	// Create result artefact (V2 Verifiable)
+	artefact, err := e.createVerifiableResultArtefact(ctx, claim, output, targetArtefact)
 	if err != nil {
 		log.Printf("[ERROR] Failed to create artefact: claim_id=%s error=%v", claim.ID, err)
 		// Try to create a Failure artefact describing the artefact creation failure
@@ -96,7 +95,7 @@ func (e *Engine) executeWork(ctx context.Context, claim *blackboard.Claim) {
 	}
 
 	log.Printf("[INFO] Created artefact: artefact_id=%s type=%s logical_id=%s version=%d",
-		artefact.ID, artefact.Type, artefact.LogicalID, artefact.Version)
+		artefact.ID, artefact.Header.Type, artefact.Header.LogicalThreadID, artefact.Header.Version)
 }
 
 // fetchTargetArtefact retrieves the artefact that the claim is for.
@@ -307,8 +306,8 @@ func (e *Engine) createResultArtefact(ctx context.Context, claim *blackboard.Cla
 	}
 
 	// Regular claim - create new work artefact
-	// Generate new UUIDs for the artefact
-	artefactID := uuid.New().String()
+	// Generate new IDs
+	artefactID := blackboard.NewID()
 	logicalID := artefactID // Derivative: new logical thread
 
 	artefact := &blackboard.Artefact{
@@ -347,11 +346,7 @@ func (e *Engine) createResultArtefact(ctx context.Context, claim *blackboard.Cla
 
 // createVerifiableResultArtefact creates a V2 VerifiableArtefact with cryptographic hash ID.
 // M4.6: This is the hash-based artefact creation path for Phase 3.
-// Unlike V1 (UUID-based), this:
-//  1. Assembles Header + Payload
-//  2. Validates payload size (1MB limit)
-//  3. Computes SHA-256 hash via RFC 8785 canonicalization
-//  4. Submits to blackboard with hash as ID
+// Handles both new work (derivative) and rework (feedback loop) scenarios.
 func (e *Engine) createVerifiableResultArtefact(ctx context.Context, claim *blackboard.Claim, output *ToolOutput, targetArtefact *blackboard.Artefact) (*blackboard.VerifiableArtefact, error) {
 	// M2.4: Validate git commit for CodeCommit artefacts
 	if output.ArtefactType == "CodeCommit" {
@@ -363,15 +358,29 @@ func (e *Engine) createVerifiableResultArtefact(ctx context.Context, claim *blac
 		log.Printf("[DEBUG] Git commit validation passed: hash=%s", output.ArtefactPayload)
 	}
 
-	// Extract parent hashes from target artefact
-	// In V1, target artefact has ID (UUID). In V2, it will be a hash.
-	// For now, we're in transitional mode where target is V1 but we're creating V2 output.
-	parentHashes := []string{targetArtefact.ID}
+	// Determine relationship (Derivative vs Rework)
+	var logicalThreadID string
+	var version int
+	var parentHashes []string
 
-	// M4.6: Determine LogicalThreadID inheritance
-	// V1: New artefacts get new UUID
-	// V2: If parent has LogicalThreadID, inherit it; otherwise generate new UUID
-	logicalThreadID := uuid.New().String() // For derivative work, always new thread
+	// M3.3: Check if this is a feedback claim (rework scenario)
+	if claim.Status == blackboard.ClaimStatusPendingAssignment {
+		// Rework: Continue existing thread
+		logicalThreadID = targetArtefact.LogicalID
+		version = targetArtefact.Version + 1
+		
+		// Parent hashes = Target + Reviews
+		parentHashes = []string{targetArtefact.ID}
+		parentHashes = append(parentHashes, claim.AdditionalContextIDs...)
+		
+		log.Printf("[INFO] Creating V2 rework artefact: logical_id=%s version=%d→%d",
+			logicalThreadID, targetArtefact.Version, version)
+	} else {
+		// New Work: Start new thread
+		logicalThreadID = blackboard.NewID()
+		version = 1
+		parentHashes = []string{targetArtefact.ID}
+	}
 
 	// Assemble payload
 	payload := blackboard.ArtefactPayload{
@@ -384,15 +393,14 @@ func (e *Engine) createVerifiableResultArtefact(ctx context.Context, claim *blac
 	}
 
 	// M4.6 Security Addendum: Inject HOLT_CLAIM_ID into header for topology validation
-	// The orchestrator sets this env var when granting work. Without it, the artefact
-	// will fail topology validation and trigger global lockdown.
-	claimID := os.Getenv("HOLT_CLAIM_ID")
+	// Use the claim ID we are working on.
+	claimID := claim.ID
 
 	// Assemble header
 	header := blackboard.ArtefactHeader{
 		ParentHashes:    parentHashes,
 		LogicalThreadID: logicalThreadID,
-		Version:         1, // First version of new thread
+		Version:         version,
 		CreatedAtMs:     time.Now().UnixMilli(),
 		ProducedByRole:  e.config.AgentName, // M3.7: AgentName IS the role
 		StructuralType:  output.GetStructuralType(),
@@ -423,10 +431,28 @@ func (e *Engine) createVerifiableResultArtefact(ctx context.Context, claim *blac
 		return nil, fmt.Errorf("failed to create verifiable artefact: %w", err)
 	}
 
+	// Add to thread tracking
+	if err := e.bbClient.AddVersionToThread(ctx, logicalThreadID, artefact.ID, version); err != nil {
+		log.Printf("[WARN] Failed to add version to thread: logical_id=%s error=%v", logicalThreadID, err)
+	}
+
 	// Publish artefact event (so orchestrator picks it up)
 	// Note: In full V2, this would be integrated into WriteVerifiableArtefact
 	// For now, we manually publish to maintain compatibility
-	artefactJSON, err := json.Marshal(artefact)
+	v1Wrapper := &blackboard.Artefact{
+		ID:              artefact.ID,
+		LogicalID:       artefact.Header.LogicalThreadID,
+		Version:         artefact.Header.Version,
+		StructuralType:  artefact.Header.StructuralType,
+		Type:            artefact.Header.Type,
+		Payload:         artefact.Payload.Content,
+		SourceArtefacts: artefact.Header.ParentHashes,
+		ProducedByRole:  artefact.Header.ProducedByRole,
+		CreatedAtMs:     artefact.Header.CreatedAtMs,
+		ClaimID:         artefact.Header.ClaimID,
+	}
+	
+	artefactJSON, err := json.Marshal(v1Wrapper)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal artefact for event: %w", err)
 	}
@@ -436,8 +462,23 @@ func (e *Engine) createVerifiableResultArtefact(ctx context.Context, claim *blac
 		return nil, fmt.Errorf("failed to publish artefact event: %w", err)
 	}
 
+	// If rework, publish artefact_reworked event
+	if claim.Status == blackboard.ClaimStatusPendingAssignment {
+		if err := e.publishArtefactReworkedEvent(ctx, v1Wrapper, targetArtefact.ID); err != nil {
+			log.Printf("[WARN] Failed to publish artefact_reworked event: %v", err)
+		}
+	}
+
 	log.Printf("[INFO] Created verifiable artefact: id=%s type=%s logical_id=%s version=%d",
 		artefact.ID, artefact.Header.Type, artefact.Header.LogicalThreadID, artefact.Header.Version)
+
+	// M4.3: Process checkpoints if present
+	if len(output.Checkpoints) > 0 {
+		if err := e.processCheckpoints(ctx, output.Checkpoints, artefact.Header.LogicalThreadID); err != nil {
+			// Log but don't fail - main artefact was created successfully
+			log.Printf("[WARN] Failed to process checkpoints: %v", err)
+		}
+	}
 
 	return artefact, nil
 }
@@ -498,40 +539,81 @@ func (e *Engine) createFailureArtefact(ctx context.Context, claim *blackboard.Cl
 		Error:    reason,
 	}
 
-	payload, err := MarshalFailurePayload(failureData)
+	payloadContent, err := MarshalFailurePayload(failureData)
 	if err != nil {
 		log.Printf("[ERROR] Failed to marshal failure payload: %v", err)
-		payload = fmt.Sprintf(`{"reason": "Failed to marshal failure data: %v"}`, err)
+		payloadContent = fmt.Sprintf(`{"reason": "Failed to marshal failure data: %v"}`, err)
 	}
 
-	// Generate new UUIDs
-	artefactID := uuid.New().String()
-	logicalID := artefactID // Derivative: new logical thread
+	// M4.6: Use V2 VerifiableArtefact structure
+	logicalThreadID := blackboard.NewID()
+	
+	// M4.6 Security Addendum: Inject HOLT_CLAIM_ID into header
+	// For failures during claim processing, we know the claim ID
+	claimID := claim.ID
 
-	artefact := &blackboard.Artefact{
-		ID:              artefactID,
-		LogicalID:       logicalID,
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeFailure,
-		Type:            "ToolExecutionFailure",
-		Payload:         payload,
-		SourceArtefacts: []string{claim.ArtefactID},
-		ProducedByRole:  e.config.AgentName, // M3.7: AgentName IS the role
-		CreatedAtMs:     time.Now().UnixMilli(), // M3.9: Millisecond precision timestamp
+	v2Artefact := &blackboard.VerifiableArtefact{
+		Header: blackboard.ArtefactHeader{
+			ParentHashes:    []string{claim.ArtefactID},
+			LogicalThreadID: logicalThreadID,
+			Version:         1,
+			CreatedAtMs:     time.Now().UnixMilli(),
+			ProducedByRole:  e.config.AgentName,
+			StructuralType:  blackboard.StructuralTypeFailure,
+			Type:            "ToolExecutionFailure",
+			ClaimID:         claimID,
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: payloadContent,
+		},
 	}
 
-	// Create artefact
-	if err := e.bbClient.CreateArtefact(ctx, artefact); err != nil {
+	// Compute hash
+	hash, err := blackboard.ComputeArtefactHash(v2Artefact)
+	if err != nil {
+		log.Printf("[ERROR] Failed to compute hash for Failure artefact: %v", err)
+		return
+	}
+	v2Artefact.ID = hash
+
+	// Write to blackboard
+	if err := e.bbClient.WriteVerifiableArtefact(ctx, v2Artefact); err != nil {
 		log.Printf("[ERROR] Failed to create Failure artefact: %v", err)
 		return
 	}
 
+	// Publish event (manual until V2 integration complete)
+	// We need to convert to V1 struct for event publishing if subscribers expect V1
+	// But wait, WriteVerifiableArtefact might not publish event? 
+	// The client.WriteVerifiableArtefact does NOT publish event by default in current impl?
+	// Let's check client code... actually WriteVerifiableArtefact just writes hash.
+	// We need to publish.
+	
+	// Create V1 wrapper for event publishing/thread tracking
+	artefact := &blackboard.Artefact{
+		ID:              v2Artefact.ID,
+		LogicalID:       v2Artefact.Header.LogicalThreadID,
+		Version:         v2Artefact.Header.Version,
+		StructuralType:  v2Artefact.Header.StructuralType,
+		Type:            v2Artefact.Header.Type,
+		Payload:         v2Artefact.Payload.Content,
+		SourceArtefacts: v2Artefact.Header.ParentHashes,
+		ProducedByRole:  v2Artefact.Header.ProducedByRole,
+		CreatedAtMs:     v2Artefact.Header.CreatedAtMs,
+		ClaimID:         v2Artefact.Header.ClaimID,
+	}
+
 	// Add to thread tracking
-	if err := e.bbClient.AddVersionToThread(ctx, logicalID, artefactID, 1); err != nil {
+	if err := e.bbClient.AddVersionToThread(ctx, logicalThreadID, v2Artefact.ID, 1); err != nil {
 		log.Printf("[WARN] Failed to add Failure artefact to thread: %v", err)
 	}
 
-	log.Printf("[INFO] Created Failure artefact: artefact_id=%s claim_id=%s", artefactID, claim.ID)
+	// Publish event
+	artefactJSON, _ := json.Marshal(artefact)
+	channel := fmt.Sprintf("holt:%s:artefact_events", e.config.InstanceName)
+	e.bbClient.PublishRaw(ctx, channel, string(artefactJSON))
+
+	log.Printf("[INFO] Created Failure artefact: artefact_id=%s claim_id=%s", v2Artefact.ID, claim.ID)
 }
 
 // limitedWriter wraps a writer and enforces a size limit.
@@ -597,7 +679,7 @@ func (e *Engine) createReworkArtefact(ctx context.Context, claim *blackboard.Cla
 	sourceArtefacts = append(sourceArtefacts, claim.AdditionalContextIDs...)
 
 	// Generate new artefact ID
-	artefactID := uuid.New().String()
+	artefactID := blackboard.NewID()
 
 	artefact := &blackboard.Artefact{
 		ID:              artefactID,

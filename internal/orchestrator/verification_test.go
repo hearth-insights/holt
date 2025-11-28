@@ -9,6 +9,7 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/dyluth/holt/internal/config"
 	"github.com/dyluth/holt/pkg/blackboard"
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -43,15 +44,17 @@ func TestVerifyArtefact_Success(t *testing.T) {
 	engine, _ := setupVerificationTestEngine(t, "test-verify-success", 300000)
 
 	// Create a valid verifiable artefact
+	// Use "user" role to make it a valid root artefact (bypassing claim check)
 	artefact := &blackboard.VerifiableArtefact{
 		Header: blackboard.ArtefactHeader{
 			ParentHashes:    []string{}, // Root artefact (no parents)
 			LogicalThreadID: "thread-123",
 			Version:         1,
 			CreatedAtMs:     time.Now().UnixMilli(),
-			ProducedByRole:  "test-agent",
+			ProducedByRole:  "user", // Valid root producer
 			StructuralType:  blackboard.StructuralTypeStandard,
 			Type:            "TestArtefact",
+			ClaimID:         "", // Root has no claim
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: "test payload content",
@@ -76,6 +79,8 @@ func TestVerifyArtefact_OrphanBlock(t *testing.T) {
 	engine, client := setupVerificationTestEngine(t, "test-verify-orphan", 300000)
 
 	// Create artefact with non-existent parent
+	// Stage 1 (Orphan Check) runs before Stage 3 (Topology), so this should fail
+	// with orphan error regardless of topology validity.
 	artefact := &blackboard.VerifiableArtefact{
 		Header: blackboard.ArtefactHeader{
 			ParentHashes:    []string{"nonexistent-parent-hash-123456789abcdef"},
@@ -124,7 +129,7 @@ func TestVerifyArtefact_TimestampDrift_Future(t *testing.T) {
 			LogicalThreadID: "thread-123",
 			Version:         1,
 			CreatedAtMs:     futureTimestamp,
-			ProducedByRole:  "test-agent",
+			ProducedByRole:  "user", // User role to pass topology check (Stage 3) if it reached it
 			StructuralType:  blackboard.StructuralTypeStandard,
 			Type:            "TestArtefact",
 		},
@@ -139,6 +144,7 @@ func TestVerifyArtefact_TimestampDrift_Future(t *testing.T) {
 	artefact.ID = hash
 
 	// Verify artefact (should fail with timestamp drift error)
+	// Timestamp check (Stage 2) runs before Topology (Stage 3)
 	err = engine.verifyArtefact(ctx, artefact)
 	assert.Error(t, err, "Future timestamp should be rejected")
 	assert.Contains(t, err.Error(), "timestamp too far in future", "Error should mention timestamp drift")
@@ -164,7 +170,7 @@ func TestVerifyArtefact_TimestampDrift_Past(t *testing.T) {
 			LogicalThreadID: "thread-123",
 			Version:         1,
 			CreatedAtMs:     pastTimestamp,
-			ProducedByRole:  "test-agent",
+			ProducedByRole:  "user", // User role to pass topology check
 			StructuralType:  blackboard.StructuralTypeStandard,
 			Type:            "TestArtefact",
 		},
@@ -197,6 +203,7 @@ func TestVerifyArtefact_HashMismatch(t *testing.T) {
 	engine, client := setupVerificationTestEngine(t, "test-verify-hash-mismatch", 300000)
 
 	// Create artefact with INCORRECT hash (tampered)
+	// Use "user" role to pass topology check (Stage 3) and reach Hash check (Stage 4)
 	artefact := &blackboard.VerifiableArtefact{
 		ID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", // Wrong hash
 		Header: blackboard.ArtefactHeader{
@@ -204,7 +211,7 @@ func TestVerifyArtefact_HashMismatch(t *testing.T) {
 			LogicalThreadID: "thread-123",
 			Version:         1,
 			CreatedAtMs:     time.Now().UnixMilli(),
-			ProducedByRole:  "test-agent",
+			ProducedByRole:  "user", // User role avoids need for ClaimID
 			StructuralType:  blackboard.StructuralTypeStandard,
 			Type:            "TestArtefact",
 		},
@@ -233,14 +240,14 @@ func TestVerifyArtefact_ValidParentChain(t *testing.T) {
 	// Setup test engine
 	engine, client := setupVerificationTestEngine(t, "test-verify-parent-chain", 300000)
 
-	// Create parent artefact
+	// Create parent artefact (root, user)
 	parentArtefact := &blackboard.VerifiableArtefact{
 		Header: blackboard.ArtefactHeader{
 			ParentHashes:    []string{},
 			LogicalThreadID: "thread-123",
 			Version:         1,
 			CreatedAtMs:     time.Now().UnixMilli(),
-			ProducedByRole:  "test-agent",
+			ProducedByRole:  "user",
 			StructuralType:  blackboard.StructuralTypeStandard,
 			Type:            "TestArtefact",
 		},
@@ -258,7 +265,18 @@ func TestVerifyArtefact_ValidParentChain(t *testing.T) {
 	err = client.WriteVerifiableArtefact(ctx, parentArtefact)
 	require.NoError(t, err)
 
-	// Create child artefact referencing parent
+	// Setup active claim for child to link to
+	claimID := "claim-123"
+	claim := &blackboard.Claim{
+		ID:                    claimID,
+		ArtefactID:            parentHash, // Claim is for parent
+		Status:                blackboard.ClaimStatusPendingExclusive,
+		GrantedExclusiveAgent: "test-agent",
+	}
+	err = client.CreateClaim(ctx, claim)
+	require.NoError(t, err)
+
+	// Create child artefact referencing parent, with valid ClaimID
 	childArtefact := &blackboard.VerifiableArtefact{
 		Header: blackboard.ArtefactHeader{
 			ParentHashes:    []string{parentHash}, // References parent
@@ -268,6 +286,7 @@ func TestVerifyArtefact_ValidParentChain(t *testing.T) {
 			ProducedByRole:  "test-agent",
 			StructuralType:  blackboard.StructuralTypeStandard,
 			Type:            "TestArtefact",
+			ClaimID:         claimID, // Valid claim reference
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: "child payload",
@@ -279,7 +298,7 @@ func TestVerifyArtefact_ValidParentChain(t *testing.T) {
 	require.NoError(t, err)
 	childArtefact.ID = childHash
 
-	// Verify child artefact (should pass - parent exists)
+	// Verify child artefact (should pass - parent exists, topology valid)
 	err = engine.verifyArtefact(ctx, childArtefact)
 	assert.NoError(t, err, "Valid parent chain should pass verification")
 
@@ -339,16 +358,45 @@ func TestProcessArtefact_RejectsTamperedArtefact(t *testing.T) {
 	// Setup test engine with real orchestrator flow
 	engine, client := setupVerificationTestEngine(t, "test-tamper-integration", 300000)
 
-	// Create a tampered V2 artefact (hash doesn't match content)
-	artefact := &blackboard.VerifiableArtefact{
+	// Create parent for topology validity
+	parentArtefact := &blackboard.VerifiableArtefact{
 		Header: blackboard.ArtefactHeader{
 			ParentHashes:    []string{},
 			LogicalThreadID: "thread-123",
 			Version:         1,
 			CreatedAtMs:     time.Now().UnixMilli(),
+			ProducedByRole:  "user",
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "GoalDefined",
+		},
+		Payload: blackboard.ArtefactPayload{Content: "parent"},
+	}
+	parentHash, _ := blackboard.ComputeArtefactHash(parentArtefact)
+	parentArtefact.ID = parentHash
+	client.WriteVerifiableArtefact(ctx, parentArtefact)
+
+	// Create valid claim
+	claimID := uuid.New().String() // Use valid UUID
+	claim := &blackboard.Claim{
+		ID:                    claimID,
+		ArtefactID:            parentHash,
+		Status:                blackboard.ClaimStatusPendingExclusive,
+		GrantedExclusiveAgent: "malicious-agent",
+	}
+	err := client.CreateClaim(ctx, claim)
+	require.NoError(t, err, "Setup: Create valid claim")
+
+	// Create a tampered V2 artefact (hash doesn't match content)
+	artefact := &blackboard.VerifiableArtefact{
+		Header: blackboard.ArtefactHeader{
+			ParentHashes:    []string{parentHash},
+			LogicalThreadID: "thread-123",
+			Version:         2,
+			CreatedAtMs:     time.Now().UnixMilli(),
 			ProducedByRole:  "malicious-agent",
 			StructuralType:  blackboard.StructuralTypeStandard,
 			Type:            "MaliciousCode",
+			ClaimID:         claim.ID, // Valid ClaimID to pass topology check
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: "legitimate content",
@@ -377,6 +425,7 @@ func TestProcessArtefact_RejectsTamperedArtefact(t *testing.T) {
 		SourceArtefacts: artefact.Header.ParentHashes,
 		ProducedByRole:  artefact.Header.ProducedByRole,
 		CreatedAtMs:     artefact.Header.CreatedAtMs,
+		ClaimID:         artefact.Header.ClaimID, // Important: pass ClaimID
 	}
 
 	// CRITICAL TEST: Call processArtefact (main orchestrator flow)
@@ -386,7 +435,7 @@ func TestProcessArtefact_RejectsTamperedArtefact(t *testing.T) {
 	assert.Contains(t, err.Error(), "hash mismatch", "Error should indicate hash mismatch")
 
 	// Verify NO claim was created (artefact rejected before claim creation)
-	claim, err := client.GetClaimByArtefactID(ctx, artefact.ID)
+	claim, err = client.GetClaimByArtefactID(ctx, artefact.ID)
 	// Expect "not found" error or nil claim
 	if err != nil && !blackboard.IsNotFound(err) {
 		t.Fatalf("Unexpected error checking for claim: %v", err)
@@ -419,6 +468,9 @@ func TestProcessArtefact_RejectsOrphanBlock(t *testing.T) {
 			ProducedByRole:  "test-agent",
 			StructuralType:  blackboard.StructuralTypeStandard,
 			Type:            "TestArtefact",
+			// Note: Technically this should fail topology because claim check comes after parent check?
+			// Actually: Parent check (Stage 1) comes FIRST.
+			// So missing ClaimID won't matter yet. It should fail on parent check.
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: "test content",
@@ -464,9 +516,4 @@ func TestProcessArtefact_RejectsOrphanBlock(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, locked, "System should be in lockdown")
 	assert.Equal(t, blackboard.AlertTypeOrphanBlock, alert.Type)
-}
-
-// Helper function to create int pointer for config
-func intPtr(i int) *int {
-	return &i
 }

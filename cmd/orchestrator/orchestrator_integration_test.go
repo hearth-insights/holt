@@ -12,8 +12,8 @@ import (
 
 	"github.com/dyluth/holt/internal/orchestrator"
 	"github.com/dyluth/holt/pkg/blackboard"
-	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
+	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 )
@@ -57,6 +57,42 @@ func setupRedis(t *testing.T) (string, func()) {
 	return redisURL, cleanup
 }
 
+// helper to create a valid hashed artefact for V1 client
+func createValidArtefact(t *testing.T, logicalID string, version int, structuralType blackboard.StructuralType, typ, payload string, sourceArtefacts []string, role string) *blackboard.Artefact {
+	// Create V2 representation to compute hash
+	v2 := &blackboard.VerifiableArtefact{
+		Header: blackboard.ArtefactHeader{
+			ParentHashes:    sourceArtefacts,
+			LogicalThreadID: logicalID,
+			Version:         version,
+			CreatedAtMs:     time.Now().UnixMilli(),
+			ProducedByRole:  role,
+			StructuralType:  structuralType,
+			Type:            typ,
+			ClaimID:         "", // Root/User artefact
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: payload,
+		},
+	}
+
+	hash, err := blackboard.ComputeArtefactHash(v2)
+	require.NoError(t, err)
+
+	// Return V1 representation with computed hash
+	return &blackboard.Artefact{
+		ID:              hash,
+		LogicalID:       logicalID,
+		Version:         version,
+		StructuralType:  structuralType,
+		Type:            typ,
+		Payload:         payload,
+		SourceArtefacts: sourceArtefacts,
+		ProducedByRole:  role,
+		CreatedAtMs:     v2.Header.CreatedAtMs,
+	}
+}
+
 // TestOrchestrator_CreatesClaimForGoalDefined tests the happy path.
 func TestOrchestrator_CreatesClaimForGoalDefined(t *testing.T) {
 	redisURL, cleanup := setupRedis(t)
@@ -88,16 +124,15 @@ func TestOrchestrator_CreatesClaimForGoalDefined(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	// Create a GoalDefined artefact
-	artefact := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "GoalDefined",
-		Payload:         "hello world",
-		SourceArtefacts: []string{},
-		ProducedByRole:  "user", // M3.7: GoalDefined created by user
-	}
+	artefact := createValidArtefact(t,
+		blackboard.NewID(),
+		1,
+		blackboard.StructuralTypeStandard,
+		"GoalDefined",
+		"hello world",
+		[]string{},
+		"user", // M3.7: GoalDefined created by user
+	)
 
 	if err := client.CreateArtefact(ctx, artefact); err != nil {
 		t.Fatalf("Failed to create artefact: %v", err)
@@ -175,16 +210,15 @@ func TestOrchestrator_SkipsTerminalArtefacts(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	// Create a Terminal artefact
-	artefact := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeTerminal,
-		Type:            "FinalReport",
-		Payload:         "workflow complete",
-		SourceArtefacts: []string{},
-		ProducedByRole:  "test-agent", // M3.7: Terminal artefact by agent
-	}
+	artefact := createValidArtefact(t,
+		blackboard.NewID(),
+		1,
+		blackboard.StructuralTypeTerminal,
+		"FinalReport",
+		"workflow complete",
+		[]string{},
+		"orchestrator", // Terminal usually by orchestrator
+	)
 
 	if err := client.CreateArtefact(ctx, artefact); err != nil {
 		t.Fatalf("Failed to create artefact: %v", err)
@@ -238,16 +272,15 @@ func TestOrchestrator_IdempotentClaimCreation(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	// Create artefact twice (simulating duplicate event)
-	artefact := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "GoalDefined",
-		Payload:         "test goal",
-		SourceArtefacts: []string{},
-		ProducedByRole:  "user", // M3.7: GoalDefined created by user
-	}
+	artefact := createValidArtefact(t,
+		blackboard.NewID(),
+		1,
+		blackboard.StructuralTypeStandard,
+		"GoalDefined",
+		"test goal",
+		[]string{},
+		"user", // M3.7: GoalDefined created by user
+	)
 
 	if err := client.CreateArtefact(ctx, artefact); err != nil {
 		t.Fatalf("Failed to create artefact (first): %v", err)

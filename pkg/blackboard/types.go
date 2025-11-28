@@ -8,22 +8,23 @@
 package blackboard
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
-
-	"github.com/google/uuid"
+	"time"
 )
 
 // Artefact represents an immutable work product on the blackboard.
 // Artefacts are the fundamental unit of state in Holt - every piece of work,
 // decision, and result is represented as an artefact with complete provenance.
 type Artefact struct {
-	ID              string         `json:"id"`               // UUID - unique identifier for this artefact
-	LogicalID       string         `json:"logical_id"`       // UUID - groups versions of the same logical entity
+	ID              string         `json:"id"`               // SHA-256 Hash (64 hex chars)
+	LogicalID       string         `json:"logical_id"`       // UUID or Hash - groups versions
 	Version         int            `json:"version"`          // Incrementing version number (starts at 1)
 	StructuralType  StructuralType `json:"structural_type"`  // Role in orchestration flow
 	Type            string         `json:"type"`             // User-defined domain type (e.g., "CodeCommit", "DesignSpec")
 	Payload         string         `json:"payload"`          // Main content (git hash, JSON, text)
-	SourceArtefacts []string       `json:"source_artefacts"` // Array of artefact UUIDs this was derived from
+	SourceArtefacts []string       `json:"source_artefacts"` // Array of parent artefact IDs
 	ProducedByRole  string         `json:"produced_by_role"` // Agent's role from holt.yml or "user"
 	CreatedAtMs     int64          `json:"created_at_ms"`    // M3.9: Unix timestamp in milliseconds when artefact was created
 
@@ -32,8 +33,6 @@ type Artefact struct {
 
 	// M4.6 Security Addendum: Grant Linkage & Topology Validation
 	// ClaimID cryptographically binds this artefact to the authorization that permitted its creation
-	// MUST be present for agent-produced artefacts (unless root artefact with SourceArtefacts=[])
-	// Empty for root artefacts (CLI-generated) and some orchestrator-generated artefacts
 	ClaimID string `json:"claim_id,omitempty"`
 }
 
@@ -62,14 +61,17 @@ const (
 
 	// StructuralTypeKnowledge represents cached context data ignored by orchestrator (M4.3)
 	StructuralTypeKnowledge StructuralType = "Knowledge"
+
+	// StructuralTypeSystemManifest represents system-generated manifests (e.g., M4.7 Integrity Manifests)
+	StructuralTypeSystemManifest StructuralType = "SystemManifest"
 )
 
 // Claim represents the orchestrator's decision about an artefact.
 // Claims track which agents have been granted access to work on an artefact,
 // and coordinate the phased execution model (review → parallel → exclusive).
 type Claim struct {
-	ID                    string      `json:"id"`                      // UUID - unique identifier for this claim
-	ArtefactID            string      `json:"artefact_id"`             // UUID - the artefact this claim is for
+	ID                    string      `json:"id"`                      // Unique identifier for this claim
+	ArtefactID            string      `json:"artefact_id"`             // The artefact this claim is for
 	Status                ClaimStatus `json:"status"`                  // Current lifecycle state
 	GrantedReviewAgents   []string    `json:"granted_review_agents"`   // Agent names granted review access
 	GrantedParallelAgents []string    `json:"granted_parallel_agents"` // Agent names granted parallel access
@@ -165,12 +167,12 @@ type GrantQueue struct {
 // Validate checks if the Artefact has valid field values.
 // Returns an error if any validation fails.
 func (a *Artefact) Validate() error {
-	if !isValidUUID(a.ID) {
-		return fmt.Errorf("invalid artefact ID: not a valid UUID")
+	if a.ID == "" {
+		return fmt.Errorf("invalid artefact ID: empty")
 	}
 
-	if !isValidUUID(a.LogicalID) {
-		return fmt.Errorf("invalid logical ID: not a valid UUID")
+	if a.LogicalID == "" {
+		return fmt.Errorf("invalid logical ID: empty")
 	}
 
 	if a.Version < 1 {
@@ -189,10 +191,10 @@ func (a *Artefact) Validate() error {
 		return fmt.Errorf("produced_by_role cannot be empty")
 	}
 
-	// Validate all source artefact UUIDs
+	// Validate all source artefact IDs
 	for i, sourceID := range a.SourceArtefacts {
-		if !isValidUUID(sourceID) {
-			return fmt.Errorf("invalid source artefact at index %d: not a valid UUID", i)
+		if sourceID == "" {
+			return fmt.Errorf("invalid source artefact at index %d: empty", i)
 		}
 	}
 
@@ -204,7 +206,7 @@ func (st StructuralType) Validate() error {
 	switch st {
 	case StructuralTypeStandard, StructuralTypeReview, StructuralTypeQuestion,
 		StructuralTypeAnswer, StructuralTypeFailure, StructuralTypeTerminal,
-		StructuralTypeKnowledge:
+		StructuralTypeKnowledge, StructuralTypeSystemManifest: // Added SystemManifest
 		return nil
 	default:
 		return fmt.Errorf("unknown structural type: %q", st)
@@ -213,20 +215,17 @@ func (st StructuralType) Validate() error {
 
 // Validate checks if the Claim has valid field values.
 func (c *Claim) Validate() error {
-	if !isValidUUID(c.ID) {
-		return fmt.Errorf("invalid claim ID: not a valid UUID")
+	if c.ID == "" {
+		return fmt.Errorf("invalid claim ID: empty")
 	}
 
-	if !isValidUUID(c.ArtefactID) {
-		return fmt.Errorf("invalid artefact ID: not a valid UUID")
+	if c.ArtefactID == "" {
+		return fmt.Errorf("invalid artefact ID: empty")
 	}
 
 	if err := c.Status.Validate(); err != nil {
 		return fmt.Errorf("invalid status: %w", err)
 	}
-
-	// Agent name arrays should not be malformed (nil is ok, converts to empty)
-	// No specific validation needed beyond ensuring they're string arrays
 
 	return nil
 }
@@ -253,8 +252,14 @@ func (bt BidType) Validate() error {
 	}
 }
 
-// isValidUUID checks if a string is a valid UUID format.
-func isValidUUID(s string) bool {
-	_, err := uuid.Parse(s)
-	return err == nil
+// NewID generates a random 32-byte hex string (64 characters).
+// Replaces UUIDs for V2 clean break.
+func NewID() string {
+	b := make([]byte, 32)
+	_, err := rand.Read(b)
+	if err != nil {
+		// Should not happen in normal operation, but safe fallback
+		return fmt.Sprintf("%x", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b)
 }

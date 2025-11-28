@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -69,8 +68,8 @@ func TestCreateArtefact(t *testing.T) {
 
 	t.Run("creates valid artefact", func(t *testing.T) {
 		artefact := &Artefact{
-			ID:              uuid.New().String(),
-			LogicalID:       uuid.New().String(),
+			ID:              NewID(),
+			LogicalID:       NewID(),
 			Version:         1,
 			StructuralType:  StructuralTypeStandard,
 			Type:            "TestType",
@@ -92,8 +91,8 @@ func TestCreateArtefact(t *testing.T) {
 
 	t.Run("rejects invalid artefact", func(t *testing.T) {
 		artefact := &Artefact{
-			ID:        "not-a-uuid",
-			LogicalID: uuid.New().String(),
+			ID:        "", // Empty ID should fail validation
+			LogicalID: NewID(),
 			Version:   1,
 		}
 
@@ -110,8 +109,8 @@ func TestCreateArtefact(t *testing.T) {
 
 		// Create artefact
 		artefact := &Artefact{
-			ID:              uuid.New().String(),
-			LogicalID:       uuid.New().String(),
+			ID:              NewID(),
+			LogicalID:       NewID(),
 			Version:         1,
 			StructuralType:  StructuralTypeStandard,
 			Type:            "EventTest",
@@ -141,14 +140,14 @@ func TestGetArtefact(t *testing.T) {
 	t.Run("retrieves existing artefact", func(t *testing.T) {
 		// Create an artefact first
 		artefact := &Artefact{
-			ID:              uuid.New().String(),
-			LogicalID:       uuid.New().String(),
+			ID:              NewID(),
+			LogicalID:       NewID(),
 			Version:         1,
 			StructuralType:  StructuralTypeStandard,
 			Type:            "TestType",
 			ProducedByRole:  "test-agent",
 			Payload:         "test payload",
-			SourceArtefacts: []string{uuid.New().String()},
+			SourceArtefacts: []string{NewID()},
 		}
 
 		err := client.CreateArtefact(ctx, artefact)
@@ -168,7 +167,7 @@ func TestGetArtefact(t *testing.T) {
 	})
 
 	t.Run("returns redis.Nil for non-existent artefact", func(t *testing.T) {
-		nonExistentID := uuid.New().String()
+		nonExistentID := NewID()
 		retrieved, err := client.GetArtefact(ctx, nonExistentID)
 		assert.Nil(t, retrieved)
 		assert.True(t, IsNotFound(err))
@@ -176,8 +175,8 @@ func TestGetArtefact(t *testing.T) {
 
 	t.Run("handles empty source artefacts", func(t *testing.T) {
 		artefact := &Artefact{
-			ID:              uuid.New().String(),
-			LogicalID:       uuid.New().String(),
+			ID:              NewID(),
+			LogicalID:       NewID(),
 			Version:         1,
 			StructuralType:  StructuralTypeStandard,
 			Type:            "TestType",
@@ -202,8 +201,8 @@ func TestArtefactExists(t *testing.T) {
 
 	t.Run("returns true for existing artefact", func(t *testing.T) {
 		artefact := &Artefact{
-			ID:              uuid.New().String(),
-			LogicalID:       uuid.New().String(),
+			ID:              NewID(),
+			LogicalID:       NewID(),
 			Version:         1,
 			StructuralType:  StructuralTypeStandard,
 			Type:            "TestType",
@@ -221,7 +220,7 @@ func TestArtefactExists(t *testing.T) {
 	})
 
 	t.Run("returns false for non-existent artefact", func(t *testing.T) {
-		nonExistentID := uuid.New().String()
+		nonExistentID := NewID()
 		exists, err := client.ArtefactExists(ctx, nonExistentID)
 		assert.NoError(t, err)
 		assert.False(t, exists)
@@ -235,8 +234,8 @@ func TestCreateClaim(t *testing.T) {
 
 	t.Run("creates valid claim", func(t *testing.T) {
 		claim := &Claim{
-			ID:                    uuid.New().String(),
-			ArtefactID:            uuid.New().String(),
+			ID:                    NewID(),
+			ArtefactID:            NewID(),
 			Status:                ClaimStatusPendingReview,
 			GrantedReviewAgents:   []string{},
 			GrantedParallelAgents: []string{},
@@ -255,8 +254,8 @@ func TestCreateClaim(t *testing.T) {
 
 	t.Run("rejects invalid claim", func(t *testing.T) {
 		claim := &Claim{
-			ID:         "not-a-uuid",
-			ArtefactID: uuid.New().String(),
+			ID:         "", // Empty ID should fail validation
+			ArtefactID: NewID(),
 			Status:     ClaimStatusPendingReview,
 		}
 
@@ -273,8 +272,8 @@ func TestCreateClaim(t *testing.T) {
 
 		// Create claim
 		claim := &Claim{
-			ID:                    uuid.New().String(),
-			ArtefactID:            uuid.New().String(),
+			ID:                    NewID(),
+			ArtefactID:            NewID(),
 			Status:                ClaimStatusPendingReview,
 			GrantedReviewAgents:   []string{},
 			GrantedParallelAgents: []string{},
@@ -301,8 +300,8 @@ func TestGetClaim(t *testing.T) {
 
 	t.Run("retrieves existing claim", func(t *testing.T) {
 		claim := &Claim{
-			ID:                    uuid.New().String(),
-			ArtefactID:            uuid.New().String(),
+			ID:                    NewID(),
+			ArtefactID:            NewID(),
 			Status:                ClaimStatusPendingReview,
 			GrantedReviewAgents:   []string{"agent1", "agent2"},
 			GrantedParallelAgents: []string{"agent3"},
@@ -323,7 +322,7 @@ func TestGetClaim(t *testing.T) {
 	})
 
 	t.Run("returns redis.Nil for non-existent claim", func(t *testing.T) {
-		nonExistentID := uuid.New().String()
+		nonExistentID := NewID()
 		retrieved, err := client.GetClaim(ctx, nonExistentID)
 		assert.Nil(t, retrieved)
 		assert.True(t, IsNotFound(err))
@@ -337,8 +336,8 @@ func TestUpdateClaim(t *testing.T) {
 	t.Run("updates existing claim", func(t *testing.T) {
 		// Create initial claim
 		claim := &Claim{
-			ID:                    uuid.New().String(),
-			ArtefactID:            uuid.New().String(),
+			ID:                    NewID(),
+			ArtefactID:            NewID(),
 			Status:                ClaimStatusPendingReview,
 			GrantedReviewAgents:   []string{},
 			GrantedParallelAgents: []string{},
@@ -365,8 +364,8 @@ func TestUpdateClaim(t *testing.T) {
 	t.Run("performs full replacement", func(t *testing.T) {
 		// Create claim with granted agents
 		claim := &Claim{
-			ID:                    uuid.New().String(),
-			ArtefactID:            uuid.New().String(),
+			ID:                    NewID(),
+			ArtefactID:            NewID(),
 			Status:                ClaimStatusPendingReview,
 			GrantedReviewAgents:   []string{"agent1", "agent2"},
 			GrantedParallelAgents: []string{"agent3"},
@@ -397,8 +396,8 @@ func TestClaimExists(t *testing.T) {
 
 	t.Run("returns true for existing claim", func(t *testing.T) {
 		claim := &Claim{
-			ID:                    uuid.New().String(),
-			ArtefactID:            uuid.New().String(),
+			ID:                    NewID(),
+			ArtefactID:            NewID(),
 			Status:                ClaimStatusPendingReview,
 			GrantedReviewAgents:   []string{},
 			GrantedParallelAgents: []string{},
@@ -414,7 +413,7 @@ func TestClaimExists(t *testing.T) {
 	})
 
 	t.Run("returns false for non-existent claim", func(t *testing.T) {
-		nonExistentID := uuid.New().String()
+		nonExistentID := NewID()
 		exists, err := client.ClaimExists(ctx, nonExistentID)
 		assert.NoError(t, err)
 		assert.False(t, exists)
@@ -427,7 +426,7 @@ func TestSetBid(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("records bid successfully", func(t *testing.T) {
-		claimID := uuid.New().String()
+		claimID := NewID()
 
 		err := client.SetBid(ctx, claimID, "agent1", BidTypeReview)
 		assert.NoError(t, err)
@@ -439,7 +438,7 @@ func TestSetBid(t *testing.T) {
 	})
 
 	t.Run("rejects invalid bid type", func(t *testing.T) {
-		claimID := uuid.New().String()
+		claimID := NewID()
 
 		err := client.SetBid(ctx, claimID, "agent1", BidType("invalid"))
 		assert.Error(t, err)
@@ -447,7 +446,7 @@ func TestSetBid(t *testing.T) {
 	})
 
 	t.Run("overwrites existing bid", func(t *testing.T) {
-		claimID := uuid.New().String()
+		claimID := NewID()
 
 		// Set initial bid
 		err := client.SetBid(ctx, claimID, "agent1", BidTypeReview)
@@ -469,7 +468,7 @@ func TestGetAllBids(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("retrieves all bids", func(t *testing.T) {
-		claimID := uuid.New().String()
+		claimID := NewID()
 
 		// Set multiple bids
 		err := client.SetBid(ctx, claimID, "agent1", BidTypeReview)
@@ -489,7 +488,7 @@ func TestGetAllBids(t *testing.T) {
 	})
 
 	t.Run("returns empty map for no bids", func(t *testing.T) {
-		claimID := uuid.New().String()
+		claimID := NewID()
 
 		bids, err := client.GetAllBids(ctx, claimID)
 		assert.NoError(t, err)
@@ -503,9 +502,9 @@ func TestAddVersionToThread(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("adds version to thread", func(t *testing.T) {
-		logicalID := uuid.New().String()
-		artefactID1 := uuid.New().String()
-		artefactID2 := uuid.New().String()
+		logicalID := NewID()
+		artefactID1 := NewID()
+		artefactID2 := NewID()
 
 		err := client.AddVersionToThread(ctx, logicalID, artefactID1, 1)
 		assert.NoError(t, err)
@@ -526,10 +525,10 @@ func TestGetLatestVersion(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("retrieves latest version", func(t *testing.T) {
-		logicalID := uuid.New().String()
-		artefactID1 := uuid.New().String()
-		artefactID2 := uuid.New().String()
-		artefactID3 := uuid.New().String()
+		logicalID := NewID()
+		artefactID1 := NewID()
+		artefactID2 := NewID()
+		artefactID3 := NewID()
 
 		// Add versions out of order
 		err := client.AddVersionToThread(ctx, logicalID, artefactID2, 2)
@@ -547,7 +546,7 @@ func TestGetLatestVersion(t *testing.T) {
 	})
 
 	t.Run("returns redis.Nil for empty thread", func(t *testing.T) {
-		logicalID := uuid.New().String()
+		logicalID := NewID()
 
 		latestID, version, err := client.GetLatestVersion(ctx, logicalID)
 		assert.Equal(t, "", latestID)
@@ -568,8 +567,8 @@ func TestSubscribeArtefactEvents(t *testing.T) {
 
 		// Create artefact (will publish event)
 		artefact := &Artefact{
-			ID:              uuid.New().String(),
-			LogicalID:       uuid.New().String(),
+			ID:              NewID(),
+			LogicalID:       NewID(),
 			Version:         1,
 			StructuralType:  StructuralTypeStandard,
 			Type:            "TestType",
@@ -602,8 +601,8 @@ func TestSubscribeArtefactEvents(t *testing.T) {
 
 		// Create artefact
 		artefact := &Artefact{
-			ID:              uuid.New().String(),
-			LogicalID:       uuid.New().String(),
+			ID:              NewID(),
+			LogicalID:       NewID(),
 			Version:         1,
 			StructuralType:  StructuralTypeStandard,
 			Type:            "MultiSubTest",
@@ -672,8 +671,8 @@ func TestSubscribeClaimEvents(t *testing.T) {
 
 		// Create claim (will publish event)
 		claim := &Claim{
-			ID:                    uuid.New().String(),
-			ArtefactID:            uuid.New().String(),
+			ID:                    NewID(),
+			ArtefactID:            NewID(),
 			Status:                ClaimStatusPendingReview,
 			GrantedReviewAgents:   []string{},
 			GrantedParallelAgents: []string{},
@@ -714,8 +713,8 @@ func TestInstanceNamespacing(t *testing.T) {
 
 	t.Run("artefacts are instance-isolated", func(t *testing.T) {
 		artefact := &Artefact{
-			ID:              uuid.New().String(),
-			LogicalID:       uuid.New().String(),
+			ID:              NewID(),
+			LogicalID:       NewID(),
 			Version:         1,
 			StructuralType:  StructuralTypeStandard,
 			Type:            "TestType",
@@ -752,8 +751,8 @@ func TestInstanceNamespacing(t *testing.T) {
 
 		// Create artefact in instance-1
 		artefact := &Artefact{
-			ID:              uuid.New().String(),
-			LogicalID:       uuid.New().String(),
+			ID:              NewID(),
+			LogicalID:       NewID(),
 			Version:         1,
 			StructuralType:  StructuralTypeStandard,
 			Type:            "IsolationTest",
@@ -833,8 +832,8 @@ func TestErrorPaths(t *testing.T) {
 		// (Note: In practice, serialization failures are hard to trigger with our types,
 		// but we test the error path exists)
 		claim := &Claim{
-			ID:         uuid.New().String(),
-			ArtefactID: uuid.New().String(),
+			ID:         NewID(),
+			ArtefactID: NewID(),
 			Status:     "invalid-status", // Will pass validation as string, but is semantically wrong
 		}
 
@@ -849,7 +848,7 @@ func TestErrorPaths(t *testing.T) {
 		closedClient, _ := setupTestClient(t)
 		closedClient.Close()
 
-		_, err := closedClient.GetArtefact(ctx, uuid.New().String())
+		_, err := closedClient.GetArtefact(ctx, NewID())
 		assert.Error(t, err)
 	})
 
@@ -857,7 +856,7 @@ func TestErrorPaths(t *testing.T) {
 		closedClient, _ := setupTestClient(t)
 		closedClient.Close()
 
-		err := closedClient.SetBid(ctx, uuid.New().String(), "agent", BidTypeReview)
+		err := closedClient.SetBid(ctx, NewID(), "agent", BidTypeReview)
 		assert.Error(t, err)
 	})
 
@@ -865,7 +864,7 @@ func TestErrorPaths(t *testing.T) {
 		closedClient, _ := setupTestClient(t)
 		closedClient.Close()
 
-		err := closedClient.AddVersionToThread(ctx, uuid.New().String(), uuid.New().String(), 1)
+		err := closedClient.AddVersionToThread(ctx, NewID(), NewID(), 1)
 		assert.Error(t, err)
 	})
 }
@@ -882,7 +881,7 @@ func TestSetBidPublishesEvent(t *testing.T) {
 		defer sub.Close()
 
 		// Submit a bid
-		claimID := uuid.New().String()
+		claimID := NewID()
 		agentName := "test-agent"
 		bidType := BidTypeExclusive
 
@@ -907,7 +906,7 @@ func TestSetBidPublishesEvent(t *testing.T) {
 		closedClient, _ := setupTestClient(t)
 		closedClient.Close()
 
-		err := closedClient.SetBid(ctx, uuid.New().String(), "agent", BidTypeExclusive)
+		err := closedClient.SetBid(ctx, NewID(), "agent", BidTypeExclusive)
 		assert.Error(t, err)
 	})
 }
@@ -955,7 +954,7 @@ func TestSubscribeWorkflowEvents(t *testing.T) {
 		defer sub.Close()
 
 		// Publish a bid event
-		claimID := uuid.New().String()
+		claimID := NewID()
 		err = client.SetBid(ctx, claimID, "agent1", BidTypeExclusive)
 		require.NoError(t, err)
 
@@ -997,7 +996,7 @@ func TestSubscribeWorkflowEvents(t *testing.T) {
 		defer sub2.Close()
 
 		// Publish event
-		claimID := uuid.New().String()
+		claimID := NewID()
 		err = client.SetBid(ctx, claimID, "agent", BidTypeReview)
 		require.NoError(t, err)
 
@@ -1070,8 +1069,8 @@ func TestGetClaimsByStatus(t *testing.T) {
 	t.Run("retrieves claims with matching statuses", func(t *testing.T) {
 		// Create test claims with different statuses
 		claim1 := &Claim{
-			ID:                    uuid.New().String(),
-			ArtefactID:            uuid.New().String(),
+			ID:                    NewID(),
+			ArtefactID:            NewID(),
 			Status:                ClaimStatusPendingReview,
 			GrantedReviewAgents:   []string{},
 			GrantedParallelAgents: []string{},
@@ -1079,8 +1078,8 @@ func TestGetClaimsByStatus(t *testing.T) {
 		}
 
 		claim2 := &Claim{
-			ID:                    uuid.New().String(),
-			ArtefactID:            uuid.New().String(),
+			ID:                    NewID(),
+			ArtefactID:            NewID(),
 			Status:                ClaimStatusPendingParallel,
 			GrantedReviewAgents:   []string{},
 			GrantedParallelAgents: []string{"agent-1"},
@@ -1088,8 +1087,8 @@ func TestGetClaimsByStatus(t *testing.T) {
 		}
 
 		claim3 := &Claim{
-			ID:                    uuid.New().String(),
-			ArtefactID:            uuid.New().String(),
+			ID:                    NewID(),
+			ArtefactID:            NewID(),
 			Status:                ClaimStatusComplete,
 			GrantedReviewAgents:   []string{},
 			GrantedParallelAgents: []string{},
@@ -1118,8 +1117,8 @@ func TestGetClaimsByStatus(t *testing.T) {
 
 	t.Run("handles single status filter", func(t *testing.T) {
 		claim := &Claim{
-			ID:                    uuid.New().String(),
-			ArtefactID:            uuid.New().String(),
+			ID:                    NewID(),
+			ArtefactID:            NewID(),
 			Status:                ClaimStatusPendingExclusive,
 			GrantedReviewAgents:   []string{},
 			GrantedParallelAgents: []string{},
@@ -1136,8 +1135,8 @@ func TestGetClaimsByStatus(t *testing.T) {
 
 	t.Run("includes pending_assignment status", func(t *testing.T) {
 		claim := &Claim{
-			ID:                    uuid.New().String(),
-			ArtefactID:            uuid.New().String(),
+			ID:                    NewID(),
+			ArtefactID:            NewID(),
 			Status:                ClaimStatusPendingAssignment,
 			GrantedReviewAgents:   []string{},
 			GrantedParallelAgents: []string{},

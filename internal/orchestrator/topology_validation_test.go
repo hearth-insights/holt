@@ -5,9 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dyluth/holt/internal/config"
 	"github.com/dyluth/holt/pkg/blackboard"
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -15,14 +13,13 @@ import (
 // TestTopologyValidation_ValidRootArtefact tests that root artefacts with empty ClaimID pass validation.
 func TestTopologyValidation_ValidRootArtefact(t *testing.T) {
 	ctx := context.Background()
-	engine, _, cleanup := setupTestEngine(t)
-	defer cleanup()
+	engine, _, _ := setupTestEngine(t)
 
 	// Create root artefact (CLI/user-generated)
 	rootArtefact := &blackboard.VerifiableArtefact{
 		Header: blackboard.ArtefactHeader{
 			ParentHashes:    []string{}, // Empty - root artefact
-			LogicalThreadID: uuid.New().String(),
+			LogicalThreadID: blackboard.NewID(),
 			Version:         1,
 			CreatedAtMs:     time.Now().UnixMilli(),
 			ProducedByRole:  "user", // Root artefact
@@ -48,14 +45,29 @@ func TestTopologyValidation_ValidRootArtefact(t *testing.T) {
 // TestTopologyValidation_ValidOrchestratorArtefact tests that orchestrator artefacts pass validation.
 func TestTopologyValidation_ValidOrchestratorArtefact(t *testing.T) {
 	ctx := context.Background()
-	engine, _, cleanup := setupTestEngine(t)
-	defer cleanup()
+	engine, bbClient, _ := setupTestEngine(t)
+
+	// Create parent artefact so it's not an orphan
+	parentHash := "parent-hash-123"
+	parentArtefact := &blackboard.Artefact{
+		ID:              parentHash,
+		LogicalID:       blackboard.NewID(),
+		Version:         1,
+		StructuralType:  blackboard.StructuralTypeStandard,
+		Type:            "Test",
+		Payload:         "test",
+		SourceArtefacts: []string{},
+		ProducedByRole:  "user",
+		CreatedAtMs:     time.Now().UnixMilli(),
+	}
+	err := bbClient.CreateArtefact(ctx, parentArtefact)
+	require.NoError(t, err)
 
 	// Create orchestrator artefact (Failure/Terminal)
 	orchArtefact := &blackboard.VerifiableArtefact{
 		Header: blackboard.ArtefactHeader{
-			ParentHashes:    []string{"parent-hash-123"},
-			LogicalThreadID: uuid.New().String(),
+			ParentHashes:    []string{parentHash},
+			LogicalThreadID: blackboard.NewID(),
 			Version:         1,
 			CreatedAtMs:     time.Now().UnixMilli(),
 			ProducedByRole:  "orchestrator", // Trusted authority
@@ -73,7 +85,7 @@ func TestTopologyValidation_ValidOrchestratorArtefact(t *testing.T) {
 	require.NoError(t, err)
 	orchArtefact.ID = hash
 
-	// Verification should pass (orchestrator is exempt from parent linkage checks)
+	// Verification should pass (orchestrator is exempt from parent linkage checks, but orphan check still applies)
 	err = engine.verifyArtefact(ctx, orchArtefact)
 	assert.NoError(t, err, "Orchestrator artefact should pass topology validation")
 }
@@ -81,14 +93,13 @@ func TestTopologyValidation_ValidOrchestratorArtefact(t *testing.T) {
 // TestTopologyValidation_ValidAgentArtefact tests that agent artefacts with valid claim pass validation.
 func TestTopologyValidation_ValidAgentArtefact(t *testing.T) {
 	ctx := context.Background()
-	engine, bbClient, cleanup := setupTestEngine(t)
-	defer cleanup()
+	engine, bbClient, _ := setupTestEngine(t)
 
 	// Create parent artefact
-	parentID := uuid.New().String()
+	parentID := blackboard.NewID()
 	parentArtefact := &blackboard.Artefact{
 		ID:              parentID,
-		LogicalID:       uuid.New().String(),
+		LogicalID:       blackboard.NewID(),
 		Version:         1,
 		StructuralType:  blackboard.StructuralTypeStandard,
 		Type:            "GoalDefined",
@@ -101,7 +112,7 @@ func TestTopologyValidation_ValidAgentArtefact(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create active claim for the parent artefact
-	claimID := uuid.New().String()
+	claimID := blackboard.NewID()
 	claim := &blackboard.Claim{
 		ID:                    claimID,
 		ArtefactID:            parentID,
@@ -115,7 +126,7 @@ func TestTopologyValidation_ValidAgentArtefact(t *testing.T) {
 	agentArtefact := &blackboard.VerifiableArtefact{
 		Header: blackboard.ArtefactHeader{
 			ParentHashes:    []string{parentID}, // References parent
-			LogicalThreadID: uuid.New().String(),
+			LogicalThreadID: blackboard.NewID(),
 			Version:         1,
 			CreatedAtMs:     time.Now().UnixMilli(),
 			ProducedByRole:  "test-agent",
@@ -141,14 +152,13 @@ func TestTopologyValidation_ValidAgentArtefact(t *testing.T) {
 // TestTopologyValidation_RejectRootArtefactWithClaim tests rejection of root artefacts with ClaimID.
 func TestTopologyValidation_RejectRootArtefactWithClaim(t *testing.T) {
 	ctx := context.Background()
-	engine, _, cleanup := setupTestEngine(t)
-	defer cleanup()
+	engine, _, _ := setupTestEngine(t)
 
 	// Create malicious root artefact with ClaimID
 	maliciousRoot := &blackboard.VerifiableArtefact{
 		Header: blackboard.ArtefactHeader{
 			ParentHashes:    []string{}, // Root
-			LogicalThreadID: uuid.New().String(),
+			LogicalThreadID: blackboard.NewID(),
 			Version:         1,
 			CreatedAtMs:     time.Now().UnixMilli(),
 			ProducedByRole:  "user",
@@ -170,20 +180,19 @@ func TestTopologyValidation_RejectRootArtefactWithClaim(t *testing.T) {
 	err = engine.verifyArtefact(ctx, maliciousRoot)
 	assert.Error(t, err, "Root artefact with ClaimID should be rejected")
 	assert.Contains(t, err.Error(), "topology violation", "Error should mention topology violation")
-	assert.Contains(t, err.Error(), "root artefact", "Error should mention root artefact")
+	assert.Contains(t, err.Error(), "user/cli artefact", "Error should mention user/cli artefact")
 }
 
 // TestTopologyValidation_RejectMissingClaimID tests rejection of agent artefacts without ClaimID.
 func TestTopologyValidation_RejectMissingClaimID(t *testing.T) {
 	ctx := context.Background()
-	engine, bbClient, cleanup := setupTestEngine(t)
-	defer cleanup()
+	engine, bbClient, _ := setupTestEngine(t)
 
 	// Create parent artefact
-	parentID := uuid.New().String()
+	parentID := blackboard.NewID()
 	parentArtefact := &blackboard.Artefact{
 		ID:              parentID,
-		LogicalID:       uuid.New().String(),
+		LogicalID:       blackboard.NewID(),
 		Version:         1,
 		StructuralType:  blackboard.StructuralTypeStandard,
 		Type:            "GoalDefined",
@@ -199,7 +208,7 @@ func TestTopologyValidation_RejectMissingClaimID(t *testing.T) {
 	unboundArtefact := &blackboard.VerifiableArtefact{
 		Header: blackboard.ArtefactHeader{
 			ParentHashes:    []string{parentID},
-			LogicalThreadID: uuid.New().String(),
+			LogicalThreadID: blackboard.NewID(),
 			Version:         1,
 			CreatedAtMs:     time.Now().UnixMilli(),
 			ProducedByRole:  "malicious-agent",
@@ -226,14 +235,13 @@ func TestTopologyValidation_RejectMissingClaimID(t *testing.T) {
 // TestTopologyValidation_RejectInvalidClaimReference tests rejection when ClaimID doesn't exist.
 func TestTopologyValidation_RejectInvalidClaimReference(t *testing.T) {
 	ctx := context.Background()
-	engine, bbClient, cleanup := setupTestEngine(t)
-	defer cleanup()
+	engine, bbClient, _ := setupTestEngine(t)
 
 	// Create parent artefact
-	parentID := uuid.New().String()
+	parentID := blackboard.NewID()
 	parentArtefact := &blackboard.Artefact{
 		ID:              parentID,
-		LogicalID:       uuid.New().String(),
+		LogicalID:       blackboard.NewID(),
 		Version:         1,
 		StructuralType:  blackboard.StructuralTypeStandard,
 		Type:            "GoalDefined",
@@ -249,7 +257,7 @@ func TestTopologyValidation_RejectInvalidClaimReference(t *testing.T) {
 	invalidClaim := &blackboard.VerifiableArtefact{
 		Header: blackboard.ArtefactHeader{
 			ParentHashes:    []string{parentID},
-			LogicalThreadID: uuid.New().String(),
+			LogicalThreadID: blackboard.NewID(),
 			Version:         1,
 			CreatedAtMs:     time.Now().UnixMilli(),
 			ProducedByRole:  "test-agent",
@@ -276,14 +284,13 @@ func TestTopologyValidation_RejectInvalidClaimReference(t *testing.T) {
 // TestTopologyValidation_RejectTerminatedClaim tests rejection when claim is terminated.
 func TestTopologyValidation_RejectTerminatedClaim(t *testing.T) {
 	ctx := context.Background()
-	engine, bbClient, cleanup := setupTestEngine(t)
-	defer cleanup()
+	engine, bbClient, _ := setupTestEngine(t)
 
 	// Create parent artefact
-	parentID := uuid.New().String()
+	parentID := blackboard.NewID()
 	parentArtefact := &blackboard.Artefact{
 		ID:              parentID,
-		LogicalID:       uuid.New().String(),
+		LogicalID:       blackboard.NewID(),
 		Version:         1,
 		StructuralType:  blackboard.StructuralTypeStandard,
 		Type:            "GoalDefined",
@@ -296,7 +303,7 @@ func TestTopologyValidation_RejectTerminatedClaim(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create TERMINATED claim
-	claimID := uuid.New().String()
+	claimID := blackboard.NewID()
 	claim := &blackboard.Claim{
 		ID:                    claimID,
 		ArtefactID:            parentID,
@@ -310,7 +317,7 @@ func TestTopologyValidation_RejectTerminatedClaim(t *testing.T) {
 	reusedClaim := &blackboard.VerifiableArtefact{
 		Header: blackboard.ArtefactHeader{
 			ParentHashes:    []string{parentID},
-			LogicalThreadID: uuid.New().String(),
+			LogicalThreadID: blackboard.NewID(),
 			Version:         1,
 			CreatedAtMs:     time.Now().UnixMilli(),
 			ProducedByRole:  "test-agent",
@@ -337,14 +344,13 @@ func TestTopologyValidation_RejectTerminatedClaim(t *testing.T) {
 // TestTopologyValidation_RejectParentLinkageViolation tests rejection when parent doesn't match claim target.
 func TestTopologyValidation_RejectParentLinkageViolation(t *testing.T) {
 	ctx := context.Background()
-	engine, bbClient, cleanup := setupTestEngine(t)
-	defer cleanup()
+	engine, bbClient, _ := setupTestEngine(t)
 
 	// Create artefact A
-	artefactA := uuid.New().String()
+	artefactA := blackboard.NewID()
 	artA := &blackboard.Artefact{
 		ID:              artefactA,
-		LogicalID:       uuid.New().String(),
+		LogicalID:       blackboard.NewID(),
 		Version:         1,
 		StructuralType:  blackboard.StructuralTypeStandard,
 		Type:            "GoalDefined",
@@ -357,10 +363,10 @@ func TestTopologyValidation_RejectParentLinkageViolation(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create artefact B (unrelated)
-	artefactB := uuid.New().String()
+	artefactB := blackboard.NewID()
 	artB := &blackboard.Artefact{
 		ID:              artefactB,
-		LogicalID:       uuid.New().String(),
+		LogicalID:       blackboard.NewID(),
 		Version:         1,
 		StructuralType:  blackboard.StructuralTypeStandard,
 		Type:            "GoalDefined",
@@ -373,7 +379,7 @@ func TestTopologyValidation_RejectParentLinkageViolation(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create claim for artefact A
-	claimID := uuid.New().String()
+	claimID := blackboard.NewID()
 	claim := &blackboard.Claim{
 		ID:                    claimID,
 		ArtefactID:            artefactA, // Claim is for A
@@ -387,7 +393,7 @@ func TestTopologyValidation_RejectParentLinkageViolation(t *testing.T) {
 	wrongParent := &blackboard.VerifiableArtefact{
 		Header: blackboard.ArtefactHeader{
 			ParentHashes:    []string{artefactB}, // WRONG - claim is for A, not B
-			LogicalThreadID: uuid.New().String(),
+			LogicalThreadID: blackboard.NewID(),
 			Version:         1,
 			CreatedAtMs:     time.Now().UnixMilli(),
 			ProducedByRole:  "test-agent",
@@ -408,20 +414,27 @@ func TestTopologyValidation_RejectParentLinkageViolation(t *testing.T) {
 	// Verification should fail
 	err = engine.verifyArtefact(ctx, wrongParent)
 	assert.Error(t, err, "Artefact with wrong parent should be rejected")
-	assert.Contains(t, err.Error(), "parent linkage violation", "Error should mention parent linkage violation")
+	assert.Contains(t, err.Error(), "topology violation: no parent matches claim target", "Error should mention parent linkage violation")
+
+	// Security alert published
+	locked, alert, err := bbClient.IsInLockdown(ctx)
+	require.NoError(t, err)
+	assert.True(t, locked, "System should be in lockdown")
+	assert.Equal(t, "unauthorized_topology", alert.Type)
+	assert.Equal(t, "parent_linkage_violation", alert.ViolationType)
+	assert.Equal(t, artefactA, alert.ExpectedParentArtefact) // artefactA is the expected parent from claim
 }
 
 // TestTopologyValidation_AllowMultipleParents tests that artefacts with multiple parents pass if one matches.
 func TestTopologyValidation_AllowMultipleParents(t *testing.T) {
 	ctx := context.Background()
-	engine, bbClient, cleanup := setupTestEngine(t)
-	defer cleanup()
+	engine, bbClient, _ := setupTestEngine(t)
 
 	// Create artefact A (target)
-	artefactA := uuid.New().String()
+	artefactA := blackboard.NewID()
 	artA := &blackboard.Artefact{
 		ID:              artefactA,
-		LogicalID:       uuid.New().String(),
+		LogicalID:       blackboard.NewID(),
 		Version:         1,
 		StructuralType:  blackboard.StructuralTypeStandard,
 		Type:            "GoalDefined",
@@ -434,10 +447,10 @@ func TestTopologyValidation_AllowMultipleParents(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create artefact B (context)
-	artefactB := uuid.New().String()
+	artefactB := blackboard.NewID()
 	artB := &blackboard.Artefact{
 		ID:              artefactB,
-		LogicalID:       uuid.New().String(),
+		LogicalID:       blackboard.NewID(),
 		Version:         1,
 		StructuralType:  blackboard.StructuralTypeStandard,
 		Type:            "Requirements",
@@ -450,7 +463,7 @@ func TestTopologyValidation_AllowMultipleParents(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create claim for artefact A
-	claimID := uuid.New().String()
+	claimID := blackboard.NewID()
 	claim := &blackboard.Claim{
 		ID:                    claimID,
 		ArtefactID:            artefactA,
@@ -464,7 +477,7 @@ func TestTopologyValidation_AllowMultipleParents(t *testing.T) {
 	multiParent := &blackboard.VerifiableArtefact{
 		Header: blackboard.ArtefactHeader{
 			ParentHashes:    []string{artefactA, artefactB}, // Both A (assigned) and B (context)
-			LogicalThreadID: uuid.New().String(),
+			LogicalThreadID: blackboard.NewID(),
 			Version:         1,
 			CreatedAtMs:     time.Now().UnixMilli(),
 			ProducedByRole:  "test-agent",
@@ -485,35 +498,4 @@ func TestTopologyValidation_AllowMultipleParents(t *testing.T) {
 	// Verification should PASS (at least one parent matches)
 	err = engine.verifyArtefact(ctx, multiParent)
 	assert.NoError(t, err, "Artefact with multiple parents should pass if one matches claim target")
-}
-
-// setupTestEngine creates a test engine with blackboard client for testing
-func setupTestEngine(t *testing.T) (*Engine, *blackboard.Client, func()) {
-	t.Helper()
-
-	// Create test Redis client (assumes miniredis or test Redis available)
-	bbClient := setupTestBlackboard(t)
-
-	// Create test config
-	cfg := &config.Config{
-		Orchestrator: config.OrchestratorConfig{
-			TimestampDriftToleranceMs: intPtr(300000), // 5 minutes
-		},
-	}
-
-	// Create engine
-	engine := &Engine{
-		client: bbClient,
-		config: cfg,
-	}
-
-	cleanup := func() {
-		bbClient.Close()
-	}
-
-	return engine, bbClient, cleanup
-}
-
-func intPtr(i int) *int {
-	return &i
 }
