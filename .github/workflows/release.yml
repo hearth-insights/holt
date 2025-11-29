@@ -1,0 +1,120 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build-binaries:
+    name: Build Binaries
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+
+      - name: Build Holt CLI
+        run: |
+          make build-darwin-arm64
+          make build-darwin-amd64
+          make build-linux-arm64
+          make build-linux-amd64
+
+      - name: Build Pup
+        run: |
+          make build-pup-darwin-arm64
+          make build-pup-darwin-amd64
+          make build-pup-linux-arm64
+          make build-pup-linux-amd64
+
+      - name: Build Orchestrator
+        run: |
+          make build-orchestrator-linux-arm64
+          make build-orchestrator-linux-amd64
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries
+          path: bin/*
+          retention-days: 1
+
+  build-push-image:
+    name: Build and Push Orchestrator Image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}/holt-orchestrator
+          tags: |
+            type=ref,event=tag
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: cmd/orchestrator/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64,linux/arm64
+
+  create-release:
+    name: Publish Release
+    runs-on: ubuntu-latest
+    needs: [build-binaries, build-push-image]
+    steps:
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: binaries
+          path: bin
+
+      # Case 1: Stable Release (Tagged)
+      - name: Create Stable Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: bin/*
+          generate_release_notes: true
+
+      # Case 2: Rolling "Latest" Release (Main Branch)
+      - name: Update Latest Release
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Latest Build (Rolling)
+          tag_name: latest
+          prerelease: true
+          files: bin/*
+          make_latest: false # Keep semantic tags as "latest" in UI
+

@@ -203,6 +203,48 @@ build-pup:
 	@$(GO) build -o bin/holt-pup ./cmd/pup
 	@echo "✓ Built: bin/holt-pup"
 
+# Cross-compile pup for macOS ARM64
+build-pup-darwin-arm64:
+	@echo "Building pup for macOS ARM64..."
+	@mkdir -p bin
+	@GOOS=darwin GOARCH=arm64 $(GO) build -o bin/holt-pup-darwin-arm64 ./cmd/pup
+	@echo "✓ Built: bin/holt-pup-darwin-arm64"
+
+# Cross-compile pup for macOS Intel
+build-pup-darwin-amd64:
+	@echo "Building pup for macOS Intel..."
+	@mkdir -p bin
+	@GOOS=darwin GOARCH=amd64 $(GO) build -o bin/holt-pup-darwin-amd64 ./cmd/pup
+	@echo "✓ Built: bin/holt-pup-darwin-amd64"
+
+# Cross-compile pup for Linux ARM64
+build-pup-linux-arm64:
+	@echo "Building pup for Linux ARM64..."
+	@mkdir -p bin
+	@GOOS=linux GOARCH=arm64 $(GO) build -o bin/holt-pup-linux-arm64 ./cmd/pup
+	@echo "✓ Built: bin/holt-pup-linux-arm64"
+
+# Cross-compile pup for Linux AMD64
+build-pup-linux-amd64:
+	@echo "Building pup for Linux AMD64..."
+	@mkdir -p bin
+	@GOOS=linux GOARCH=amd64 $(GO) build -o bin/holt-pup-linux-amd64 ./cmd/pup
+	@echo "✓ Built: bin/holt-pup-linux-amd64"
+
+# Cross-compile orchestrator for Linux ARM64
+build-orchestrator-linux-arm64:
+	@echo "Building orchestrator for Linux ARM64..."
+	@mkdir -p bin
+	@GOOS=linux GOARCH=arm64 $(GO) build -o bin/holt-orchestrator-linux-arm64 ./cmd/orchestrator
+	@echo "✓ Built: bin/holt-orchestrator-linux-arm64"
+
+# Cross-compile orchestrator for Linux AMD64
+build-orchestrator-linux-amd64:
+	@echo "Building orchestrator for Linux AMD64..."
+	@mkdir -p bin
+	@GOOS=linux GOARCH=amd64 $(GO) build -o bin/holt-orchestrator-linux-amd64 ./cmd/orchestrator
+	@echo "✓ Built: bin/holt-orchestrator-linux-amd64"
+
 # Run pup unit and integration tests
 test-pup:
 	@echo "Running pup tests..."
