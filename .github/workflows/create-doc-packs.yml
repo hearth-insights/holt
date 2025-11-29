@@ -1,0 +1,53 @@
+name: Create Doc Packs
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'docs/compliance/**'
+      - '.github/workflows/create-doc-packs.yml'
+  workflow_dispatch:
+
+jobs:
+  convert_to_pdf:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Pandoc and TeX Live
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pandoc texlive-xetex
+
+      - name: Create Output Directory
+        run: mkdir -p pdfs
+
+      - name: Convert Markdown to PDF
+        run: |
+          for file in docs/compliance/*.md; do
+            filename=$(basename "$file" .md)
+            echo "Converting $file to pdfs/$filename.pdf"
+            pandoc "$file" -o "pdfs/$filename.pdf" --pdf-engine=xelatex
+          done
+
+      - name: Zip PDFs
+        run: |
+          zip -r compliance-docs.zip pdfs
+
+      - name: Zip Independent Clan Docs
+        run: |
+          zip -r independent-clan-docs.zip docs/independent-holt-clan-creation
+
+      - name: Upload Compliance Docs
+        uses: actions/upload-artifact@v4
+        with:
+          name: compliance-docs
+          path: compliance-docs.zip
+
+      - name: Upload Independent Clan Docs
+        uses: actions/upload-artifact@v4
+        with:
+          name: independent-clan-docs
+          path: independent-clan-docs.zip

@@ -43,6 +43,18 @@ func setupGitRepo(t *testing.T) string {
 	cmd.Dir = tmpDir
 	require.NoError(t, cmd.Run())
 
+	// Create initial commit (required for M4.7 System Spine identity)
+	err = os.WriteFile(filepath.Join(tmpDir, "README.md"), []byte("# Test Repo"), 0644)
+	require.NoError(t, err)
+
+	cmd = exec.Command("git", "add", ".")
+	cmd.Dir = tmpDir
+	require.NoError(t, cmd.Run())
+
+	cmd = exec.Command("git", "commit", "-m", "Initial commit")
+	cmd.Dir = tmpDir
+	require.NoError(t, cmd.Run())
+
 	return tmpDir
 }
 

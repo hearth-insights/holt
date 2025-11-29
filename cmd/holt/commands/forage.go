@@ -190,7 +190,21 @@ func runForage(cmd *cobra.Command, args []string) error {
 		)
 	}
 
-	// Phase 7: If --watch mode, start streaming BEFORE creating artefact to catch all events
+	// Phase 7: Fetch active_manifest (M4.7 System Spine)
+	activeManifestID, err := fetchActiveManifest(ctx, bbClient, targetInstanceName)
+	if err != nil {
+		return printer.ErrorWithContext(
+			"System Spine not initialized",
+			"The orchestrator has not initialized the System Spine yet.",
+			map[string]string{"Error": err.Error()},
+			[]string{
+				"Wait for orchestrator to complete startup and retry",
+				fmt.Sprintf("Check orchestrator logs:\n  holt logs orchestrator --name %s", targetInstanceName),
+			},
+		)
+	}
+
+	// Phase 8: If --watch mode, start streaming BEFORE creating artefact to catch all events
 	if forageWatch {
 		printer.Info("Starting watch mode...\n")
 
@@ -205,10 +219,11 @@ func runForage(cmd *cobra.Command, args []string) error {
 		time.Sleep(100 * time.Millisecond)
 
 		// Create V2-compatible artefact to compute hash
+		// M4.7: Anchor to active SystemManifest
 		v2Artefact := &blackboard.VerifiableArtefact{
 			Header: blackboard.ArtefactHeader{
-				ParentHashes:    []string{},
-				LogicalThreadID: blackboard.NewID(), // New thread
+				ParentHashes:    []string{activeManifestID}, // M4.7: Anchor to SystemManifest
+				LogicalThreadID: blackboard.NewID(),         // New thread
 				Version:         1,
 				CreatedAtMs:     time.Now().UnixMilli(),
 				ProducedByRole:  "user",
@@ -251,10 +266,11 @@ func runForage(cmd *cobra.Command, args []string) error {
 
 	// Non-watch mode: create artefact and return
 	// Create V2-compatible artefact to compute hash
+	// M4.7: Anchor to active SystemManifest
 	v2Artefact := &blackboard.VerifiableArtefact{
 		Header: blackboard.ArtefactHeader{
-			ParentHashes:    []string{},
-			LogicalThreadID: blackboard.NewID(), // New thread
+			ParentHashes:    []string{activeManifestID}, // M4.7: Anchor to SystemManifest
+			LogicalThreadID: blackboard.NewID(),         // New thread
 			Version:         1,
 			CreatedAtMs:     time.Now().UnixMilli(),
 			ProducedByRole:  "user",
@@ -307,4 +323,24 @@ func mustGetGitRoot() string {
 		return "<unknown>"
 	}
 	return root
+}
+
+// fetchActiveManifest retrieves the active SystemManifest ID from Redis (M4.7).
+// This manifest hash is used to anchor root artefacts to the current system configuration state.
+func fetchActiveManifest(ctx context.Context, bbClient *blackboard.Client, instanceName string) (string, error) {
+	activeManifestKey := fmt.Sprintf("holt:%s:active_manifest", instanceName)
+	manifestID, err := bbClient.GetRedisClient().Get(ctx, activeManifestKey).Result()
+
+	if err != nil {
+		if err.Error() == "redis: nil" {
+			return "", fmt.Errorf("active_manifest not found - orchestrator may not be fully initialized")
+		}
+		return "", fmt.Errorf("failed to fetch active_manifest: %w", err)
+	}
+
+	if manifestID == "" {
+		return "", fmt.Errorf("active_manifest is empty")
+	}
+
+	return manifestID, nil
 }

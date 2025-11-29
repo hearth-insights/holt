@@ -16,6 +16,7 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/go-connections/nat"
 	dockerpkg "github.com/dyluth/holt/internal/docker"
+	"github.com/dyluth/holt/pkg/blackboard"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -24,7 +25,19 @@ import (
 // M4.4: Integration tests for Production-Grade State Management
 // Tests external Redis, managed Redis with password, and authentication failures
 
-const holtBinary = "/app/bin/holt"
+var holtBinary = "/app/bin/holt"
+
+func init() {
+	// If running locally, try to find the binary in the project root
+	if _, err := os.Stat(holtBinary); os.IsNotExist(err) {
+		// Try to find the binary relative to the test file
+		// Tests run in cmd/holt/commands, so project root is ../../..
+		localPath, _ := filepath.Abs("../../../bin/holt")
+		if _, err := os.Stat(localPath); err == nil {
+			holtBinary = localPath
+		}
+	}
+}
 
 // TestExternalRedisMode verifies that Holt can connect to an external Redis instance
 // and that holt down does NOT stop the external Redis container
@@ -92,7 +105,7 @@ agents:
     bidding_strategy: "exclusive"
 services:
   redis:
-    uri: "redis://:%s@localhost:%s"
+    uri: "redis://:%s@host.docker.internal:%s"
 `, redisPassword, redisPort)
 
 	err = os.WriteFile(filepath.Join(gitRoot, "holt.yml"), []byte(configContent), 0644)
@@ -124,7 +137,7 @@ services:
 
 	hasRedis := false
 	for _, name := range containerNamesSlice {
-		if strings.Contains(name, "redis") {
+		if name == dockerpkg.RedisContainerName(instanceName) {
 			hasRedis = true
 			break
 		}
@@ -148,6 +161,29 @@ services:
 	require.NoError(t, err)
 	assert.True(t, orchestratorInfo.State.Running, "Orchestrator should be running")
 
+	// M4.7 Validation: Verify SystemManifest persistence with external Redis
+	// 1. Connect to external Redis directly to check state
+	validationClient := redis.NewClient(&redis.Options{
+		Addr:     fmt.Sprintf("localhost:%s", redisPort),
+		Password: redisPassword,
+	})
+	defer validationClient.Close()
+
+	// 2. Fetch initial manifest and spine IDs
+	activeManifestKey := "holt:" + instanceName + ":active_manifest"
+	spineThreadKey := "holt:" + instanceName + ":spine_thread_id"
+
+	// Wait a moment for spine initialization
+	time.Sleep(1 * time.Second)
+
+	manifestID1, err := validationClient.Get(ctx, activeManifestKey).Result()
+	require.NoError(t, err, "Should have active manifest after first start")
+	spineID1, err := validationClient.Get(ctx, spineThreadKey).Result()
+	require.NoError(t, err, "Should have spine thread ID after first start")
+
+	t.Logf("Initial Manifest: %s", manifestID1)
+	t.Logf("Initial Spine ID: %s", spineID1)
+
 	// Test: holt down should NOT stop external Redis
 	t.Log("Running holt down")
 	cmd = exec.Command(holtBinary, "down", "--name", instanceName)
@@ -163,6 +199,104 @@ services:
 	// Verify: External Redis is still accessible
 	err = redisClient.Ping(ctx).Err()
 	assert.NoError(t, err, "External Redis should still be accessible")
+
+	// M4.7 Validation: Restart and verify persistence
+	t.Log("Restarting instance to verify persistence")
+	cmd = exec.Command(holtBinary, "up", "--name", instanceName)
+	output, err = cmd.CombinedOutput()
+	// Just log output for debugging if it fails
+	if err != nil {
+		t.Logf("holt up restart output:\n%s", string(output))
+	}
+	require.NoError(t, err, "holt up restart should succeed")
+
+	// Wait for orchestrator
+	time.Sleep(2 * time.Second)
+
+	// 3. Fetch manifest and spine IDs after restart
+	manifestID2, err := validationClient.Get(ctx, activeManifestKey).Result()
+	require.NoError(t, err, "Should have active manifest after restart")
+	spineID2, err := validationClient.Get(ctx, spineThreadKey).Result()
+	require.NoError(t, err, "Should have spine thread ID after restart")
+
+	// 4. Verify they match (persistence worked!)
+	assert.Equal(t, manifestID1, manifestID2, "SystemManifest should be persisted across restarts in external Redis")
+	assert.Equal(t, spineID1, spineID2, "Spine thread ID should be persisted across restarts in external Redis")
+
+	// M4.7 Validation: Verify Configuration Drift Detection
+	t.Log("Modifying configuration to test drift detection")
+
+	// Stop instance
+	cmd = exec.Command(holtBinary, "down", "--name", instanceName)
+	_ = cmd.Run()
+
+	// Modify holt.yml
+	newConfigContent := fmt.Sprintf(`version: "1.0"
+agents:
+  TestAgent:
+    image: "example-agent:latest"
+    command: ["/app/run.sh"]
+    bidding_strategy: "review" 
+services:
+  redis:
+    uri: "redis://:%s@host.docker.internal:%s"
+`, redisPassword, redisPort)
+	// Changed strategy to 'review'
+
+	err = os.WriteFile(filepath.Join(gitRoot, "holt.yml"), []byte(newConfigContent), 0644)
+	require.NoError(t, err)
+
+	// Commit changes (required for identity change)
+	cmd = exec.Command("git", "add", "holt.yml")
+	cmd.Dir = gitRoot
+	require.NoError(t, cmd.Run())
+
+	cmd = exec.Command("git", "commit", "-m", "Update config for drift test")
+	cmd.Dir = gitRoot
+	require.NoError(t, cmd.Run())
+
+	// Restart instance
+	t.Log("Restarting instance with new config")
+	cmd = exec.Command(holtBinary, "up", "--name", instanceName)
+	output, err = cmd.CombinedOutput()
+	if err != nil {
+		t.Logf("holt up output:\n%s", string(output))
+	}
+	require.NoError(t, err)
+
+	// Wait for spine update
+	time.Sleep(2 * time.Second)
+
+	// Fetch new manifest ID
+	manifestID3, err := validationClient.Get(ctx, activeManifestKey).Result()
+	require.NoError(t, err, "Should have active manifest after config change")
+
+	// Verify drift detected
+	assert.NotEqual(t, manifestID2, manifestID3, "New manifest should be created after config change")
+
+	// Verify spine continuity (v3 parent is v2)
+	// Use a blackboard client for this verification to handle proper deserialization
+	redisOpts := &redis.Options{
+		Addr:     fmt.Sprintf("localhost:%s", redisPort),
+		Password: redisPassword,
+	}
+	bbClient, err := blackboard.NewClient(redisOpts, instanceName)
+	require.NoError(t, err)
+	defer bbClient.Close()
+
+	// Fetch v3 artefact
+	manifest3, err := bbClient.GetVerifiableArtefact(ctx, manifestID3)
+	require.NoError(t, err, "Failed to fetch manifest 3")
+
+	// Verify parent is previous manifest
+	assert.Len(t, manifest3.Header.ParentHashes, 1, "New manifest should have 1 parent")
+	assert.Equal(t, manifestID2, manifest3.Header.ParentHashes[0], "New manifest parent should be previous manifest")
+	assert.Equal(t, 2, manifest3.Header.Version, "New manifest should be version 2")
+
+	// Final cleanup
+	t.Log("Running final holt down")
+	cmd = exec.Command(holtBinary, "down", "--name", instanceName)
+	_ = cmd.Run()
 
 	t.Log("✓ External Redis mode test passed")
 }

@@ -5,7 +5,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -26,6 +25,8 @@ func setupRedis(t *testing.T) (string, func()) {
 		Image:        "redis:7-alpine",
 		ExposedPorts: []string{"6379/tcp"},
 		WaitingFor:   wait.ForLog("Ready to accept connections"),
+		// Disable Ryuk to avoid Docker-in-Docker issues
+		SkipReaper: true,
 	}
 
 	redisC, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
@@ -36,17 +37,19 @@ func setupRedis(t *testing.T) (string, func()) {
 		t.Fatalf("Failed to start Redis container: %v", err)
 	}
 
+	// Get container's internal host and port for Docker network connectivity
 	host, err := redisC.Host(ctx)
 	if err != nil {
 		t.Fatalf("Failed to get container host: %v", err)
 	}
 
-	port, err := redisC.MappedPort(ctx, "6379")
+	// Get the mapped port
+	mappedPort, err := redisC.MappedPort(ctx, "6379/tcp")
 	if err != nil {
-		t.Fatalf("Failed to get container port: %v", err)
+		t.Fatalf("Failed to get mapped port: %v", err)
 	}
 
-	redisURL := fmt.Sprintf("redis://%s:%s", host, port.Port())
+	redisURL := "redis://" + host + ":" + mappedPort.Port()
 
 	cleanup := func() {
 		if err := redisC.Terminate(ctx); err != nil {
