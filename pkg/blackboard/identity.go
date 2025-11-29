@@ -53,7 +53,8 @@ func (p *LocalIdentityProvider) ComputeIdentity() (*SystemIdentity, error) {
 	configHash := "sha256:" + hex.EncodeToString(configHashBytes[:])
 
 	// Step 2: Get git HEAD commit (MUST succeed - fail fast if not a git repo)
-	cmd := exec.Command("git", "rev-parse", "HEAD")
+	// M4.7: Add safe.directory=* to allow running in container where owner might differ
+	cmd := exec.Command("git", "-c", "safe.directory=*", "rev-parse", "HEAD")
 	cmd.Dir = p.WorkspaceRoot
 	output, err := cmd.Output()
 	if err != nil {

@@ -27,7 +27,8 @@ func validateCommitExists(commitHash string) error {
 
 	// Use git cat-file -e to check if commit exists
 	// -e flag: exit with zero status if object exists
-	cmd := exec.Command("git", "cat-file", "-e", commitHash)
+	// M4.7: Add safe.directory=* to allow running in container where owner might differ
+	cmd := exec.Command("git", "-c", "safe.directory=*", "cat-file", "-e", commitHash)
 	cmd.Dir = workspaceDir
 
 	// Run command and check exit code
