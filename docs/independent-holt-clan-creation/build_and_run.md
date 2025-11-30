@@ -20,11 +20,11 @@ sudo ./download-holt.sh --install
 ```
 
 ### Option B: Manual Download
-Download the latest release from the **[GitHub Releases Page](https://github.com/hearth-insights/holt/releases)**.
+Download the latest release from the **[GitHub Releases Page](https://github.com/hearth-insights/holt/releases/tag/latest)**.
 
 You will need to download the appropriate binaries for your OS/Arch:
 *   **CLI**: `holt-<os>-<arch>` (e.g., `holt-darwin-arm64`) -> Rename to `holt`
-*   **Pup**: `holt-pup-<os>-<arch>` (e.g., `holt-pup-linux-amd64`) -> Rename to `holt-pup`
+*   **Pup**: `holt-pup-<os>-<arch>` (e.g., `holt-pup-linux-amd64`) -> Rename to `holt-pup` (Required for building agent images)
 
 Make them executable:
 ```bash
@@ -49,7 +49,7 @@ This will create:
 The orchestrator image is available from the GitHub Container Registry.
 
 ```bash
-docker pull ghcr.io/holt/holt-orchestrator:latest
+docker pull ghcr.io/hearth-insights/holt/holt-orchestrator:latest
 ```
 
 ### Option B: Build Locally

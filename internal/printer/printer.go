@@ -104,8 +104,18 @@ func Warning(format string, a ...any) {
 	}
 }
 
+// HandledError represents an error that has already been printed to stderr.
+// Used to prevent double-printing of errors in the main execution loop.
+type HandledError struct {
+	Title string
+}
+
+func (e *HandledError) Error() string {
+	return e.Title
+}
+
 // Error creates a formatted error message with title, explanation, and suggestions
-// Prints the formatted error to stderr with colors and returns a simple error for Cobra
+// Prints the formatted error to stderr with colors and returns a HandledError
 func Error(title string, explanation string, suggestions []string) error {
 	// Print title in red to stderr
 	red.Fprintf(os.Stderr, "%s\n\n", title)
@@ -126,12 +136,12 @@ func Error(title string, explanation string, suggestions []string) error {
 		}
 	}
 
-	// Return simple error for Cobra (won't be printed due to SilenceErrors)
-	return fmt.Errorf("%s", title)
+	// Return HandledError to signal that this error has already been printed
+	return &HandledError{Title: title}
 }
 
 // ErrorWithContext creates a formatted error with context details
-// Prints the formatted error to stderr with colors and returns a simple error for Cobra
+// Prints the formatted error to stderr with colors and returns a HandledError
 func ErrorWithContext(title string, explanation string, context map[string]string, suggestions []string) error {
 	// Print title in red to stderr
 	red.Fprintf(os.Stderr, "%s\n\n", title)
@@ -162,8 +172,8 @@ func ErrorWithContext(title string, explanation string, context map[string]strin
 		}
 	}
 
-	// Return simple error for Cobra (won't be printed due to SilenceErrors)
-	return fmt.Errorf("%s", title)
+	// Return HandledError to signal that this error has already been printed
+	return &HandledError{Title: title}
 }
 
 // Step prints a step message with emphasis (used in multi-step operations).

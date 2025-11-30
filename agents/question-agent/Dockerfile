@@ -13,6 +13,7 @@ RUN go mod download
 COPY cmd/pup ./cmd/pup
 COPY internal/pup ./internal/pup
 COPY pkg/blackboard ./pkg/blackboard
+COPY pkg/version ./pkg/version
 COPY internal/config ./internal/config
 
 # Build the pup binary

@@ -52,12 +52,26 @@ enabling transparent, auditable AI workflows.`,
 
 // Execute adds all child commands to the root command and sets flags appropriately.
 // This is called by main.main(). It only needs to happen once to the rootCmd.
+// Execute adds all child commands to the root command and sets flags appropriately.
+// This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() error {
 	// Silence Cobra's default error and usage printing
 	// We print formatted colored errors directly in the printer package
 	rootCmd.SilenceErrors = true
 	rootCmd.SilenceUsage = true
-	return rootCmd.Execute()
+
+	err := rootCmd.Execute()
+	if err != nil {
+		// Check if this is a HandledError (already printed)
+		// If not, it's likely a Cobra error (unknown command, flag, etc.)
+		if _, ok := err.(*printer.HandledError); !ok {
+			// Print the raw error message
+			fmt.Fprintf(rootCmd.ErrOrStderr(), "Error: %v\n\n", err)
+			// Print usage for context
+			rootCmd.Usage()
+		}
+	}
+	return err
 }
 
 // SetVersionInfo sets the version information for the CLI

@@ -13,10 +13,15 @@ RUN go mod download
 # Copy source code
 COPY . .
 
+# Build arguments for version info
+ARG VERSION=dev
+ARG COMMIT=none
+ARG DATE=unknown
+
 # Build orchestrator binary
 # Use CGO_ENABLED=0 for static binary
 # GOARCH will be set by docker buildx or defaults to the build platform
-RUN CGO_ENABLED=0 go build -ldflags="-w -s" -o holt-orchestrator ./cmd/orchestrator
+RUN CGO_ENABLED=0 go build -ldflags="-w -s -X github.com/dyluth/holt/pkg/version.Version=${VERSION} -X github.com/dyluth/holt/pkg/version.Commit=${COMMIT} -X github.com/dyluth/holt/pkg/version.Date=${DATE}" -o holt-orchestrator ./cmd/orchestrator
 
 # Runtime stage
 FROM alpine:latest

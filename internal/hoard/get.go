@@ -14,8 +14,20 @@ import (
 // Uses IsNotFound() to distinguish "not found" errors from other errors.
 func GetArtefact(ctx context.Context, bbClient *blackboard.Client, artefactID string, w io.Writer) error {
 	// Validate artefact ID format
-	if _, err := uuid.Parse(artefactID); err != nil {
-		return fmt.Errorf("invalid artefact ID format: must be a valid UUID")
+	// Allow UUID (36 chars) or SHA-256 Hash (64 chars)
+	isValidUUID := false
+	if _, err := uuid.Parse(artefactID); err == nil {
+		isValidUUID = true
+	}
+
+	isValidHash := false
+	if len(artefactID) == 64 {
+		// Simple length check for hash, could add hex validation if needed
+		isValidHash = true
+	}
+
+	if !isValidUUID && !isValidHash {
+		return fmt.Errorf("invalid artefact ID format: must be a valid UUID or SHA-256 hash")
 	}
 
 	// Fetch artefact from blackboard

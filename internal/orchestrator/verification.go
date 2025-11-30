@@ -150,6 +150,7 @@ func (e *Engine) verifyArtefact(ctx context.Context, artefact *blackboard.Verifi
 	// Declare variables before goto statements (Go requirement)
 	var claim *blackboard.Claim
 	var err error
+	var isReviewClaim bool
 
 	// Rule 1: Root/User artefacts (CLI/user-generated) validation
 	if artefact.Header.ProducedByRole == "user" || artefact.Header.ProducedByRole == "cli" {
@@ -339,6 +340,39 @@ func (e *Engine) verifyArtefact(ctx context.Context, artefact *blackboard.Verifi
 
 		return fmt.Errorf("topology violation: ClaimID references non-active claim: %s (status: %s, artefact %s)",
 			artefact.Header.ClaimID, claim.Status, artefact.ID)
+	}
+
+	// Rule 4.5: Review Claim Enforcement (M3.3)
+	// If the claim was granted as a REVIEW claim, the resulting artefact MUST be StructuralTypeReview.
+	// This prevents misconfigured agents from breaking the workflow state machine.
+	isReviewClaim = false
+	if claim.GrantedReviewAgents != nil {
+		for _, agent := range claim.GrantedReviewAgents {
+			if agent == artefact.Header.ProducedByRole { // Note: agent name == role in simplified model
+				isReviewClaim = true
+				break
+			}
+		}
+	}
+
+	if isReviewClaim && artefact.Header.StructuralType != blackboard.StructuralTypeReview {
+		// SECURITY EVENT: Review claim violation
+		alert := &blackboard.SecurityAlert{
+			Type:               "unauthorized_topology",
+			TimestampMs:        time.Now().UnixMilli(),
+			ArtefactID:         artefact.ID,
+			AgentRole:          artefact.Header.ProducedByRole,
+			ClaimIDProvided:    artefact.Header.ClaimID,
+			ViolationType:      "review_claim_type_mismatch",
+			OrchestratorAction: "global_lockdown",
+		}
+
+		if lockdownErr := e.client.TriggerGlobalLockdown(ctx, alert); lockdownErr != nil {
+			log.Printf("[Orchestrator] CRITICAL: Failed to trigger lockdown for topology violation: %v", lockdownErr)
+		}
+
+		return fmt.Errorf("topology violation: agent granted review claim must produce Review artefact, got %s (artefact %s)",
+			artefact.Header.StructuralType, artefact.ID)
 	}
 
 	// Rule 5: Parent linkage check - at least one parent must match claim's target
