@@ -21,8 +21,8 @@ const MinShortIDLength = 6
 // 2. Input is too short (< 6 chars) - returns validation error
 // 3. Input is a short prefix - scans for matches and returns unique result
 func ResolveArtefactID(ctx context.Context, bbClient *blackboard.Client, shortID string) (string, error) {
-	// If input is already a full UUID, verify it exists and return as-is
-	if len(shortID) == 36 && strings.Count(shortID, "-") == 4 {
+	// If input is already a full UUID or full SHA-256 hash, verify it exists and return as-is
+	if (len(shortID) == 36 && strings.Count(shortID, "-") == 4) || len(shortID) == 64 {
 		// Verify it exists
 		_, err := bbClient.GetArtefact(ctx, shortID)
 		if err != nil {
