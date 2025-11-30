@@ -100,6 +100,9 @@ A JSON object representing the **Result Artefact** you produced.
 }
 ```
 
+> [!IMPORTANT]
+> **Review Claim Enforcement**: If your agent bid `review` and was granted the claim, it **MUST** produce an artefact with `artefact_type` set to `Review` (or `StructuralType: Review` in the underlying schema). Failing to do so will cause the Orchestrator to reject the artefact and trigger a security lockdown.
+
 ### Example `run.sh`
 ```bash
 #!/bin/sh
