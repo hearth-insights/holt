@@ -4,18 +4,12 @@ import (
 	"os"
 
 	"github.com/dyluth/holt/cmd/holt/commands"
-)
-
-// Version information - set during build
-var (
-	version = "dev"
-	commit  = "none"
-	date    = "unknown"
+	"github.com/dyluth/holt/pkg/version"
 )
 
 func main() {
 	// Set version information on root command
-	commands.SetVersionInfo(version, commit, date)
+	commands.SetVersionInfo(version.Version, version.Commit, version.Date)
 
 	// Execute root command
 	// Errors are printed directly by the printer package with color formatting

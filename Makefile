@@ -9,7 +9,7 @@ COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
 BUILD_DATE := $(shell date -u '+%Y-%m-%d_%H:%M:%S')
 
 # Go build flags
-LDFLAGS := -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(BUILD_DATE)"
+LDFLAGS := -ldflags "-X github.com/dyluth/holt/pkg/version.Version=$(VERSION) -X github.com/dyluth/holt/pkg/version.Commit=$(COMMIT) -X github.com/dyluth/holt/pkg/version.Date=$(BUILD_DATE)"
 
 # Test flags (can be overridden)
 TEST_FLAGS ?= -v
@@ -193,56 +193,56 @@ build-linux-amd64:
 build-orchestrator:
 	@echo "Building orchestrator..."
 	@mkdir -p bin
-	@$(GO) build -o bin/holt-orchestrator ./cmd/orchestrator
+	@$(GO) build $(LDFLAGS) -o bin/holt-orchestrator ./cmd/orchestrator
 	@echo "✓ Built: bin/holt-orchestrator"
 
 # Build the agent pup binary
 build-pup:
 	@echo "Building agent pup..."
 	@mkdir -p bin
-	@$(GO) build -o bin/holt-pup ./cmd/pup
+	@$(GO) build $(LDFLAGS) -o bin/holt-pup ./cmd/pup
 	@echo "✓ Built: bin/holt-pup"
 
 # Cross-compile pup for macOS ARM64
 build-pup-darwin-arm64:
 	@echo "Building pup for macOS ARM64..."
 	@mkdir -p bin
-	@GOOS=darwin GOARCH=arm64 $(GO) build -o bin/holt-pup-darwin-arm64 ./cmd/pup
+	@GOOS=darwin GOARCH=arm64 $(GO) build $(LDFLAGS) -o bin/holt-pup-darwin-arm64 ./cmd/pup
 	@echo "✓ Built: bin/holt-pup-darwin-arm64"
 
 # Cross-compile pup for macOS Intel
 build-pup-darwin-amd64:
 	@echo "Building pup for macOS Intel..."
 	@mkdir -p bin
-	@GOOS=darwin GOARCH=amd64 $(GO) build -o bin/holt-pup-darwin-amd64 ./cmd/pup
+	@GOOS=darwin GOARCH=amd64 $(GO) build $(LDFLAGS) -o bin/holt-pup-darwin-amd64 ./cmd/pup
 	@echo "✓ Built: bin/holt-pup-darwin-amd64"
 
 # Cross-compile pup for Linux ARM64
 build-pup-linux-arm64:
 	@echo "Building pup for Linux ARM64..."
 	@mkdir -p bin
-	@GOOS=linux GOARCH=arm64 $(GO) build -o bin/holt-pup-linux-arm64 ./cmd/pup
+	@GOOS=linux GOARCH=arm64 $(GO) build $(LDFLAGS) -o bin/holt-pup-linux-arm64 ./cmd/pup
 	@echo "✓ Built: bin/holt-pup-linux-arm64"
 
 # Cross-compile pup for Linux AMD64
 build-pup-linux-amd64:
 	@echo "Building pup for Linux AMD64..."
 	@mkdir -p bin
-	@GOOS=linux GOARCH=amd64 $(GO) build -o bin/holt-pup-linux-amd64 ./cmd/pup
+	@GOOS=linux GOARCH=amd64 $(GO) build $(LDFLAGS) -o bin/holt-pup-linux-amd64 ./cmd/pup
 	@echo "✓ Built: bin/holt-pup-linux-amd64"
 
 # Cross-compile orchestrator for Linux ARM64
 build-orchestrator-linux-arm64:
 	@echo "Building orchestrator for Linux ARM64..."
 	@mkdir -p bin
-	@GOOS=linux GOARCH=arm64 $(GO) build -o bin/holt-orchestrator-linux-arm64 ./cmd/orchestrator
+	@GOOS=linux GOARCH=arm64 $(GO) build $(LDFLAGS) -o bin/holt-orchestrator-linux-arm64 ./cmd/orchestrator
 	@echo "✓ Built: bin/holt-orchestrator-linux-arm64"
 
 # Cross-compile orchestrator for Linux AMD64
 build-orchestrator-linux-amd64:
 	@echo "Building orchestrator for Linux AMD64..."
 	@mkdir -p bin
-	@GOOS=linux GOARCH=amd64 $(GO) build -o bin/holt-orchestrator-linux-amd64 ./cmd/orchestrator
+	@GOOS=linux GOARCH=amd64 $(GO) build $(LDFLAGS) -o bin/holt-orchestrator-linux-amd64 ./cmd/orchestrator
 	@echo "✓ Built: bin/holt-orchestrator-linux-amd64"
 
 # Run pup unit and integration tests
@@ -255,7 +255,11 @@ test-pup:
 # Build orchestrator Docker image
 docker-orchestrator:
 	@echo "Building orchestrator Docker image..."
-	@docker build -f cmd/orchestrator/Dockerfile -t holt-orchestrator:latest .
+	@docker build -f cmd/orchestrator/Dockerfile \
+		--build-arg VERSION=$(VERSION) \
+		--build-arg COMMIT=$(COMMIT) \
+		--build-arg DATE=$(BUILD_DATE) \
+		-t holt-orchestrator:latest .
 	@echo "✓ Built: holt-orchestrator:latest"
 
 # Build everything (CLI + orchestrator Docker image + pup)

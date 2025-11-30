@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -11,10 +12,20 @@ import (
 
 	"github.com/dyluth/holt/internal/pup"
 	"github.com/dyluth/holt/pkg/blackboard"
+	"github.com/dyluth/holt/pkg/version"
 	"github.com/redis/go-redis/v9"
 )
 
 func main() {
+	// Check for version flag early (before other flags or env vars)
+	// We use a custom flag set to avoid parsing conflicts with other flags if needed,
+	// but standard flag package is fine here as we parse all flags in run() anyway.
+	// However, to support --version without other required env vars, we check it first.
+	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "version") {
+		fmt.Printf("holt-pup version %s (commit: %s, built: %s)\n", version.Version, version.Commit, version.Date)
+		os.Exit(0)
+	}
+
 	// Exit with appropriate code
 	os.Exit(run())
 }
@@ -24,7 +35,13 @@ func main() {
 func run() int {
 	// M3.4: Parse command-line flags
 	executeClaimID := flag.String("execute-claim", "", "Execute specific claim ID and exit (worker mode)")
+	showVersion := flag.Bool("version", false, "Show version information")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Printf("holt-pup version %s (commit: %s, built: %s)\n", version.Version, version.Commit, version.Date)
+		return 0
+	}
 
 	// Load configuration from environment variables
 	config, err := pup.LoadConfig()

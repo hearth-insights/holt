@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"os"
 	"os/signal"
@@ -11,10 +12,19 @@ import (
 	"github.com/dyluth/holt/internal/config"
 	"github.com/dyluth/holt/internal/orchestrator"
 	"github.com/dyluth/holt/pkg/blackboard"
+	"github.com/dyluth/holt/pkg/version"
 	"github.com/redis/go-redis/v9"
 )
 
 func main() {
+	// Check for version flag
+	showVersion := flag.Bool("version", false, "Show version information")
+	flag.Parse()
+
+	if *showVersion {
+		fmt.Printf("holt-orchestrator version %s (commit: %s, built: %s)\n", version.Version, version.Commit, version.Date)
+		os.Exit(0)
+	}
 	// 1. Load environment variables
 	instanceName := os.Getenv("HOLT_INSTANCE_NAME")
 	redisURL := os.Getenv("REDIS_URL")

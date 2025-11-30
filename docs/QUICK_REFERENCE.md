@@ -204,6 +204,7 @@ holt init                                # Bootstrap new project
 holt up [--name <instance>] [--force]    # Start holt instance
 holt down [--name <instance>]            # Stop holt instance
 holt list                                # List active instances
+holt version                             # Show version, commit, and build time
 holt forage --goal "description"         # Start a new workflow
 ```
 

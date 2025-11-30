@@ -33,7 +33,7 @@ services:
 Each agent needs a Dockerfile. The key requirement is that it must include the `pup` binary.
 
 ### Example Dockerfile
-This example assumes you have downloaded the `holt-pup` binary and placed it in the same directory as your Dockerfile.
+This example assumes you have downloaded the `holt-pup` binary (see [Build & Run](./build_and_run.md#option-b-manual-download)) and placed it in the same directory as your Dockerfile.
 
 ```dockerfile
 FROM alpine:latest
