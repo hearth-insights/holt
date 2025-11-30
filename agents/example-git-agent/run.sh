@@ -11,10 +11,10 @@ input=$(cat)
 echo "Git agent received claim, processing..." >&2
 
 # Parse target artefact payload (filename to create)
-filename=$(echo "$input" | grep -o '"payload":"[^"]*"' | head -1 | cut -d'"' -f4)
+filename=$(echo "$input" | jq -r '.target_artefact.payload // empty')
 
-# Parse claim ID from target artefact ID for commit message
-claim_id=$(echo "$input" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+# Parse claim ID
+claim_id=$(echo "$input" | jq -r '.id // empty')
 
 # Default to hello.txt if no filename provided
 if [ -z "$filename" ]; then

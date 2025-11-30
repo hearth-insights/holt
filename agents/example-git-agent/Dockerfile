@@ -15,6 +15,7 @@ COPY cmd/pup ./cmd/pup
 COPY internal/pup ./internal/pup
 COPY internal/config ./internal/config
 COPY pkg/blackboard ./pkg/blackboard
+COPY pkg/version ./pkg/version
 
 # Build the pup binary
 RUN CGO_ENABLED=0 GOOS=linux go build -o pup ./cmd/pup
@@ -22,8 +23,8 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o pup ./cmd/pup
 # Runtime stage - Alpine with Git
 FROM alpine:latest
 
-# Install git and ca-certificates
-RUN apk --no-cache add git ca-certificates
+# Install git, ca-certificates, and jq
+RUN apk --no-cache add git ca-certificates jq
 
 WORKDIR /app
 
