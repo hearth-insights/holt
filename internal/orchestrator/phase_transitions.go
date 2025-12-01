@@ -46,12 +46,19 @@ func (e *Engine) TransitionToNextPhase(ctx context.Context, claim *blackboard.Cl
 			nextStatus = blackboard.ClaimStatusPendingExclusive
 			nextPhase = "exclusive"
 		} else {
-			// No more work - claim becomes dormant
-			e.logEvent("claim_dormant", map[string]interface{}{
+			// No more work - claim is complete
+			e.logEvent("claim_complete", map[string]interface{}{
 				"claim_id": claim.ID,
 				"reason":   "no_grants_remaining_after_review",
 			})
-			log.Printf("[Orchestrator] Claim %s has no remaining grants after review phase, becoming dormant", claim.ID)
+			log.Printf("[Orchestrator] Claim %s has no remaining grants after review phase, marking as complete", claim.ID)
+			
+			currentClaim.Status = blackboard.ClaimStatusComplete
+			if err := e.client.UpdateClaim(ctx, currentClaim); err != nil {
+				e.logError("failed to update claim status to complete", err)
+				return fmt.Errorf("failed to update claim status: %w", err)
+			}
+			
 			delete(e.phaseStates, claim.ID)
 			return nil
 		}
@@ -62,12 +69,19 @@ func (e *Engine) TransitionToNextPhase(ctx context.Context, claim *blackboard.Cl
 			nextStatus = blackboard.ClaimStatusPendingExclusive
 			nextPhase = "exclusive"
 		} else {
-			// No exclusive work - claim becomes dormant
-			e.logEvent("claim_dormant", map[string]interface{}{
+			// No exclusive work - claim is complete
+			e.logEvent("claim_complete", map[string]interface{}{
 				"claim_id": claim.ID,
 				"reason":   "no_grants_remaining_after_parallel",
 			})
-			log.Printf("[Orchestrator] Claim %s has no remaining grants after parallel phase, becoming dormant", claim.ID)
+			log.Printf("[Orchestrator] Claim %s has no remaining grants after parallel phase, marking as complete", claim.ID)
+			
+			currentClaim.Status = blackboard.ClaimStatusComplete
+			if err := e.client.UpdateClaim(ctx, currentClaim); err != nil {
+				e.logError("failed to update claim status to complete", err)
+				return fmt.Errorf("failed to update claim status: %w", err)
+			}
+			
 			delete(e.phaseStates, claim.ID)
 			return nil
 		}

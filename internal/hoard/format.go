@@ -7,37 +7,63 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dyluth/holt/internal/spine"
 	"github.com/dyluth/holt/pkg/blackboard"
 )
 
-// FormatTable writes artefacts as a formatted table to the provided writer.
-// The table includes columns: ID, VERSION, TYPE, PRODUCED BY, TIMESTAMP, and PAYLOAD (truncated).
-// Returns the number of artefacts formatted.
-func FormatTable(w io.Writer, artefacts []*blackboard.Artefact, instanceName string) int {
+// FormatTable writes a list of artefacts as a human-readable table.
+// If spineInfos is provided, it adds a SPINE column.
+func FormatTable(w io.Writer, artefacts []*blackboard.Artefact, spineInfos map[string]*spine.SpineInfo, instanceName string) {
 	if len(artefacts) == 0 {
 		fmt.Fprintf(w, "No artefacts found for instance '%s'\n", instanceName)
-		return 0
+		return
 	}
+
 
 	// Print header
 	fmt.Fprintf(w, "Artefacts for instance '%s':\n\n", instanceName)
 
+	hasSpine := len(spineInfos) > 0
+
 	// Print header row
-	fmt.Fprintf(w, "%-10s %-5s %-10s %-18s %-8s %s\n",
-		"ID", "VER", "TYPE", "BY", "AGE", "PAYLOAD")
-	fmt.Fprintf(w, "%-10s %-5s %-10s %-18s %-8s %s\n",
-		"----------", "-----", "----------", "------------------", "--------", "----------------------------------------")
+	if hasSpine {
+		fmt.Fprintf(w, "%-10s %-5s %-10s %-18s %-8s %-10s %s\n",
+			"ID", "VER", "TYPE", "BY", "AGE", "SPINE", "PAYLOAD")
+		fmt.Fprintf(w, "%-10s %-5s %-10s %-18s %-8s %-10s %s\n",
+			"----------", "-----", "----------", "------------------", "--------", "----------", "----------------------------------------")
+	} else {
+		fmt.Fprintf(w, "%-10s %-5s %-10s %-18s %-8s %s\n",
+			"ID", "VER", "TYPE", "BY", "AGE", "PAYLOAD")
+		fmt.Fprintf(w, "%-10s %-5s %-10s %-18s %-8s %s\n",
+			"----------", "-----", "----------", "------------------", "--------", "----------------------------------------")
+	}
 
 	// Print data rows
 	for _, a := range artefacts {
-		fmt.Fprintf(w, "%-10s %-5s %-10s %-18s %-8s %s\n",
-			formatID(a.ID),
-			formatVersion(a.Version),
-			formatType(a.Type),
-			formatProducedBy(a.ProducedByRole),
-			formatTimestamp(a.CreatedAtMs),
-			formatPayload(a.Payload),
-		)
+		if hasSpine {
+			spineStr := "-"
+			if info, ok := spineInfos[a.ID]; ok && !info.IsDetached {
+				spineStr = info.GitCommit[:8] // Show short commit hash
+			}
+			fmt.Fprintf(w, "%-10s %-5s %-10s %-18s %-8s %-10s %s\n",
+				formatID(a.ID),
+				formatVersion(a.Version),
+				formatType(a.Type),
+				formatProducedBy(a.ProducedByRole),
+				formatTimestamp(a.CreatedAtMs),
+				spineStr,
+				formatPayload(a.Payload),
+			)
+		} else {
+			fmt.Fprintf(w, "%-10s %-5s %-10s %-18s %-8s %s\n",
+				formatID(a.ID),
+				formatVersion(a.Version),
+				formatType(a.Type),
+				formatProducedBy(a.ProducedByRole),
+				formatTimestamp(a.CreatedAtMs),
+				formatPayload(a.Payload),
+			)
+		}
 	}
 
 	// Print count
@@ -47,7 +73,44 @@ func FormatTable(w io.Writer, artefacts []*blackboard.Artefact, instanceName str
 	}
 	fmt.Fprintf(w, "\n%d %s found\n", len(artefacts), countMsg)
 
-	return len(artefacts)
+}
+
+// FormatJSON writes a list of artefacts as a JSON array.
+// If fields are provided, it selects only those fields.
+// If withSpine is true, it resolves and includes spine info.
+func FormatJSON(artefacts []*blackboard.Artefact, spineInfos map[string]*spine.SpineInfo, fields []string) ([]byte, error) {
+	var output []interface{}
+
+	for _, art := range artefacts {
+		var item interface{} = art
+
+		// If fields are specified or spine is requested (and not already in fields), we need to select/augment
+		if len(fields) > 0 {
+			spine := spineInfos[art.ID]
+			selected, err := SelectFields(art, spine, fields)
+			if err != nil {
+				return nil, err
+			}
+			item = selected
+		} else if spineInfos != nil {
+			// If no specific fields requested but spine is available (implied --with-spine but no --fields),
+			// we probably want full artefact + spine.
+			// But standard JSON marshaling won't add "spine" field to Artefact struct.
+			// So we convert to map and add it.
+			// This is a bit expensive but correct.
+			artMap := make(map[string]interface{})
+			tmp, _ := json.Marshal(art)
+			json.Unmarshal(tmp, &artMap)
+			if spine, ok := spineInfos[art.ID]; ok {
+				artMap["spine"] = spine
+			}
+			item = artMap
+		}
+
+		output = append(output, item)
+	}
+
+	return json.MarshalIndent(output, "", "  ")
 }
 
 // FormatJSONL writes artefacts as line-delimited JSON (JSONL) to the provided writer.
@@ -71,24 +134,53 @@ func FormatJSONL(w io.Writer, artefacts []*blackboard.Artefact) error {
 	return nil
 }
 
-// FormatSingleJSON writes a single artefact as pretty-printed JSON to the provided writer.
-// Used in get mode to display complete artefact details.
-func FormatSingleJSON(w io.Writer, artefact *blackboard.Artefact) error {
-	// Marshal to pretty JSON
-	data, err := json.MarshalIndent(artefact, "", "  ")
+// artefactToMap converts an Artefact struct to a map[string]interface{}.
+// This is useful for dynamic field selection and adding extra fields like 'spine'.
+func artefactToMap(art *blackboard.Artefact) (map[string]interface{}, error) {
+	data, err := json.Marshal(art)
+	if err != nil {
+		return nil, err
+	}
+	var m map[string]interface{}
+	err = json.Unmarshal(data, &m)
+	return m, err
+}
+
+// spineToMap converts a SpineInfo struct to a map[string]interface{}.
+// This is useful for merging spine information into an artefact map.
+func spineToMap(info *spine.SpineInfo) (map[string]interface{}, error) {
+	data, err := json.Marshal(info)
+	if err != nil {
+		return nil, err
+	}
+	var m map[string]interface{}
+	err = json.Unmarshal(data, &m)
+	return m, err
+}
+
+// FormatSingleJSON writes a single artefact as pretty-printed JSON.
+// Optionally includes relationship information if provided.
+func FormatSingleJSON(w io.Writer, artefact *blackboard.Artefact, relationships ...*RelationshipInfo) error {
+	// Convert artefact to map to allow adding extra fields
+	var artMap map[string]interface{}
+	tmp, err := json.Marshal(artefact)
 	if err != nil {
 		return fmt.Errorf("failed to marshal artefact to JSON: %w", err)
 	}
-
-	// Write to output
-	_, err = w.Write(data)
-	if err != nil {
-		return fmt.Errorf("failed to write JSON output: %w", err)
+	if err := json.Unmarshal(tmp, &artMap); err != nil {
+		return fmt.Errorf("failed to unmarshal artefact to map: %w", err)
 	}
 
-	// Add newline for clean output
-	fmt.Fprintln(w)
+	// Add relationships if provided
+	if len(relationships) > 0 && relationships[0] != nil {
+		artMap["relationships"] = relationships[0]
+	}
 
+	encoder := json.NewEncoder(w)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(artMap); err != nil {
+		return fmt.Errorf("failed to write JSON output: %w", err)
+	}
 	return nil
 }
 

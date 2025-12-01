@@ -101,11 +101,10 @@ func TestFormatProducedBy(t *testing.T) {
 func TestFormatTable(t *testing.T) {
 	t.Run("empty artefacts", func(t *testing.T) {
 		var buf bytes.Buffer
-		count := FormatTable(&buf, []*blackboard.Artefact{}, "test-instance")
+		FormatTable(&buf, []*blackboard.Artefact{}, nil, "test-instance")
 
 		output := buf.String()
 		assert.Contains(t, output, "No artefacts found for instance 'test-instance'")
-		assert.Equal(t, 0, count)
 	})
 
 	t.Run("single artefact", func(t *testing.T) {
@@ -119,7 +118,7 @@ func TestFormatTable(t *testing.T) {
 		}
 
 		var buf bytes.Buffer
-		count := FormatTable(&buf, artefacts, "test-instance")
+		FormatTable(&buf, artefacts, nil, "test-instance")
 
 		output := buf.String()
 		assert.Contains(t, output, "Artefacts for instance 'test-instance'")
@@ -128,7 +127,6 @@ func TestFormatTable(t *testing.T) {
 		assert.Contains(t, output, "test-agent")
 		assert.Contains(t, output, "hello.txt")
 		assert.Contains(t, output, "1 artefact found")
-		assert.Equal(t, 1, count)
 	})
 
 	t.Run("multiple artefacts", func(t *testing.T) {
@@ -136,25 +134,24 @@ func TestFormatTable(t *testing.T) {
 			{
 				ID:             "abc-123",
 				Type:           "GoalDefined",
-			ProducedByRole:  "test-agent",
+				ProducedByRole: "test-agent",
 				Payload:        "hello.txt",
 			},
 			{
 				ID:             "def-456",
 				Type:           "CodeCommit",
-			ProducedByRole:  "test-agent",
+				ProducedByRole: "test-agent",
 				Payload:        "a3f5b8c91d2e4f7a9b1c3d5e6f8a9b0c1d2e3f4a5b6c7d8e9f0a",
 			},
 		}
 
 		var buf bytes.Buffer
-		count := FormatTable(&buf, artefacts, "test-instance")
+		FormatTable(&buf, artefacts, nil, "test-instance")
 
 		output := buf.String()
 		assert.Contains(t, output, "abc-123")
 		assert.Contains(t, output, "def-456")
 		assert.Contains(t, output, "2 artefacts found")
-		assert.Equal(t, 2, count)
 	})
 
 	t.Run("artefact with empty fields", func(t *testing.T) {
@@ -168,7 +165,7 @@ func TestFormatTable(t *testing.T) {
 		}
 
 		var buf bytes.Buffer
-		FormatTable(&buf, artefacts, "test-instance")
+		FormatTable(&buf, artefacts, nil, "test-instance")
 
 		output := buf.String()
 		// Should contain "-" for empty fields
@@ -186,7 +183,7 @@ func TestFormatTable(t *testing.T) {
 		}
 
 		var buf bytes.Buffer
-		FormatTable(&buf, artefacts, "test-instance")
+		FormatTable(&buf, artefacts, nil, "test-instance")
 
 		output := buf.String()
 		// Payload should be truncated with "..."

@@ -10,6 +10,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/dyluth/holt/internal/spine"
 	"github.com/dyluth/holt/pkg/blackboard"
 )
 
@@ -112,7 +113,10 @@ func StreamActivity(ctx context.Context, client *blackboard.Client, instanceName
 	case OutputFormatJSONL:
 		formatter = &jsonlFormatter{writer: writer}
 	default:
-		formatter = &defaultFormatter{writer: writer}
+		formatter = &defaultFormatter{
+			writer: writer,
+			client: client,
+		}
 	}
 
 	// Phase 1: Query and display historical events if filters are active
@@ -632,6 +636,7 @@ type eventFormatter interface {
 // defaultFormatter produces human-readable output with emojis
 type defaultFormatter struct {
 	writer io.Writer
+	client *blackboard.Client
 }
 
 func (f *defaultFormatter) FormatArtefact(artefact *blackboard.Artefact) error {
@@ -660,8 +665,26 @@ func (f *defaultFormatter) FormatArtefact(artefact *blackboard.Artefact) error {
 		return err
 	}
 
-	_, err := fmt.Fprintf(f.writer, "[%s] ✨ Artefact created: by=%s, type=%s, id=%s\n",
+	_, err := fmt.Fprintf(f.writer, "[%s] ✨ Artefact created: by=%s, type=%s, id=%s",
 		timestamp, artefact.ProducedByRole, artefact.Type, shortID(artefact.ID))
+	if err != nil {
+		return err
+	}
+
+	// M4.7: For GoalDefined artefacts, resolve and display spine info
+	if artefact.Type == "GoalDefined" && f.client != nil {
+		// Create a temporary context for the lookup
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
+		// Resolve spine (no cache needed for single lookup)
+		spineInfo, err := spine.ResolveSpine(ctx, f.client, artefact, make(map[string]*spine.SpineInfo))
+		if err == nil && !spineInfo.IsDetached {
+			_, _ = fmt.Fprintf(f.writer, " (anchored to spine=%s)", shortID(spineInfo.ManifestID))
+		}
+	}
+
+	_, err = fmt.Fprintf(f.writer, "\n")
 	return err
 }
 
