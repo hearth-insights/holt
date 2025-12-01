@@ -32,8 +32,10 @@ WORKDIR /app
 COPY --from=builder /build/pup /app/pup
 
 # Copy run script
+# Copy run script
 COPY agents/example-git-agent/run.sh /app/run.sh
-RUN chmod +x /app/run.sh
+COPY agents/example-git-agent/bid.sh /app/bid.sh
+RUN chmod +x /app/run.sh /app/bid.sh
 
 # Run as non-root user (security best practice)
 RUN adduser -D -u 1000 agent
