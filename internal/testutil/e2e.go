@@ -516,7 +516,7 @@ agents:
   GitAgent:
     image: "example-git-agent:latest"
     command: ["/app/run.sh"]
-    bidding_strategy: "exclusive"
+    bid_script: ["/app/bid.sh"]
     workspace:
       mode: rw
 services:

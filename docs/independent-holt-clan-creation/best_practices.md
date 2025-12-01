@@ -12,6 +12,13 @@ Avoid creating "God Agents" that try to do everything (plan, code, test, deploy)
 *   **Benefit**: Easier to debug, test, and swap out components.
 *   **Safety**: Smaller steps are essential for future auditing.
 
+## Context Management
+Holt agents receive the full history of the workflow (`context_chain`). This allows them to "remember" previous attempts and fix mistakes. However, this can grow large.
+
+*   **Context Window**: Ensure your LLM provider (e.g., Ollama, vLLM) is configured with a sufficient context window (recommend **8k** or **16k** minimum). The default 2k is often too small for complex rework loops.
+*   **Trimming**: If the context is too large, your agent script should **trim** the `context_chain`. Prioritize the **Target Artefact** (the goal) and the **most recent** items (the latest feedback).
+    *   See [examples/trim_context.py](./examples/trim_context.py) for a reference implementation.
+
 ## Auditability & Compliance
 Holt is designed for regulated environments. Your agent design should leverage these built-in features:
 
@@ -35,7 +42,9 @@ For critical tasks, pair a "Doer" agent with multiple specialized "Reviewer" age
 *   **Doer**: Generates content (code, text, plans).
 *   **Reviewer**: Validates the content against specific criteria.
     *   **Idempotent**: Reviewers should be idempotent (safe to run multiple times).
-    *   **Gatekeeper**: Any output from a reviewer is considered a **failure**. This cancels the claim and triggers rework before other agents proceed.
+    *   **Gatekeeper**: The Orchestrator enforces a strict protocol:
+        *   **Empty JSON (`{}` or `[]`)**: **Approval**. The workflow proceeds.
+        *   **Non-Empty**: **Rejection**. The workflow loops back for rework.
 
 **Example**:
 *   `Coder` agent writes a function.

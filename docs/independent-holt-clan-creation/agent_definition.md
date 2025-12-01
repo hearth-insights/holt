@@ -4,6 +4,17 @@ To run agents in Holt, you need two things:
 1.  A definition in `holt.yaml`.
 2.  A Dockerfile for the agent image.
 
+## Do's and Don'ts
+*   **DO** keep agents small and focused.
+*   **DON'T** implement internal retry loops. If your agent fails or produces bad output, just output the error or the bad result. The **Reviewer** agent will reject it, and the Orchestrator will loop it back to you. This "fail fast" approach is critical for the system to work.
+*   **DO** use the `holt.yaml` to define clear roles.
+
+## Review Protocol (Strict)
+The Orchestrator enforces a strict rule for Reviewer agents:
+*   **Approval**: The review payload **MUST** be an empty JSON object `{}` or an empty JSON array `[]`.
+*   **Rejection/Feedback**: **ANY** other content (e.g., `{"issue": "..."}`, `{"status": "ok"}`, or even `true`) is treated as **negative feedback** and will trigger a rework loop.
+*   **Implication**: You must explicitly program your Reviewer agents to return strictly empty JSON when they intend to approve.
+
 ## 1. holt.yaml
 This file resides in the root of your project (or the directory where you run `holt`). It defines the agents and services.
 

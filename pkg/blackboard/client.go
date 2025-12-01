@@ -482,6 +482,11 @@ func (c *Client) SubscribeArtefactEvents(ctx context.Context) (*Subscription, er
 	channel := ArtefactEventsChannel(c.instanceName)
 	pubsub := c.rdb.Subscribe(ctx, channel)
 
+	// Wait for confirmation that subscription is created
+	if _, err := pubsub.Receive(ctx); err != nil {
+		return nil, fmt.Errorf("failed to subscribe: %w", err)
+	}
+
 	// Create buffered channels for events and errors
 	eventsChan := make(chan *Artefact, 10)
 	errorsChan := make(chan error, 10)
@@ -543,6 +548,11 @@ func (c *Client) SubscribeClaimEvents(ctx context.Context) (*ClaimSubscription, 
 	channel := ClaimEventsChannel(c.instanceName)
 	pubsub := c.rdb.Subscribe(ctx, channel)
 
+	// Wait for confirmation that subscription is created
+	if _, err := pubsub.Receive(ctx); err != nil {
+		return nil, fmt.Errorf("failed to subscribe: %w", err)
+	}
+
 	// Create buffered channels for events and errors
 	eventsChan := make(chan *Claim, 10)
 	errorsChan := make(chan error, 10)
@@ -603,6 +613,11 @@ func (c *Client) SubscribeClaimEvents(ctx context.Context) (*ClaimSubscription, 
 func (c *Client) SubscribeWorkflowEvents(ctx context.Context) (*WorkflowSubscription, error) {
 	channel := WorkflowEventsChannel(c.instanceName)
 	pubsub := c.rdb.Subscribe(ctx, channel)
+
+	// Wait for confirmation that subscription is created
+	if _, err := pubsub.Receive(ctx); err != nil {
+		return nil, fmt.Errorf("failed to subscribe: %w", err)
+	}
 
 	// Create buffered channels for events and errors
 	eventsChan := make(chan *WorkflowEvent, 10)

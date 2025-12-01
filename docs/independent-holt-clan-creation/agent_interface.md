@@ -89,6 +89,20 @@ A JSON object containing the full context.
 }
 ```
 
+#### The Context Chain
+The `context_chain` is a chronological list of all artefacts that led to the current moment.
+*   **Standard Flow**: `Goal` -> `Plan` -> `Code`
+*   **Review Loop (Rework)**: If your agent is fixing a mistake, the chain will look like this:
+    1.  `Goal` (Original request)
+    2.  `Code` (Your previous attempt)
+    3.  `Review` (The feedback explaining why it failed)
+
+**Tip**: To fix a mistake, your agent should look at the **last item** in the `context_chain` (the Review) to understand what went wrong, and the **second-to-last item** (the Code) to see what it wrote previously.
+
+#### Managing Large Contexts
+The `context_chain` can grow large. If you are using a local LLM with a small context window, you should trim this list.
+*   **See Example**: [examples/trim_context.py](./examples/trim_context.py) demonstrates how to prioritize recent items and trim the context.
+
 ### Output (stdout)
 A JSON object representing the **Result Artefact** you produced.
 
@@ -101,7 +115,9 @@ A JSON object representing the **Result Artefact** you produced.
 ```
 
 > [!IMPORTANT]
-> **Review Claim Enforcement**: If your agent bid `review` and was granted the claim, it **MUST** produce an artefact with `artefact_type` set to `Review` (or `StructuralType: Review` in the underlying schema). Failing to do so will cause the Orchestrator to reject the artefact and trigger a security lockdown.
+> **Review Claim Enforcement**: If your agent bid `review` and was granted the claim, it **MUST** produce an artefact with `artefact_type` set to `Review` (or `StructuralType: Review` in the underlying schema).
+>
+> **Strict Approval Rule**: To **APPROVE**, the payload MUST be an empty JSON object `{}` or array `[]`. **ANY** other content is treated as a rejection and triggers rework.
 
 ### Example `run.sh`
 ```bash

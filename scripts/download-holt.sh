@@ -30,6 +30,8 @@ esac
 # Parse arguments
 INSTALL=false
 INSTALL_DIR="/usr/local/bin"
+TARGET_OS=""
+TARGET_ARCH=""
 
 for arg in "$@"; do
     case $arg in
@@ -37,10 +39,26 @@ for arg in "$@"; do
             INSTALL=true
             shift
             ;;
+        --os=*)
+            TARGET_OS="${arg#*=}"
+            shift
+            ;;
+        --arch=*)
+            TARGET_ARCH="${arg#*=}"
+            shift
+            ;;
         *)
             ;;
     esac
 done
+
+# Override detection if flags provided
+if [ -n "$TARGET_OS" ]; then
+    OS="$TARGET_OS"
+fi
+if [ -n "$TARGET_ARCH" ]; then
+    ARCH="$TARGET_ARCH"
+fi
 
 echo "Detected system: $OS/$ARCH"
 

@@ -438,13 +438,21 @@ func displayHistoricalArtefacts(ctx context.Context, client *blackboard.Client, 
 			}
 
 			// Determine if approved or rejected based on payload
-			// Rejections have {"error":"...","output":"..."} in payload
-			// Approvals have {} (empty JSON object)
-			eventType := "review_approved"
-			var payloadData map[string]interface{}
-			if err := json.Unmarshal([]byte(reviewArtefact.Payload), &payloadData); err == nil {
-				if _, hasError := payloadData["error"]; hasError {
-					eventType = "review_rejected"
+			// Approvals must be empty JSON object {} or empty array []
+			// Any other content is treated as feedback/rejection
+			eventType := "review_rejected" // Default to rejected unless proven empty
+
+			var jsonData interface{}
+			if err := json.Unmarshal([]byte(reviewArtefact.Payload), &jsonData); err == nil {
+				switch v := jsonData.(type) {
+				case map[string]interface{}:
+					if len(v) == 0 {
+						eventType = "review_approved"
+					}
+				case []interface{}:
+					if len(v) == 0 {
+						eventType = "review_approved"
+					}
 				}
 			}
 
