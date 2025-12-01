@@ -18,3 +18,7 @@ Select the document that matches your current goal.
 1.  **Prerequisites**: Ensure you have Docker and Git. See [Prerequisites](./prerequisites.md).
 2.  **Download**: Get the binaries. See [Build & Run](./build_and_run.md).
 3.  **Define**: Create your `holt.yaml`. See [Agent Definition](./agent_definition.md).
+
+---
+**Version Information**
+{{VERSION_METADATA}}
