@@ -43,6 +43,25 @@ services:
     *   **workspace**: Configuration for the shared workspace. `mode: rw` means read-write access.
 *   **services**: A map of service names (like Redis) to their configuration.
 
+### Health Checks
+By default, Holt performs a **Redis PING** check to verify that the agent can connect to the Blackboard. If the agent can talk to Redis, it is considered healthy.
+
+You can override this with a custom `health_check` in `holt.yaml`. This is useful if your agent has other dependencies or needs to warm up.
+
+```yaml
+agents:
+  my-agent:
+    # ... other config ...
+    health_check:
+      command: ["python", "check_health.py"]
+      interval: "30s"
+      timeout: "5s"
+```
+
+*   **command**: The command to run inside the container. Exit code 0 means healthy.
+*   **interval**: How often to run the check (default: 30s).
+*   **timeout**: How long to wait for the command to finish (default: 5s).
+
 ## 2. Dockerfile
 Each agent needs a Dockerfile. The key requirement is that it must include the `pup` binary.
 
