@@ -36,8 +36,34 @@ func RunControllerMode(ctx context.Context, config *Config, bbClient *blackboard
 				return nil
 			}
 
+			// Fetch target artefact for filtering (M4.8)
+			targetArtefact, err := bbClient.GetArtefact(ctx, claim.ArtefactID)
+			if err != nil {
+				log.Printf("[Controller] Failed to fetch artefact %s: %v", claim.ArtefactID, err)
+				// If we can't check type, we can't safely bid our strategy. 
+				// Submit 'ignore' to avoid blocking consensus.
+				if err := bbClient.SetBid(ctx, claim.ID, config.AgentName, blackboard.BidTypeIgnore); err != nil {
+					log.Printf("[Controller] Failed to submit fallback ignore bid: %v", err)
+				}
+				continue
+			}
+
 			// Evaluate claim using bidding strategy from config
-			bid := config.BiddingStrategy
+			bid := config.BiddingStrategy.Type
+
+			// M4.8: Check target types filtering
+			if len(config.BiddingStrategy.TargetTypes) > 0 {
+				match := false
+				for _, t := range config.BiddingStrategy.TargetTypes {
+					if t == targetArtefact.Type {
+						match = true
+						break
+					}
+				}
+				if !match {
+					bid = blackboard.BidTypeIgnore
+				}
+			}
 
 			// Submit bid
 			if err := bbClient.SetBid(ctx, claim.ID, config.AgentName, bid); err != nil {

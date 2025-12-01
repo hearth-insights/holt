@@ -3,6 +3,8 @@ package pup
 import (
 	"os"
 	"testing"
+
+	"github.com/dyluth/holt/pkg/blackboard"
 )
 
 func TestLoadConfig_Success(t *testing.T) {
@@ -11,7 +13,7 @@ func TestLoadConfig_Success(t *testing.T) {
 	os.Setenv("HOLT_AGENT_NAME", "test-agent")
 	os.Setenv("REDIS_URL", "redis://localhost:6379")
 	os.Setenv("HOLT_AGENT_COMMAND", `["/app/run.sh"]`)
-	os.Setenv("HOLT_BIDDING_STRATEGY", "exclusive") // M3.1: Required
+	os.Setenv("HOLT_BIDDING_STRATEGY", `{"type":"exclusive"}`) // M4.8: Required
 	defer func() {
 		os.Unsetenv("HOLT_INSTANCE_NAME")
 		os.Unsetenv("HOLT_AGENT_NAME")
@@ -181,7 +183,7 @@ func TestValidate_ValidConfig(t *testing.T) {
 		AgentName:       "test-agent",
 		RedisURL:        "redis://localhost:6379",
 		Command:         []string{"/app/run.sh"},
-		BiddingStrategy: "exclusive", // M3.1: Required
+		BiddingStrategy: BiddingStrategy{Type: blackboard.BidTypeExclusive}, // M4.8: Required
 	}
 
 	err := cfg.Validate()

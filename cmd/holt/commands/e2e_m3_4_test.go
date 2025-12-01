@@ -50,7 +50,8 @@ agents:
     mode: "controller"
     image: "example-git-agent:latest"
     command: ["/app/pup"]
-    bidding_strategy: "exclusive"
+    bidding_strategy:
+      type: "exclusive"
     worker:
       image: "example-git-agent:latest"
       max_concurrent: 2
@@ -252,7 +253,8 @@ agents:
     mode: "controller"
     image: "example-git-agent:latest"
     command: ["/app/pup"]
-    bidding_strategy: "exclusive"
+    bidding_strategy:
+      type: "exclusive"
     worker:
       image: "example-git-agent:latest"
       max_concurrent: 1
@@ -349,14 +351,16 @@ agents:
   TraditionalCoder:
     image: "example-git-agent:latest"
     command: ["/app/run.sh"]
-    bidding_strategy: "exclusive"
+    bidding_strategy:
+      type: "exclusive"
     workspace:
       mode: rw
   ControllerCoder:
     mode: "controller"
     image: "example-git-agent:latest"
     command: ["/app/pup"]
-    bidding_strategy: "claim"
+    bidding_strategy:
+      type: "claim"
     worker:
       image: "example-git-agent:latest"
       max_concurrent: 2

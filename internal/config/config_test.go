@@ -22,7 +22,7 @@ agents:
     role: "Example Agent"
     image: "example-agent:latest"
     command: ["./run.sh"]
-    bidding_strategy: "exclusive"
+    bidding_strategy: { type: "exclusive" }
 `
 	err := os.WriteFile(configPath, []byte(validConfig), 0644)
 	require.NoError(t, err)
@@ -70,7 +70,7 @@ func TestValidate_UnsupportedVersion(t *testing.T) {
 			"test": {
 				Image:           "test:latest",
 				Command:         []string{"test"},
-				BiddingStrategy: "exclusive",
+				BiddingStrategy: BiddingStrategyConfig{Type: "exclusive"},
 			},
 		},
 	}
@@ -136,7 +136,7 @@ func TestAgentValidate_BuildContextSkippedWithPrebuiltImage(t *testing.T) {
 	agent := Agent{
 		Image:           "prebuilt-agent:latest", // Pre-built image specified
 		Command:         []string{"./run.sh"},
-		BiddingStrategy: "exclusive",
+		BiddingStrategy: BiddingStrategyConfig{Type: "exclusive"},
 		Build: &BuildConfig{
 			Context: "/nonexistent/path", // Path doesn't exist, but should not be validated
 		},
@@ -153,7 +153,7 @@ func TestAgentValidate_ImageRequired(t *testing.T) {
 	agent := Agent{
 		Image:           "", // No image
 		Command:         []string{"./run.sh"},
-		BiddingStrategy: "exclusive",
+		BiddingStrategy: BiddingStrategyConfig{Type: "exclusive"},
 		Build: &BuildConfig{
 			Context: "/some/path", // Build context present but doesn't matter
 		},
@@ -171,7 +171,7 @@ func TestAgentValidate_ValidBuildContext(t *testing.T) {
 	agent := Agent{
 		Image:           "test-agent:latest",
 		Command:         []string{"./run.sh"},
-		BiddingStrategy: "exclusive",
+		BiddingStrategy: BiddingStrategyConfig{Type: "exclusive"},
 		Build: &BuildConfig{
 			Context: tmpDir,
 		},
@@ -185,7 +185,7 @@ func TestAgentValidate_InvalidWorkspaceMode(t *testing.T) {
 	agent := Agent{
 		Image:           "test-agent:latest",
 		Command:         []string{"./run.sh"},
-		BiddingStrategy: "exclusive",
+		BiddingStrategy: BiddingStrategyConfig{Type: "exclusive"},
 		Workspace: &WorkspaceConfig{
 			Mode: "invalid",
 		},
@@ -202,7 +202,7 @@ func TestAgentValidate_ValidWorkspaceModes(t *testing.T) {
 		agent := Agent{
 			Image:           "test-agent:latest",
 			Command:         []string{"./run.sh"},
-			BiddingStrategy: "exclusive",
+			BiddingStrategy: BiddingStrategyConfig{Type: "exclusive"},
 			Workspace: &WorkspaceConfig{
 				Mode: mode,
 			},
@@ -217,7 +217,7 @@ func TestAgentValidate_InvalidStrategy(t *testing.T) {
 	agent := Agent{
 		Image:           "test-agent:latest",
 		Command:         []string{"./run.sh"},
-		BiddingStrategy: "exclusive",
+		BiddingStrategy: BiddingStrategyConfig{Type: "exclusive"},
 		Strategy:        "invalid_strategy",
 	}
 
@@ -232,7 +232,7 @@ func TestAgentValidate_ValidStrategies(t *testing.T) {
 		agent := Agent{
 			Image:           "test-agent:latest",
 			Command:         []string{"./run.sh"},
-			BiddingStrategy: "exclusive",
+			BiddingStrategy: BiddingStrategyConfig{Type: "exclusive"},
 			Strategy:        strategy,
 		}
 
@@ -256,7 +256,7 @@ agents:
     role: "Design Agent"
     image: "designer-agent:latest"
     command: ["python", "design.py"]
-    bidding_strategy: "exclusive"
+    bidding_strategy: { type: "exclusive" }
     build:
       context: ` + buildContext + `
     workspace:
@@ -280,7 +280,7 @@ agents:
     role: "Code Agent"
     image: "coder-agent:latest"
     command: ["./code.sh"]
-    bidding_strategy: "exclusive"
+    bidding_strategy: { type: "exclusive" }
 services:
   redis:
     image: "redis:7-alpine"
@@ -438,7 +438,7 @@ func TestValidate_OrchestratorConfig_DefaultValue(t *testing.T) {
 			"test": {
 				Image:           "test:latest",
 				Command:         []string{"test"},
-				BiddingStrategy: "exclusive",
+				BiddingStrategy: BiddingStrategyConfig{Type: "exclusive"},
 			},
 		},
 	}
@@ -460,7 +460,7 @@ func TestValidate_OrchestratorConfig_DefaultWhenSectionExists(t *testing.T) {
 			"test": {
 				Image:           "test:latest",
 				Command:         []string{"test"},
-				BiddingStrategy: "exclusive",
+				BiddingStrategy: BiddingStrategyConfig{Type: "exclusive"},
 			},
 		},
 	}
@@ -495,7 +495,7 @@ func TestValidate_OrchestratorConfig_ValidValues(t *testing.T) {
 					"test": {
 						Image:           "test:latest",
 						Command:         []string{"test"},
-						BiddingStrategy: "exclusive",
+						BiddingStrategy: BiddingStrategyConfig{Type: "exclusive"},
 					},
 				},
 			}
@@ -518,7 +518,7 @@ func TestValidate_OrchestratorConfig_NegativeValue(t *testing.T) {
 			"test": {
 				Image:           "test:latest",
 				Command:         []string{"test"},
-				BiddingStrategy: "exclusive",
+				BiddingStrategy: BiddingStrategyConfig{Type: "exclusive"},
 			},
 		},
 	}
@@ -542,7 +542,7 @@ agents:
     role: "Example Agent"
     image: "example-agent:latest"
     command: ["./run.sh"]
-    bidding_strategy: "exclusive"
+    bidding_strategy: { type: "exclusive" }
 `
 	err := os.WriteFile(configPath, []byte(configWithOrchestrator), 0644)
 	require.NoError(t, err)
@@ -562,7 +562,7 @@ func TestAgentValidate_ControllerWithValidWorker(t *testing.T) {
 	agent := Agent{
 		Image:           "coder-controller:latest",
 		Command:         []string{"./controller.sh"},
-		BiddingStrategy: "exclusive",
+		BiddingStrategy: BiddingStrategyConfig{Type: "exclusive"},
 		Mode:            "controller",
 		Worker: &WorkerConfig{
 			Image:         "coder-worker:latest",
@@ -582,7 +582,7 @@ func TestAgentValidate_ControllerMissingWorkerConfig(t *testing.T) {
 	agent := Agent{
 		Image:           "coder:latest",
 		Command:         []string{"./run.sh"},
-		BiddingStrategy: "exclusive",
+		BiddingStrategy: BiddingStrategyConfig{Type: "exclusive"},
 		Mode:            "controller",
 		Worker:          nil, // Missing worker config
 	}
@@ -596,7 +596,7 @@ func TestAgentValidate_ControllerWorkerMissingImage(t *testing.T) {
 	agent := Agent{
 		Image:           "coder:latest",
 		Command:         []string{"./run.sh"},
-		BiddingStrategy: "exclusive",
+		BiddingStrategy: BiddingStrategyConfig{Type: "exclusive"},
 		Mode:            "controller",
 		Worker: &WorkerConfig{
 			Image:   "", // Missing image
@@ -613,7 +613,7 @@ func TestAgentValidate_ControllerWorkerMissingCommand(t *testing.T) {
 	agent := Agent{
 		Image:           "coder:latest",
 		Command:         []string{"./run.sh"},
-		BiddingStrategy: "exclusive",
+		BiddingStrategy: BiddingStrategyConfig{Type: "exclusive"},
 		Mode:            "controller",
 		Worker: &WorkerConfig{
 			Image:   "worker:latest",
@@ -630,7 +630,7 @@ func TestAgentValidate_ControllerWorkerDefaultMaxConcurrent(t *testing.T) {
 	agent := Agent{
 		Image:           "coder:latest",
 		Command:         []string{"./run.sh"},
-		BiddingStrategy: "exclusive",
+		BiddingStrategy: BiddingStrategyConfig{Type: "exclusive"},
 		Mode:            "controller",
 		Worker: &WorkerConfig{
 			Image:         "worker:latest",
@@ -648,7 +648,7 @@ func TestAgentValidate_ControllerWorkerNegativeMaxConcurrent(t *testing.T) {
 	agent := Agent{
 		Image:           "coder:latest",
 		Command:         []string{"./run.sh"},
-		BiddingStrategy: "exclusive",
+		BiddingStrategy: BiddingStrategyConfig{Type: "exclusive"},
 		Mode:            "controller",
 		Worker: &WorkerConfig{
 			Image:         "worker:latest",
@@ -677,7 +677,7 @@ func TestAgentValidate_ControllerWorkerValidMaxConcurrent(t *testing.T) {
 			agent := Agent{
 				Image:           "coder:latest",
 				Command:         []string{"./run.sh"},
-				BiddingStrategy: "exclusive",
+				BiddingStrategy: BiddingStrategyConfig{Type: "exclusive"},
 				Mode:            "controller",
 				Worker: &WorkerConfig{
 					Image:         "worker:latest",
@@ -697,7 +697,7 @@ func TestAgentValidate_ControllerWorkerInvalidWorkspaceMode(t *testing.T) {
 	agent := Agent{
 		Image:           "coder:latest",
 		Command:         []string{"./run.sh"},
-		BiddingStrategy: "exclusive",
+		BiddingStrategy: BiddingStrategyConfig{Type: "exclusive"},
 		Mode:            "controller",
 		Worker: &WorkerConfig{
 			Image:   "worker:latest",
@@ -728,7 +728,7 @@ func TestAgentValidate_ControllerWorkerValidWorkspaceModes(t *testing.T) {
 			agent := Agent{
 				Image:           "coder:latest",
 				Command:         []string{"./run.sh"},
-				BiddingStrategy: "exclusive",
+				BiddingStrategy: BiddingStrategyConfig{Type: "exclusive"},
 				Mode:            "controller",
 				Worker: &WorkerConfig{
 					Image:   "worker:latest",
@@ -749,7 +749,7 @@ func TestAgentValidate_UnknownMode(t *testing.T) {
 	agent := Agent{
 		Image:           "coder:latest",
 		Command:         []string{"./run.sh"},
-		BiddingStrategy: "exclusive",
+		BiddingStrategy: BiddingStrategyConfig{Type: "exclusive"},
 		Mode:            "unknown-mode", // Invalid mode
 	}
 
@@ -763,7 +763,7 @@ func TestAgentValidate_TraditionalAgentNoMode(t *testing.T) {
 	agent := Agent{
 		Image:           "coder:latest",
 		Command:         []string{"./run.sh"},
-		BiddingStrategy: "exclusive",
+		BiddingStrategy: BiddingStrategyConfig{Type: "exclusive"},
 		Mode:            "", // Traditional agent (no mode)
 	}
 
@@ -783,7 +783,7 @@ agents:
     mode: "controller"
     image: "coder:latest"
     command: ["./controller.sh"]
-    bidding_strategy: "exclusive"
+    bidding_strategy: { type: "exclusive" }
     worker:
       image: "coder-worker:latest"
       max_concurrent: 3
@@ -826,7 +826,7 @@ agents:
     mode: "controller"
     image: "coder:latest"
     command: ["./controller.sh"]
-    bidding_strategy: "exclusive"
+    bidding_strategy: { type: "exclusive" }
     worker:
       image: "coder-worker:latest"
       max_concurrent: 2
@@ -837,7 +837,7 @@ agents:
     role: "Reviewer"
     image: "reviewer:latest"
     command: ["./review.sh"]
-    bidding_strategy: "review"
+    bidding_strategy: { type: "review" }
 `
 	err := os.WriteFile(configPath, []byte(mixedConfig), 0644)
 	require.NoError(t, err)
@@ -936,4 +936,25 @@ agents:
 			assert.Equal(t, expectedSorted, result)
 		})
 	}
+}
+
+// M4.8: Verify that legacy string format for bidding_strategy is rejected
+func TestConfig_LegacyBiddingStrategy_Rejection(t *testing.T) {
+	yamlConfig := `
+version: "1.0"
+agents:
+  legacy-agent:
+    image: "legacy:latest"
+    command: ["/app/run.sh"]
+    bidding_strategy: "exclusive" # Legacy string format
+`
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "holt.yml")
+	err := os.WriteFile(configPath, []byte(yamlConfig), 0644)
+	require.NoError(t, err)
+
+	// Attempt to load
+	_, err = Load(configPath)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "legacy string format for bidding_strategy is no longer supported")
 }

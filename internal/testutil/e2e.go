@@ -532,7 +532,8 @@ agents:
   EchoAgent:
     image: "example-agent:latest"
     command: ["/app/run.sh"]
-    bidding_strategy: "exclusive"
+    bidding_strategy:
+      type: "exclusive"
     workspace:
       mode: ro
 services:
@@ -548,19 +549,22 @@ agents:
   Reviewer:
     image: "example-reviewer-agent:latest"
     command: ["/app/run.sh"]
-    bidding_strategy: "review"
+    bidding_strategy:
+      type: "review"
     workspace:
       mode: ro
   ParallelWorker:
     image: "example-parallel-agent:latest"
     command: ["/app/run.sh"]
-    bidding_strategy: "claim"
+    bidding_strategy:
+      type: "claim"
     workspace:
       mode: ro
   Coder:
     image: "example-git-agent:latest"
     command: ["/app/run.sh"]
-    bidding_strategy: "exclusive"
+    bidding_strategy:
+      type: "exclusive"
     workspace:
       mode: rw
 services:

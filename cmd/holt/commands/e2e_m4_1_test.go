@@ -54,7 +54,8 @@ agents:
   QuestionAgent:
     image: "question-agent:latest"
     command: ["/app/run.sh"]
-    bidding_strategy: "exclusive"
+    bidding_strategy:
+      type: "exclusive"
     workspace:
       mode: ro
 services:
@@ -245,7 +246,8 @@ agents:
   QuestionAgent:
     image: "question-agent:latest"
     command: ["/app/run.sh"]
-    bidding_strategy: "exclusive"
+    bidding_strategy:
+      type: "exclusive"
     workspace:
       mode: ro
 services:

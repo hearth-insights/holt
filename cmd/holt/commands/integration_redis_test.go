@@ -102,7 +102,8 @@ agents:
   TestAgent:
     image: "example-agent:latest"
     command: ["/app/run.sh"]
-    bidding_strategy: "exclusive"
+    bidding_strategy:
+      type: "exclusive"
 services:
   redis:
     uri: "redis://:%s@host.docker.internal:%s"
@@ -236,7 +237,8 @@ agents:
   TestAgent:
     image: "example-agent:latest"
     command: ["/app/run.sh"]
-    bidding_strategy: "review" 
+    bidding_strategy:
+      type: "review" 
 services:
   redis:
     uri: "redis://:%s@host.docker.internal:%s"
@@ -320,7 +322,8 @@ agents:
   TestAgent:
     image: "example-agent:latest"
     command: ["/app/run.sh"]
-    bidding_strategy: "exclusive"
+    bidding_strategy:
+      type: "exclusive"
 services:
   redis:
     image: "redis:7-alpine"
@@ -469,7 +472,8 @@ agents:
   TestAgent:
     image: "example-agent:latest"
     command: ["/app/run.sh"]
-    bidding_strategy: "exclusive"
+    bidding_strategy:
+      type: "exclusive"
 services:
   redis:
     uri: "redis://:%s@localhost:%s"
@@ -547,7 +551,8 @@ agents:
   TestAgent:
     image: "example-agent:latest"
     command: ["/app/run.sh"]
-    bidding_strategy: "exclusive"
+    bidding_strategy:
+      type: "exclusive"
 services:
   redis:
     uri: "redis://external:6379"
@@ -583,7 +588,8 @@ agents:
   TestAgent:
     image: "example-agent:latest"
     command: ["/app/run.sh"]
-    bidding_strategy: "exclusive"
+    bidding_strategy:
+      type: "exclusive"
 services:
   redis:
     uri: "${MISSING_REDIS_URI_VAR}"
@@ -616,7 +622,8 @@ agents:
   TestAgent:
     image: "example-agent:latest"
     command: ["/app/run.sh"]
-    bidding_strategy: "exclusive"
+    bidding_strategy:
+      type: "exclusive"
 services:
   redis:
     uri: "http://wrong-scheme:6379"
@@ -655,7 +662,8 @@ agents:
   TestAgent:
     image: "example-agent:latest"
     command: ["/app/run.sh"]
-    bidding_strategy: "exclusive"
+    bidding_strategy:
+      type: "exclusive"
 services:
   redis:
     image: "redis:7-alpine"

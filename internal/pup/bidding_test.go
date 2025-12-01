@@ -72,7 +72,7 @@ fi
 		// Create an engine with no bid script, only static strategy
 		staticEngine := &Engine{
 			config: &Config{
-				BiddingStrategy: blackboard.BidTypeExclusive,
+				BiddingStrategy: BiddingStrategy{Type: blackboard.BidTypeExclusive},
 			},
 		}
 
@@ -97,7 +97,7 @@ exit 1
 			config: &Config{
 				AgentName:       "test-agent",
 				BidScript:       []string{failingScriptPath},
-				BiddingStrategy: blackboard.BidTypeParallel, // Fallback
+				BiddingStrategy: BiddingStrategy{Type: blackboard.BidTypeParallel}, // Fallback
 			},
 		}
 
@@ -147,7 +147,7 @@ echo "invalid_bid_type"
 			config: &Config{
 				AgentName:       "test-agent",
 				BidScript:       []string{invalidScriptPath},
-				BiddingStrategy: blackboard.BidTypeReview, // Fallback
+				BiddingStrategy: BiddingStrategy{Type: blackboard.BidTypeReview}, // Fallback
 			},
 		}
 

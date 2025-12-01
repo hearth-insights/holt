@@ -95,7 +95,8 @@ agents:
   EchoAgent:
     image: "example-agent:latest"
     command: ["/app/run.sh"]
-    bidding_strategy: "exclusive"
+    bidding_strategy:
+      type: "exclusive"
     workspace:
       mode: ro
 services:
@@ -295,7 +296,8 @@ agents:
   GitAgent:
     image: "example-git-agent:latest"
     command: ["/app/run.sh"]
-    bidding_strategy: "exclusive"
+    bidding_strategy:
+      type: "exclusive"
     workspace:
       mode: rw
 services:
@@ -382,7 +384,8 @@ agents:
   GitAgent:
     image: "example-git-agent:latest"
     command: ["/app/run.sh"]
-    bidding_strategy: "exclusive"
+    bidding_strategy:
+      type: "exclusive"
     workspace:
       mode: rw
 services:

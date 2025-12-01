@@ -50,7 +50,8 @@ agents:
   HumanReviewer:
     image: "holt/human-reviewer:test"
     command: ["/app/human-reviewer"]
-    bidding_strategy: "review"
+    bidding_strategy:
+      type: "review"
     workspace:
       mode: ro
     environment:
@@ -170,7 +171,8 @@ agents:
   TestAgent:
     image: "example-agent:latest"
     command: ["/app/run.sh"]
-    bidding_strategy: "exclusive"
+    bidding_strategy:
+      type: "exclusive"
     workspace:
       mode: ro
     volumes:
@@ -228,7 +230,8 @@ agents:
   TestRunner:
     image: "holt/test-runner:test"
     command: ["/app/run-tests.sh"]
-    bidding_strategy: "review"
+    bidding_strategy:
+      type: "review"
     workspace:
       mode: rw
 services:

@@ -24,20 +24,42 @@ type HoltConfig struct {
 	Services     *ServicesConfig     `yaml:"services,omitempty"`
 }
 
+// BiddingStrategyConfig defines the agent's bidding behavior (M4.8)
+type BiddingStrategyConfig struct {
+	Type        string   `yaml:"type"`                   // Required: review, claim, exclusive, or ignore
+	TargetTypes []string `yaml:"target_types,omitempty"` // Optional: list of artefact types to bid on
+}
+
+// UnmarshalYAML implements custom unmarshalling to reject legacy string format (M4.8)
+func (b *BiddingStrategyConfig) UnmarshalYAML(value *yaml.Node) error {
+	// Reject string format (Breaking Change)
+	if value.Kind == yaml.ScalarNode {
+		return fmt.Errorf("legacy string format for bidding_strategy is no longer supported. Please use object format: { type: \"...\", target_types: [...] }")
+	}
+
+	// Unmarshal object format
+	type plain BiddingStrategyConfig
+	if err := value.Decode((*plain)(b)); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 // Agent represents a single agent configuration
 // M3.7: Agent key in holt.yml IS the role - no separate role field
 type Agent struct {
-	Image           string           `yaml:"image"` // Required: Docker image name for this agent
-	Build           *BuildConfig     `yaml:"build,omitempty"`
-	Command         []string         `yaml:"command"`
-	BidScript       []string         `yaml:"bid_script,omitempty"`
-	Workspace       *WorkspaceConfig `yaml:"workspace,omitempty"`
-	Replicas        *int             `yaml:"replicas,omitempty"`
-	Strategy        string           `yaml:"strategy,omitempty"`
-	BiddingStrategy string           `yaml:"bidding_strategy"` // Required: review, claim, exclusive, or ignore
-	Environment     []string         `yaml:"environment,omitempty"`
-	Resources       *ResourcesConfig `yaml:"resources,omitempty"`
-	Prompts         *PromptsConfig   `yaml:"prompts,omitempty"`
+	Image           string                `yaml:"image"` // Required: Docker image name for this agent
+	Build           *BuildConfig          `yaml:"build,omitempty"`
+	Command         []string              `yaml:"command"`
+	BidScript       []string              `yaml:"bid_script,omitempty"`
+	Workspace       *WorkspaceConfig      `yaml:"workspace,omitempty"`
+	Replicas        *int                  `yaml:"replicas,omitempty"`
+	Strategy        string                `yaml:"strategy,omitempty"`
+	BiddingStrategy BiddingStrategyConfig `yaml:"bidding_strategy"` // Required: review, claim, exclusive, or ignore
+	Environment     []string              `yaml:"environment,omitempty"`
+	Resources       *ResourcesConfig      `yaml:"resources,omitempty"`
+	Prompts         *PromptsConfig        `yaml:"prompts,omitempty"`
 
 	// M3.4: Controller-worker pattern
 	Mode   string        `yaml:"mode,omitempty"`   // "controller" or empty (traditional)
@@ -214,7 +236,7 @@ func (a *Agent) Validate(name string) error {
 
 	// M3.6: Bidding strategy validation - either bid_script or bidding_strategy required
 	hasBidScript := len(a.BidScript) > 0
-	hasStaticStrategy := a.BiddingStrategy != ""
+	hasStaticStrategy := a.BiddingStrategy.Type != ""
 
 	if !hasBidScript && !hasStaticStrategy {
 		return fmt.Errorf("agent '%s': either bidding_strategy or bid_script must be provided", name)
@@ -222,8 +244,8 @@ func (a *Agent) Validate(name string) error {
 
 	// Validate bidding_strategy enum if provided
 	if hasStaticStrategy {
-		if a.BiddingStrategy != "review" && a.BiddingStrategy != "claim" && a.BiddingStrategy != "exclusive" && a.BiddingStrategy != "ignore" {
-			return fmt.Errorf("agent '%s': invalid bidding_strategy: %s (must be 'review', 'claim', 'exclusive', or 'ignore')", name, a.BiddingStrategy)
+		if a.BiddingStrategy.Type != "review" && a.BiddingStrategy.Type != "claim" && a.BiddingStrategy.Type != "exclusive" && a.BiddingStrategy.Type != "ignore" {
+			return fmt.Errorf("agent '%s': invalid bidding_strategy type: %s (must be 'review', 'claim', 'exclusive', or 'ignore')", name, a.BiddingStrategy.Type)
 		}
 	}
 

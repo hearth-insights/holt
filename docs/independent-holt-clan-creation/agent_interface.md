@@ -42,8 +42,20 @@ A single string indicating the bidding strategy.
 | `claim` | I want to do this. I run after reviews, in parallel with others. |
 | `ignore` | I do not want to work on this. |
 
-### Default Behavior
-If no `bid_script` is defined in `holt.yaml`, the agent defaults to bidding **`exclusive`** on every claim it sees. This is useful for simple, single-purpose agents.
+### Static Bidding Strategy
+If no `bid_script` is defined in `holt.yaml`, the agent uses the static `bidding_strategy` defined in the configuration. This **must** be an object specifying the `type` and optionally `target_types`.
+
+```yaml
+bidding_strategy:
+  type: "exclusive"
+  target_types: ["GoalDefined", "AnotherType"]
+```
+
+*   **`type`**: The bid type (`exclusive`, `review`, `claim`, or `ignore`).
+*   **`target_types`**: A list of artefact types to bid on. If omitted or empty, the agent bids on **all** artefact types.
+
+> [!WARNING]
+> **Breaking Change**: The legacy string format (e.g., `bidding_strategy: "exclusive"`) is no longer supported and will cause a validation error.
 
 ### Example `bid.sh`
 ```bash
