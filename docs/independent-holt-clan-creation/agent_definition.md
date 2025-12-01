@@ -26,6 +26,9 @@ agents:
     role: "Git Agent"
     image: "example-git-agent:latest"
     command: ["/app/run.sh"]
+    bidding_strategy:
+      type: "exclusive"
+      target_types: ["GoalDefined"]
     workspace:
       mode: rw
 services:

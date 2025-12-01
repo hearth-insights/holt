@@ -169,7 +169,7 @@ agents:
   test-agent:
     image: "test:latest"
     command: ["/app/run.sh"]
-    bidding_strategy: "exclusive"
+    bidding_strategy: { type: "exclusive" }
 services:
   redis:
     uri: "redis://external-redis:6379"
@@ -199,7 +199,7 @@ agents:
   test-agent:
     image: "test:latest"
     command: ["/app/run.sh"]
-    bidding_strategy: "exclusive"
+    bidding_strategy: { type: "exclusive" }
 services:
   redis:
     image: "redis:7-alpine"
@@ -227,7 +227,7 @@ agents:
   test-agent:
     image: "test:latest"
     command: ["/app/run.sh"]
-    bidding_strategy: "exclusive"
+    bidding_strategy: { type: "exclusive" }
 services:
   redis:
     uri: "redis://external:6379"
@@ -255,7 +255,7 @@ agents:
   test-agent:
     image: "test:latest"
     command: ["/app/run.sh"]
-    bidding_strategy: "exclusive"
+    bidding_strategy: { type: "exclusive" }
 services:
   redis:
     uri: "${MISSING_REDIS_URI}"
@@ -279,7 +279,7 @@ agents:
   test-agent:
     image: "test:latest"
     command: ["/app/run.sh"]
-    bidding_strategy: "exclusive"
+    bidding_strategy: { type: "exclusive" }
 services:
   redis:
     image: "redis:7-alpine"
@@ -307,7 +307,7 @@ agents:
   test-agent:
     image: "test:latest"
     command: ["/app/run.sh"]
-    bidding_strategy: "exclusive"
+    bidding_strategy: { type: "exclusive" }
 `
 	err := os.WriteFile(configPath, []byte(config), 0644)
 	require.NoError(t, err)

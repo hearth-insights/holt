@@ -638,6 +638,12 @@ func launchAgentContainerWithRedisURL(ctx context.Context, cli *client.Client, i
 		workspaceMode = agent.Workspace.Mode
 	}
 
+	// Serialize BiddingStrategyConfig to JSON (M4.8)
+	biddingStrategyJSON, err := json.Marshal(agent.BiddingStrategy)
+	if err != nil {
+		return fmt.Errorf("failed to marshal bidding strategy: %w", err)
+	}
+
 	// Build environment variables
 	// M3.7: ONLY HOLT_AGENT_NAME is set (to the role), HOLT_AGENT_ROLE removed
 	// M4.4: Use provided redisURL (may be external or managed with password)
@@ -645,7 +651,7 @@ func launchAgentContainerWithRedisURL(ctx context.Context, cli *client.Client, i
 		fmt.Sprintf("HOLT_INSTANCE_NAME=%s", instanceName),
 		fmt.Sprintf("HOLT_AGENT_NAME=%s", agentRole),
 		fmt.Sprintf("REDIS_URL=%s", redisURL),
-		fmt.Sprintf("HOLT_BIDDING_STRATEGY=%s", agent.BiddingStrategy), // M3.1
+		fmt.Sprintf("HOLT_BIDDING_STRATEGY=%s", string(biddingStrategyJSON)), // M4.8: Serialized JSON
 	}
 
 	// M3.4: Set HOLT_MODE for controller agents

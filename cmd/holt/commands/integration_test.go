@@ -65,7 +65,8 @@ agents:
     role: "Example Agent"
     image: "example-agent:latest"
     command: ["echo", "hello"]
-    bidding_strategy: "exclusive"
+    bidding_strategy:
+      type: "exclusive"
 `
 	err := os.WriteFile(filepath.Join(gitRoot, "holt.yml"), []byte(configContent), 0644)
 	require.NoError(t, err)

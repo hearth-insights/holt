@@ -35,12 +35,12 @@ func setupTestEngineWithMaxIterations(t *testing.T, maxIterations int) (*Engine,
 			"Coder": {
 				Image:           "test:latest",
 				Command:         []string{"test"},
-				BiddingStrategy: "exclusive",
+				BiddingStrategy: config.BiddingStrategyConfig{Type: "exclusive"},
 			},
 			"Reviewer": {
 				Image:           "test:latest",
 				Command:         []string{"test"},
-				BiddingStrategy: "review",
+				BiddingStrategy: config.BiddingStrategyConfig{Type: "review"},
 			},
 		},
 	}

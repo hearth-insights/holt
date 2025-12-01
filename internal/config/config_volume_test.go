@@ -19,7 +19,7 @@ func TestAgentVolumesValidation(t *testing.T) {
 			agent: Agent{
 				Image:           "test:latest",
 				Command:         []string{"/app/run.sh"},
-				BiddingStrategy: "exclusive",
+				BiddingStrategy: BiddingStrategyConfig{Type: "exclusive"},
 				Volumes:         []string{"~/.config/gcloud:/root/.config/gcloud:ro"},
 			},
 			wantErr: false,
@@ -29,7 +29,7 @@ func TestAgentVolumesValidation(t *testing.T) {
 			agent: Agent{
 				Image:           "test:latest",
 				Command:         []string{"/app/run.sh"},
-				BiddingStrategy: "exclusive",
+				BiddingStrategy: BiddingStrategyConfig{Type: "exclusive"},
 				Volumes:         []string{"~/.ssh:/root/.ssh:rw"},
 			},
 			wantErr: false, // Warning only, not an error
@@ -39,7 +39,7 @@ func TestAgentVolumesValidation(t *testing.T) {
 			agent: Agent{
 				Image:           "test:latest",
 				Command:         []string{"/app/run.sh"},
-				BiddingStrategy: "exclusive",
+				BiddingStrategy: BiddingStrategyConfig{Type: "exclusive"},
 				Volumes: []string{
 					"~/.config/gcloud:/root/.config/gcloud:ro",
 					"/var/data:/data:ro",
@@ -53,7 +53,7 @@ func TestAgentVolumesValidation(t *testing.T) {
 			agent: Agent{
 				Image:           "test:latest",
 				Command:         []string{"/app/run.sh"},
-				BiddingStrategy: "exclusive",
+				BiddingStrategy: BiddingStrategyConfig{Type: "exclusive"},
 				Volumes:         []string{"~/foo"},
 			},
 			wantErr: true,
@@ -64,7 +64,7 @@ func TestAgentVolumesValidation(t *testing.T) {
 			agent: Agent{
 				Image:           "test:latest",
 				Command:         []string{"/app/run.sh"},
-				BiddingStrategy: "exclusive",
+				BiddingStrategy: BiddingStrategyConfig{Type: "exclusive"},
 				Volumes:         []string{""},
 			},
 			wantErr: true,
@@ -75,7 +75,7 @@ func TestAgentVolumesValidation(t *testing.T) {
 			agent: Agent{
 				Image:           "test:latest",
 				Command:         []string{"/app/run.sh"},
-				BiddingStrategy: "exclusive",
+				BiddingStrategy: BiddingStrategyConfig{Type: "exclusive"},
 				Volumes:         []string{},
 			},
 			wantErr: false,
@@ -85,7 +85,7 @@ func TestAgentVolumesValidation(t *testing.T) {
 			agent: Agent{
 				Image:           "test:latest",
 				Command:         []string{"/app/run.sh"},
-				BiddingStrategy: "exclusive",
+				BiddingStrategy: BiddingStrategyConfig{Type: "exclusive"},
 				Volumes:         nil,
 			},
 			wantErr: false,
@@ -115,7 +115,7 @@ agents:
   TestAgent:
     image: test:latest
     command: ["/app/run.sh"]
-    bidding_strategy: exclusive
+    bidding_strategy: { type: "exclusive" }
     volumes:
       - "~/.config/gcloud:/root/.config/gcloud:ro"
       - "/var/data:/data:ro"

@@ -228,14 +228,16 @@ agents:
     role: "Reviewer"
     image: "example-git-agent:latest"
     command: ["/app/run.sh"]
-    bidding_strategy: "review"
+    bidding_strategy:
+      type: "review"
     workspace:
       mode: ro
   coder:
     role: "Coder"
     image: "example-git-agent:latest"
     command: ["/app/run.sh"]
-    bidding_strategy: "exclusive"
+    bidding_strategy:
+      type: "exclusive"
     workspace:
       mode: rw
 services:

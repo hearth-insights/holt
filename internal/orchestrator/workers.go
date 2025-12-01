@@ -156,6 +156,12 @@ func (wm *WorkerManager) LaunchWorker(ctx context.Context, claim *blackboard.Cla
 	// Build Docker container config
 	redisURL := fmt.Sprintf("redis://%s:6379", wm.redisContainerName)
 
+	// Serialize BiddingStrategyConfig to JSON (M4.8)
+	biddingStrategyJSON, err := json.Marshal(agent.BiddingStrategy)
+	if err != nil {
+		return fmt.Errorf("failed to marshal bidding strategy: %w", err)
+	}
+
 	containerConfig := &container.Config{
 		Image: agent.Worker.Image,
 		// M3.4: Worker is launched with --execute-claim flag
@@ -168,7 +174,7 @@ func (wm *WorkerManager) LaunchWorker(ctx context.Context, claim *blackboard.Cla
 			fmt.Sprintf("HOLT_AGENT_NAME=%s", agentRole),
 			fmt.Sprintf("HOLT_CLAIM_ID=%s", claim.ID), // M4.6: Grant Linkage for topology validation
 			fmt.Sprintf("REDIS_URL=%s", redisURL),
-			fmt.Sprintf("HOLT_BIDDING_STRATEGY=%s", agent.BiddingStrategy),
+			fmt.Sprintf("HOLT_BIDDING_STRATEGY=%s", string(biddingStrategyJSON)),
 			// NOTE: No HOLT_MODE for workers - the --execute-claim flag is sufficient
 		},
 		Labels: dockerpkg.BuildLabels(wm.instanceName, uuid.New().String(), wm.workspacePath, "worker"),

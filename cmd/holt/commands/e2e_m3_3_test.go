@@ -63,13 +63,15 @@ agents:
   Reviewer:
     image: "conditional-reviewer-agent:latest"
     command: ["/app/run.sh"]
-    bidding_strategy: "review"
+    bidding_strategy:
+      type: "review"
     workspace:
       mode: ro
   Coder:
     image: "example-git-agent:latest"
     command: ["/app/run.sh"]
-    bidding_strategy: "exclusive"
+    bidding_strategy:
+      type: "exclusive"
     workspace:
       mode: rw
 services:
@@ -199,13 +201,15 @@ agents:
   Reviewer:
     image: "always-reject-reviewer-agent:latest"
     command: ["/app/run.sh"]
-    bidding_strategy: "review"
+    bidding_strategy:
+      type: "review"
     workspace:
       mode: ro
   Coder:
     image: "example-git-agent:latest"
     command: ["/app/run.sh"]
-    bidding_strategy: "exclusive"
+    bidding_strategy:
+      type: "exclusive"
     workspace:
       mode: rw
 services:

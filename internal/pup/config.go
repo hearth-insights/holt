@@ -11,6 +11,14 @@ import (
 
 // Config holds the agent pup's runtime configuration loaded from environment variables.
 // All fields are required and validated at startup to ensure fail-fast behavior.
+// BiddingStrategy defines the agent's bidding behavior (M4.8)
+type BiddingStrategy struct {
+	Type        blackboard.BidType `json:"type"`
+	TargetTypes []string           `json:"target_types,omitempty"`
+}
+
+// Config holds the agent pup's runtime configuration loaded from environment variables.
+// All fields are required and validated at startup to ensure fail-fast behavior.
 type Config struct {
 	// InstanceName is the Holt instance identifier (from HOLT_INSTANCE_NAME)
 	InstanceName string
@@ -27,8 +35,8 @@ type Config struct {
 	Command []string
 
 	// BiddingStrategy is the bid type this agent submits for claims (from HOLT_BIDDING_STRATEGY)
-	// M3.1: Must be one of: review, claim, exclusive, ignore
-	BiddingStrategy blackboard.BidType
+	// M4.8: Now a struct parsed from JSON
+	BiddingStrategy BiddingStrategy
 
 	// BidScript is the command array to execute for dynamic bidding (from HOLT_AGENT_BID_SCRIPT)
 	BidScript []string
@@ -61,10 +69,15 @@ func LoadConfig() (*Config, error) {
 		}
 	}
 
-	// Parse bidding strategy (M3.1)
-	biddingStrategyStr := os.Getenv("HOLT_BIDDING_STRATEGY")
-	if biddingStrategyStr != "" {
-		cfg.BiddingStrategy = blackboard.BidType(biddingStrategyStr)
+	// Parse bidding strategy (M4.8)
+	biddingStrategyJSON := os.Getenv("HOLT_BIDDING_STRATEGY")
+	if biddingStrategyJSON != "" {
+		// Try parsing as JSON object (new format)
+		if err := json.Unmarshal([]byte(biddingStrategyJSON), &cfg.BiddingStrategy); err != nil {
+			// Fallback check: if it's a simple string (legacy env var from old orchestrator?), fail hard
+			// We want to enforce the breaking change everywhere.
+			return nil, fmt.Errorf("failed to parse HOLT_BIDDING_STRATEGY as JSON object: %w", err)
+		}
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -97,7 +110,7 @@ func (c *Config) Validate() error {
 
 	// M3.6: Bidding strategy validation - either bid_script or bidding_strategy required
 	hasBidScript := len(c.BidScript) > 0
-	hasStaticStrategy := c.BiddingStrategy != ""
+	hasStaticStrategy := c.BiddingStrategy.Type != ""
 
 	if !hasBidScript && !hasStaticStrategy {
 		return fmt.Errorf("either HOLT_BIDDING_STRATEGY or HOLT_AGENT_BID_SCRIPT must be provided")
@@ -105,8 +118,8 @@ func (c *Config) Validate() error {
 
 	// Validate bidding strategy is a valid enum if provided
 	if hasStaticStrategy {
-		if err := c.BiddingStrategy.Validate(); err != nil {
-			return fmt.Errorf("invalid HOLT_BIDDING_STRATEGY: %w", err)
+		if err := c.BiddingStrategy.Type.Validate(); err != nil {
+			return fmt.Errorf("invalid HOLT_BIDDING_STRATEGY type: %w", err)
 		}
 	} else {
 		log.Printf("[WARN] No static bidding_strategy configured for agent %s, relying entirely on bid_script", c.AgentName)
@@ -114,3 +127,4 @@ func (c *Config) Validate() error {
 
 	return nil
 }
+

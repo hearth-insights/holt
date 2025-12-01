@@ -214,7 +214,22 @@ func (e *Engine) handleClaimEvent(ctx context.Context, claim *blackboard.Claim, 
 func (e *Engine) determineBidType(ctx context.Context, targetArtefact *blackboard.Artefact) (blackboard.BidType, error) {
 	// Fallback to static bidding strategy if no bid script is defined.
 	if len(e.config.BidScript) == 0 {
-		return e.config.BiddingStrategy, nil
+		// M4.8: Check target types filtering
+		if len(e.config.BiddingStrategy.TargetTypes) > 0 {
+			match := false
+			for _, t := range e.config.BiddingStrategy.TargetTypes {
+				if t == targetArtefact.Type {
+					match = true
+					break
+				}
+			}
+			if !match {
+				log.Printf("[DEBUG] Target artefact type '%s' not in target_types %v, ignoring",
+					targetArtefact.Type, e.config.BiddingStrategy.TargetTypes)
+				return blackboard.BidTypeIgnore, nil
+			}
+		}
+		return e.config.BiddingStrategy.Type, nil
 	}
 
 	// A bid script is defined, execute it dynamically.
@@ -266,9 +281,9 @@ func (e *Engine) handleBidScriptFailure(msg string, err error) (blackboard.BidTy
 	log.Printf("[ERROR] %s: %v", msg, err)
 
 	// If we have a fallback strategy, use it
-	if e.config.BiddingStrategy != "" {
-		log.Printf("[WARN] Falling back to static bidding_strategy: %s", e.config.BiddingStrategy)
-		return e.config.BiddingStrategy, nil
+	if e.config.BiddingStrategy.Type != "" {
+		log.Printf("[WARN] Falling back to static bidding_strategy: %s", e.config.BiddingStrategy.Type)
+		return e.config.BiddingStrategy.Type, nil
 	}
 
 	// No fallback available, return ignore as safe default

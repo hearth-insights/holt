@@ -69,7 +69,8 @@ agents:
   FailingAgent:
     image: "example-agent:latest"
     command: ["/bin/sh", "-c", "echo 'Failing intentionally' >&2 && exit 1"]
-    bidding_strategy: "exclusive"
+    bidding_strategy:
+      type: "exclusive"
     workspace:
       mode: ro
 services:
@@ -229,7 +230,8 @@ agents:
   InvalidAgent:
     image: "example-agent:latest"
     command: ["/bin/sh", "-c", "echo 'This is not valid JSON' && exit 0"]
-    bidding_strategy: "exclusive"
+    bidding_strategy:
+      type: "exclusive"
     workspace:
       mode: ro
 services:

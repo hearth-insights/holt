@@ -18,7 +18,7 @@ func TestAgent_Validate_BiddingStrategy(t *testing.T) {
 			agent: Agent{
 				Image:           "test:latest",
 				Command:         []string{"/app/run.sh"},
-				BiddingStrategy: "exclusive",
+				BiddingStrategy: BiddingStrategyConfig{Type: "exclusive"},
 			},
 			expectError: false,
 		},
@@ -27,7 +27,7 @@ func TestAgent_Validate_BiddingStrategy(t *testing.T) {
 			agent: Agent{
 				Image:           "test:latest",
 				Command:         []string{"/app/run.sh"},
-				BiddingStrategy: "review",
+				BiddingStrategy: BiddingStrategyConfig{Type: "review"},
 			},
 			expectError: false,
 		},
@@ -36,7 +36,7 @@ func TestAgent_Validate_BiddingStrategy(t *testing.T) {
 			agent: Agent{
 				Image:           "test:latest",
 				Command:         []string{"/app/run.sh"},
-				BiddingStrategy: "claim",
+				BiddingStrategy: BiddingStrategyConfig{Type: "claim"},
 			},
 			expectError: false,
 		},
@@ -45,7 +45,7 @@ func TestAgent_Validate_BiddingStrategy(t *testing.T) {
 			agent: Agent{
 				Image:           "test:latest",
 				Command:         []string{"/app/run.sh"},
-				BiddingStrategy: "ignore",
+				BiddingStrategy: BiddingStrategyConfig{Type: "ignore"},
 			},
 			expectError: false,
 		},
@@ -66,7 +66,7 @@ func TestAgent_Validate_BiddingStrategy(t *testing.T) {
 				Image:           "test:latest",
 				Command:         []string{"/app/run.sh"},
 				BidScript:       []string{"/app/bid.sh"},
-				BiddingStrategy: "claim", // Fallback
+				BiddingStrategy: BiddingStrategyConfig{Type: "claim"}, // Fallback
 			},
 			expectError: false,
 		},
@@ -86,7 +86,7 @@ func TestAgent_Validate_BiddingStrategy(t *testing.T) {
 				Image:           "test:latest",
 				Command:         []string{"/app/run.sh"},
 				BidScript:       []string{"/app/bid.sh"},
-				BiddingStrategy: "invalid",
+				BiddingStrategy: BiddingStrategyConfig{Type: "invalid"},
 			},
 			expectError:   true,
 			errorContains: "invalid bidding_strategy",

@@ -31,7 +31,8 @@ agents:
     role: "Test Agent"
     image: "example-agent:latest"
     command: ["/app/run.sh"]
-    bidding_strategy: "exclusive"
+    bidding_strategy:
+      type: "exclusive"
 services:
   redis:
     image: redis:7-alpine
@@ -248,7 +249,8 @@ agents:
     role: "Test Agent"
     image: "example-agent:latest"
     command: ["/app/run.sh"]
-    bidding_strategy: "exclusive"
+    bidding_strategy:
+      type: "exclusive"
 services:
   redis:
     image: redis:7-alpine

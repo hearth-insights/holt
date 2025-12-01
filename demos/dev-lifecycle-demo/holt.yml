@@ -15,7 +15,8 @@ agents:
   Designer:
     image: holt/gemini-agent:latest
     command: ["/app/designer.sh"]
-    bidding_strategy: "exclusive"
+    bidding_strategy:
+      type: "exclusive"
     workspace:
       mode: ro
 
@@ -44,7 +45,8 @@ agents:
   HumanReviewer:
     image: holt/human-reviewer:latest
     command: ["/app/human-reviewer"]
-    bidding_strategy: "review"
+    bidding_strategy:
+      type: "review"
     workspace:
       mode: ro
     environment:
@@ -55,7 +57,8 @@ agents:
   DetailedDesigner:
     image: holt/claude-agent:latest
     command: ["/app/designer.sh"]
-    bidding_strategy: "exclusive"
+    bidding_strategy:
+      type: "exclusive"
     workspace:
       mode: ro
     environment:
@@ -79,7 +82,8 @@ agents:
   Coder:
     image: holt/claude-agent:latest
     command: ["/app/code.sh"]
-    bidding_strategy: "exclusive"
+    bidding_strategy:
+      type: "exclusive"
     workspace:
       mode: rw  # Needs write access for git commits
     environment:
@@ -100,7 +104,8 @@ agents:
   Architect:
     image: holt/gemini-agent:latest
     command: ["/app/answer.sh"]
-    bidding_strategy: "exclusive"
+    bidding_strategy:
+      type: "exclusive"
     workspace:
       mode: ro
     environment:
@@ -121,7 +126,8 @@ agents:
   TestRunner:
     image: holt/test-runner:latest
     command: ["/app/run-tests.sh"]
-    bidding_strategy: "review"
+    bidding_strategy:
+      type: "review"
     workspace:
       mode: ro
 
@@ -129,7 +135,8 @@ agents:
   SecurityScanner:
     image: holt/security-scanner:latest
     command: ["/app/scan.sh"]
-    bidding_strategy: "review"
+    bidding_strategy:
+      type: "review"
     workspace:
       mode: ro
 
@@ -137,7 +144,8 @@ agents:
   LeadEngineer:
     image: holt/gemini-agent:latest
     command: ["/app/review-code.sh"]
-    bidding_strategy: "exclusive"
+    bidding_strategy:
+      type: "exclusive"
     workspace:
       mode: ro
     environment:
