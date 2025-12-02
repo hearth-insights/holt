@@ -71,3 +71,35 @@ func TestResolveArtefactID(t *testing.T) {
         assert.Equal(t, uuidID, resolved)
     })
 }
+
+func TestErrorHelpers(t *testing.T) {
+	// Test NotFoundError
+	notFoundErr := &NotFoundError{ShortID: "abc"}
+	assert.Equal(t, "no artefacts found matching 'abc'", notFoundErr.Error())
+	assert.True(t, IsNotFoundError(notFoundErr))
+	assert.False(t, IsAmbiguousError(notFoundErr))
+
+	// Test AmbiguousError
+	ambiguousErr := &AmbiguousError{
+		ShortID: "abc",
+		Matches: []string{"abc1", "abc2"},
+	}
+	assert.Equal(t, "ambiguous short ID 'abc' matches 2 artefacts", ambiguousErr.Error())
+	assert.True(t, IsAmbiguousError(ambiguousErr))
+	assert.False(t, IsNotFoundError(ambiguousErr))
+
+	// Test FormatAmbiguousError
+	formatted := FormatAmbiguousError(ambiguousErr)
+	assert.Contains(t, formatted, "Error: ambiguous short ID 'abc' matches 2 artefacts:")
+	assert.Contains(t, formatted, "  abc1")
+	assert.Contains(t, formatted, "  abc2")
+
+	// Test FormatAmbiguousError with many matches
+	manyMatches := make([]string, 15)
+	for i := 0; i < 15; i++ {
+		manyMatches[i] = "match"
+	}
+	largeErr := &AmbiguousError{ShortID: "large", Matches: manyMatches}
+	formattedLarge := FormatAmbiguousError(largeErr)
+	assert.Contains(t, formattedLarge, "...and 5 more")
+}

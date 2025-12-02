@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/signal"
@@ -48,33 +49,43 @@ type ReviewPayload struct {
 }
 
 func main() {
+	if err := Run(os.Stdin, os.Stdout, os.Stderr, os.Getenv); err != nil {
+		log.Fatalf("[HumanReviewer] Error: %v", err)
+	}
+}
+
+// Run is the testable entry point
+func Run(stdin io.Reader, stdout, stderr io.Writer, getEnv func(string) string) error {
 	// Setup signal handling for graceful shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
 	// Get configuration from environment
-	autoApprove := os.Getenv("AUTO_APPROVE") == "true"
-	timeoutSeconds := getTimeoutSeconds()
+	autoApprove := getEnv("AUTO_APPROVE") == "true"
+	timeoutSeconds := getTimeoutSeconds(getEnv)
 
 	// Read input from stdin
+	// Use a buffered reader for both JSON and user input to avoid losing data due to buffering
+	reader := bufio.NewReader(stdin)
+	
 	var input Input
-	decoder := json.NewDecoder(os.Stdin)
+	decoder := json.NewDecoder(reader)
 	if err := decoder.Decode(&input); err != nil {
-		log.Fatalf("[HumanReviewer] Failed to decode stdin: %v", err)
+		return fmt.Errorf("failed to decode stdin: %w", err)
 	}
 
+	log.SetOutput(stderr) // Ensure logs go to stderr
 	log.Printf("[HumanReviewer] Reviewing %s artefact (version %d)",
 		input.TargetArtefact.Type, input.TargetArtefact.Version)
 
 	// Auto-approve mode for testing
 	if autoApprove {
 		log.Println("[HumanReviewer] AUTO_APPROVE=true, automatically approving")
-		outputApproval()
-		return
+		return outputApproval(stdout)
 	}
 
 	// Display artefact for human review
-	displayArtefact(input.TargetArtefact)
+	displayArtefact(stderr, input.TargetArtefact)
 
 	// Create timeout context
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSeconds)*time.Second)
@@ -83,13 +94,16 @@ func main() {
 	// Channel for user input
 	inputChan := make(chan string, 1)
 
+	// Create a new reader that includes any data buffered by the decoder
+	inputReader := io.MultiReader(decoder.Buffered(), reader)
+	inputScanner := bufio.NewReader(inputReader)
+
 	// Start goroutine to read user input
 	go func() {
-		reader := bufio.NewReader(os.Stdin)
-		fmt.Fprintf(os.Stderr, "\nReview this %s (v%d). Approve? (y/n/comment): ",
+		fmt.Fprintf(stderr, "\nReview this %s (v%d). Approve? (y/n/comment): ",
 			input.TargetArtefact.Type, input.TargetArtefact.Version)
 
-		response, err := reader.ReadString('\n')
+		response, err := inputScanner.ReadString('\n')
 		if err != nil {
 			log.Printf("[HumanReviewer] Error reading input: %v", err)
 			inputChan <- ""
@@ -103,93 +117,89 @@ func main() {
 	case <-sigChan:
 		// SIGINT/SIGTERM - exit immediately
 		log.Println("[HumanReviewer] Received interrupt signal, exiting")
-		os.Exit(1)
+		return fmt.Errorf("received interrupt signal")
 
 	case <-ctx.Done():
 		// Timeout
 		log.Printf("[HumanReviewer] Review timed out after %d seconds", timeoutSeconds)
-		outputFailure("Human review timed out. No response received within timeout period.")
-		os.Exit(1)
+		return outputFailure(stdout, "Human review timed out. No response received within timeout period.")
 
 	case response := <-inputChan:
 		// Got user input
-		handleUserInput(response, input.TargetArtefact)
+		return handleUserInput(inputScanner, stdout, stderr, response, input.TargetArtefact)
 	}
 }
 
 // displayArtefact shows the artefact content to the reviewer
-func displayArtefact(art Artefact) {
-	fmt.Fprintln(os.Stderr, "\n"+strings.Repeat("=", 80))
-	fmt.Fprintf(os.Stderr, "Artefact ID: %s\n", art.ID)
-	fmt.Fprintf(os.Stderr, "Type: %s (version %d)\n", art.Type, art.Version)
-	fmt.Fprintf(os.Stderr, "Produced by: %s\n", art.ProducedByRole)
-	fmt.Fprintln(os.Stderr, strings.Repeat("-", 80))
-	fmt.Fprintln(os.Stderr, "Payload:")
-	fmt.Fprintln(os.Stderr, art.Payload)
-	fmt.Fprintln(os.Stderr, strings.Repeat("=", 80))
+func displayArtefact(w io.Writer, art Artefact) {
+	fmt.Fprintln(w, "\n"+strings.Repeat("=", 80))
+	fmt.Fprintf(w, "Artefact ID: %s\n", art.ID)
+	fmt.Fprintf(w, "Type: %s (version %d)\n", art.Type, art.Version)
+	fmt.Fprintf(w, "Produced by: %s\n", art.ProducedByRole)
+	fmt.Fprintln(w, strings.Repeat("-", 80))
+	fmt.Fprintln(w, "Payload:")
+	fmt.Fprintln(w, art.Payload)
+	fmt.Fprintln(w, strings.Repeat("=", 80))
 }
 
 // handleUserInput processes the user's review decision
-func handleUserInput(response string, art Artefact) {
+func handleUserInput(reader *bufio.Reader, stdout, stderr io.Writer, response string, art Artefact) error {
 	response = strings.ToLower(response)
 
 	switch {
 	case response == "y" || response == "yes":
 		// Approval
 		log.Println("[HumanReviewer] Approved by human")
-		outputApproval()
+		return outputApproval(stdout)
 
 	case response == "n" || response == "no":
 		// Rejection - prompt for feedback
-		fmt.Fprint(os.Stderr, "Rejection reason: ")
-		reader := bufio.NewReader(os.Stdin)
+		fmt.Fprint(stderr, "Rejection reason: ")
 		feedback, err := reader.ReadString('\n')
 		if err != nil {
 			log.Printf("[HumanReviewer] Error reading feedback: %v", err)
-			outputRejection("Rejected by human (no feedback provided)")
-			return
+			return outputRejection(stdout, "Rejected by human (no feedback provided)")
 		}
 		feedback = strings.TrimSpace(feedback)
 		log.Printf("[HumanReviewer] Rejected by human: %s", feedback)
-		outputRejection(feedback)
+		return outputRejection(stdout, feedback)
 
 	case strings.HasPrefix(response, "comment "):
 		// Direct comment format: "comment <feedback text>"
 		feedback := strings.TrimSpace(response[8:])
 		if feedback == "" {
 			log.Println("[HumanReviewer] Rejected with empty comment")
-			outputRejection("Rejected by human (empty comment)")
-			return
+			return outputRejection(stdout, "Rejected by human (empty comment)")
 		}
 		log.Printf("[HumanReviewer] Rejected by human: %s", feedback)
-		outputRejection(feedback)
+		return outputRejection(stdout, feedback)
 
 	default:
 		// Invalid input - treat as rejection
 		log.Printf("[HumanReviewer] Invalid input '%s', treating as rejection", response)
-		outputRejection(fmt.Sprintf("Invalid review response: %s", response))
+		return outputRejection(stdout, fmt.Sprintf("Invalid review response: %s", response))
 	}
 }
 
 // outputApproval creates an approval Review artefact
-func outputApproval() {
+func outputApproval(w io.Writer) error {
 	output := Output{
 		StructuralType:  "Review",
 		ArtefactType:    "Review",
 		ArtefactPayload: "{}",
 		Summary:         "Approved by human reviewer",
 	}
-	printOutput(output)
+	return printOutput(w, output)
 }
 
 // outputRejection creates a rejection Review artefact with feedback
-func outputRejection(feedback string) {
+func outputRejection(w io.Writer, feedback string) error {
 	payload := ReviewPayload{
 		Feedback: feedback,
 	}
 	payloadJSON, err := json.Marshal(payload)
 	if err != nil {
-		log.Fatalf("[HumanReviewer] Failed to marshal rejection payload: %v", err)
+		return fmt.Errorf("failed to marshal rejection payload: %w", err)
 	}
 
 	output := Output{
@@ -198,32 +208,33 @@ func outputRejection(feedback string) {
 		ArtefactPayload: string(payloadJSON),
 		Summary:         "Rejected by human reviewer",
 	}
-	printOutput(output)
+	return printOutput(w, output)
 }
 
 // outputFailure creates a Failure artefact (for timeout)
-func outputFailure(message string) {
+func outputFailure(w io.Writer, message string) error {
 	output := Output{
 		StructuralType:  "Failure",
 		ArtefactType:    "HumanReviewTimeout",
 		ArtefactPayload: message,
 		Summary:         "Human review failed: timeout",
 	}
-	printOutput(output)
+	return printOutput(w, output)
 }
 
 // printOutput writes the output JSON to stdout
-func printOutput(output Output) {
-	encoder := json.NewEncoder(os.Stdout)
+func printOutput(w io.Writer, output Output) error {
+	encoder := json.NewEncoder(w)
 	encoder.SetIndent("", "  ")
 	if err := encoder.Encode(output); err != nil {
-		log.Fatalf("[HumanReviewer] Failed to encode output: %v", err)
+		return fmt.Errorf("failed to encode output: %w", err)
 	}
+	return nil
 }
 
 // getTimeoutSeconds reads REVIEW_TIMEOUT env var, defaults to 300 (5 minutes)
-func getTimeoutSeconds() int {
-	timeoutStr := os.Getenv("REVIEW_TIMEOUT")
+func getTimeoutSeconds(getEnv func(string) string) int {
+	timeoutStr := getEnv("REVIEW_TIMEOUT")
 	if timeoutStr == "" {
 		return 300 // Default: 5 minutes
 	}

@@ -17,50 +17,59 @@ import (
 )
 
 func main() {
+	if err := run(context.Background(), os.Args, os.Getenv); err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		os.Exit(1)
+	}
+}
+
+// run is the testable entry point for the orchestrator
+func run(ctx context.Context, args []string, getEnv func(string) string) error {
 	// Check for version flag
-	showVersion := flag.Bool("version", false, "Show version information")
-	flag.Parse()
+	// We use a custom flag set to avoid polluting the global flag set
+	fs := flag.NewFlagSet(args[0], flag.ContinueOnError)
+	showVersion := fs.Bool("version", false, "Show version information")
+	
+	// Parse flags (skipping program name)
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
 
 	if *showVersion {
 		fmt.Printf("holt-orchestrator version %s (commit: %s, built: %s)\n", version.Version, version.Commit, version.Date)
-		os.Exit(0)
+		return nil
 	}
+
 	// 1. Load environment variables
-	instanceName := os.Getenv("HOLT_INSTANCE_NAME")
-	redisURL := os.Getenv("REDIS_URL")
+	instanceName := getEnv("HOLT_INSTANCE_NAME")
+	redisURL := getEnv("REDIS_URL")
 
 	if instanceName == "" || redisURL == "" {
-		fmt.Fprintf(os.Stderr, "Error: HOLT_INSTANCE_NAME and REDIS_URL must be set\n")
-		os.Exit(1)
+		return fmt.Errorf("Error: HOLT_INSTANCE_NAME and REDIS_URL must be set")
 	}
 
 	// 2. Parse Redis URL
 	redisOpts, err := redis.ParseURL(redisURL)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: Invalid REDIS_URL: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("Error: Invalid REDIS_URL: %v", err)
 	}
 
 	// 3. Create blackboard client
 	bbClient, err := blackboard.NewClient(redisOpts, instanceName)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: Failed to create blackboard client: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("Error: Failed to create blackboard client: %v", err)
 	}
 	defer bbClient.Close()
 
 	// 4. Verify Redis connectivity
-	ctx := context.Background()
 	if err := bbClient.Ping(ctx); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: Redis not accessible: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("Error: Redis not accessible: %v", err)
 	}
 
 	// 5. Load holt.yml configuration from workspace
 	cfg, err := config.Load("/workspace/holt.yml")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: Failed to load holt.yml: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("Error: Failed to load holt.yml: %v", err)
 	}
 
 	fmt.Printf("Orchestrator starting for instance '%s' with %d agents\n", instanceName, len(cfg.Agents))
@@ -111,7 +120,7 @@ func main() {
 		// M3.4: Get host workspace path from environment (for worker bind mounts)
 		// The orchestrator container has the workspace mounted at /workspace internally,
 		// but workers need to mount from the actual host path
-		hostWorkspacePath := os.Getenv("HOST_WORKSPACE_PATH")
+		hostWorkspacePath := getEnv("HOST_WORKSPACE_PATH")
 		if hostWorkspacePath == "" {
 			// Fallback: try to use /workspace if not set (for backward compatibility)
 			// This may fail if running in a container environment
@@ -126,7 +135,7 @@ func main() {
 	engine := orchestrator.NewEngine(bbClient, instanceName, cfg, workerManager)
 
 	// 9. Setup graceful shutdown
-	runCtx, cancel := context.WithCancel(context.Background())
+	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	sigCh := make(chan os.Signal, 1)
@@ -144,12 +153,15 @@ func main() {
 		fmt.Printf("Received signal %v, shutting down gracefully...\n", sig)
 		cancel()
 		// Wait for engine to finish
-		<-errCh
+		return <-errCh
 	case runErr := <-errCh:
 		if runErr != nil {
-			fmt.Fprintf(os.Stderr, "Orchestrator error: %v\n", runErr)
-			os.Exit(1)
+			return fmt.Errorf("Orchestrator error: %v", runErr)
 		}
+	case <-ctx.Done():
+		// Context cancelled externally (e.g. in tests)
+		cancel()
+		return <-errCh
 	}
 
 	// 12. Cleanup Docker client if initialized
@@ -158,4 +170,5 @@ func main() {
 	}
 
 	fmt.Println("Orchestrator stopped")
+	return nil
 }
