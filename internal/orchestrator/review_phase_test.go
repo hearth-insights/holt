@@ -157,6 +157,46 @@ func TestCheckReviewPhaseCompletion(t *testing.T) {
 	assert.NotEmpty(t, feedbackClaims)
 }
 
+func TestCheckReviewPhaseCompletion_GetArtefactError(t *testing.T) {
+	ctx := context.Background()
+	e, _, _ := setupTestEngine(t)
+
+	// Setup Claim
+	claim := &blackboard.Claim{
+		ID:                  "claim-error-check",
+		ArtefactID:          "art-missing", // This artefact does not exist
+		Status:              blackboard.ClaimStatusPendingReview,
+		GrantedReviewAgents: []string{"Reviewer"},
+	}
+	require.NoError(t, e.client.CreateClaim(ctx, claim))
+
+	// Setup PhaseState with complete reviews (so it proceeds to artefact fetch)
+	phaseState := &PhaseState{
+		ClaimID:           claim.ID,
+		Phase:             "review",
+		GrantedAgents:     []string{"Reviewer"},
+		ReceivedArtefacts: map[string]string{"Reviewer": "art-approval"},
+		StartTime:         time.Now(),
+	}
+
+	// Create approval artefact so we pass the "reviews received" check
+	approval := &blackboard.Artefact{
+		ID:             "art-approval",
+		LogicalID:      "art-approval",
+		Version:        1,
+		StructuralType: blackboard.StructuralTypeStandard,
+		Type:           "Review",
+		ProducedByRole: "Reviewer",
+		Payload:        "{}",
+	}
+	require.NoError(t, e.client.CreateArtefact(ctx, approval))
+
+	// Run check - should fail when trying to fetch "art-missing" for breakpoint evaluation
+	err := e.CheckReviewPhaseCompletion(ctx, claim, phaseState)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to fetch target artefact")
+}
+
 func TestIsApproval_EmptyObject(t *testing.T) {
 	assert.True(t, isApproval("{}"))
 }
