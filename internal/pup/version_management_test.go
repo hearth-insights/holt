@@ -31,6 +31,7 @@ func setupTestPup(t *testing.T, agentName, agentRole string) (*Engine, *blackboa
 		AgentName:       agentName, // M3.7: This IS the role
 		Command:         []string{"test"},
 		BiddingStrategy: BiddingStrategy{Type: blackboard.BidTypeExclusive},
+		MaxContextDepth: 10,
 	}
 
 	engine := New(cfg, bbClient)

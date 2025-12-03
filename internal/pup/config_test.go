@@ -44,6 +44,66 @@ func TestLoadConfig_Success(t *testing.T) {
 	if len(cfg.Command) != 1 || cfg.Command[0] != "/app/run.sh" {
 		t.Errorf("Expected Command=['/app/run.sh'], got %v", cfg.Command)
 	}
+
+	// Check default MaxContextDepth
+	if cfg.MaxContextDepth != 10 {
+		t.Errorf("Expected MaxContextDepth=10 (default), got %d", cfg.MaxContextDepth)
+	}
+}
+
+func TestLoadConfig_WithMaxContextDepth(t *testing.T) {
+	// Set up valid environment with custom depth
+	os.Setenv("HOLT_INSTANCE_NAME", "test-instance")
+	os.Setenv("HOLT_AGENT_NAME", "test-agent")
+	os.Setenv("REDIS_URL", "redis://localhost:6379")
+	os.Setenv("HOLT_AGENT_COMMAND", `["/app/run.sh"]`)
+	os.Setenv("HOLT_BIDDING_STRATEGY", `{"type":"exclusive"}`)
+	os.Setenv("HOLT_MAX_CONTEXT_DEPTH", "50")
+	defer func() {
+		os.Unsetenv("HOLT_INSTANCE_NAME")
+		os.Unsetenv("HOLT_AGENT_NAME")
+		os.Unsetenv("REDIS_URL")
+		os.Unsetenv("HOLT_AGENT_COMMAND")
+		os.Unsetenv("HOLT_BIDDING_STRATEGY")
+		os.Unsetenv("HOLT_MAX_CONTEXT_DEPTH")
+	}()
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+
+	if cfg.MaxContextDepth != 50 {
+		t.Errorf("Expected MaxContextDepth=50, got %d", cfg.MaxContextDepth)
+	}
+}
+
+func TestLoadConfig_InvalidMaxContextDepth(t *testing.T) {
+	// Set up environment with invalid depth
+	os.Setenv("HOLT_INSTANCE_NAME", "test-instance")
+	os.Setenv("HOLT_AGENT_NAME", "test-agent")
+	os.Setenv("REDIS_URL", "redis://localhost:6379")
+	os.Setenv("HOLT_AGENT_COMMAND", `["/app/run.sh"]`)
+	os.Setenv("HOLT_BIDDING_STRATEGY", `{"type":"exclusive"}`)
+	os.Setenv("HOLT_MAX_CONTEXT_DEPTH", "not-a-number")
+	defer func() {
+		os.Unsetenv("HOLT_INSTANCE_NAME")
+		os.Unsetenv("HOLT_AGENT_NAME")
+		os.Unsetenv("REDIS_URL")
+		os.Unsetenv("HOLT_AGENT_COMMAND")
+		os.Unsetenv("HOLT_BIDDING_STRATEGY")
+		os.Unsetenv("HOLT_MAX_CONTEXT_DEPTH")
+	}()
+
+	_, err := LoadConfig()
+	if err == nil {
+		t.Fatal("Expected error for invalid HOLT_MAX_CONTEXT_DEPTH, got nil")
+	}
+
+	expected := "invalid HOLT_MAX_CONTEXT_DEPTH"
+	if err == nil || len(err.Error()) < len(expected) || err.Error()[:len(expected)] != expected {
+		t.Errorf("Expected error starting with '%s', got '%v'", expected, err)
+	}
 }
 
 func TestLoadConfig_MissingInstanceName(t *testing.T) {
@@ -184,6 +244,7 @@ func TestValidate_ValidConfig(t *testing.T) {
 		RedisURL:        "redis://localhost:6379",
 		Command:         []string{"/app/run.sh"},
 		BiddingStrategy: BiddingStrategy{Type: blackboard.BidTypeExclusive}, // M4.8: Required
+		MaxContextDepth: 100,
 	}
 
 	err := cfg.Validate()
@@ -225,6 +286,18 @@ func TestValidate_InvalidConfig(t *testing.T) {
 				RedisURL:     "",
 			},
 			expectedErr: "REDIS_URL environment variable is required",
+		},
+		{
+			name: "negative max context depth",
+			cfg: &Config{
+				InstanceName:    "test-instance",
+				AgentName:       "test-agent",
+				RedisURL:        "redis://localhost:6379",
+				Command:         []string{"/app/run.sh"},
+				BiddingStrategy: BiddingStrategy{Type: blackboard.BidTypeExclusive},
+				MaxContextDepth: -1,
+			},
+			expectedErr: "HOLT_MAX_CONTEXT_DEPTH must be a positive integer",
 		},
 	}
 

@@ -9,11 +9,7 @@ import (
 	"github.com/dyluth/holt/pkg/blackboard"
 )
 
-const (
-	// maxContextDepth is the hard limit for BFS traversal depth to prevent
-	// infinite loops in malformed graphs and excessive context size.
-	maxContextDepth = 10
-)
+
 
 // assembleContext performs breadth-first traversal of the artefact dependency graph
 // to build a rich historical context for agent execution.
@@ -21,7 +17,7 @@ const (
 // Algorithm (from agent-pup.md):
 //  1. Start with target artefact's source_artefacts
 //  2. M3.3: Also add claim.AdditionalContextIDs for feedback claims
-//  3. For each level (max 10):
+//  3. For each level (max configured depth):
 //     - Fetch each artefact from blackboard
 //     - Use thread tracking to get latest version of that logical artefact
 //     - Store latest version in context map (de-duplicates by logical_id)
@@ -57,7 +53,7 @@ func (e *Engine) assembleContext(ctx context.Context, targetArtefact *blackboard
 	seenLogicalIDs := make(map[string]bool)
 
 	// BFS traversal
-	for len(queue) > 0 && depth < maxContextDepth {
+	for len(queue) > 0 && depth < e.config.MaxContextDepth {
 		depth++
 		currentLevelSize := len(queue)
 
@@ -88,6 +84,39 @@ func (e *Engine) assembleContext(ctx context.Context, targetArtefact *blackboard
 				latestArtefact = artefact // Fallback to discovered version
 			}
 
+			// M4.9: Direct V1 Link Strategy
+			// If we have a reworked version (v > 1), we must fetch V1 to get the original input links.
+			// Intermediate versions (e.g. v2) often only link to the review that triggered them,
+			// dropping the original context (Version Shadowing).
+			if latestArtefact.Version > 1 {
+				v1ID, v1Version, err := e.bbClient.GetFirstVersion(ctx, latestArtefact.LogicalID)
+				if err != nil {
+					log.Printf("[WARN] Failed to get first version for logical_id=%s: %v", latestArtefact.LogicalID, err)
+				} else if v1Version == 1 && v1ID != latestArtefact.ID {
+					// Fetch V1 artefact
+					v1Artefact, err := e.bbClient.GetArtefact(ctx, v1ID)
+					if err != nil {
+						log.Printf("[WARN] Failed to fetch V1 artefact %s: %v", v1ID, err)
+					} else if v1Artefact != nil {
+						log.Printf("[DEBUG] Merging links from V1 (id=%s) into V%d (id=%s)",
+							v1Artefact.ID, latestArtefact.Version, latestArtefact.ID)
+						
+						// Merge V1 sources into latest sources (avoiding duplicates)
+						existingSources := make(map[string]bool)
+						for _, src := range latestArtefact.SourceArtefacts {
+							existingSources[src] = true
+						}
+						
+						for _, src := range v1Artefact.SourceArtefacts {
+							if !existingSources[src] {
+								latestArtefact.SourceArtefacts = append(latestArtefact.SourceArtefacts, src)
+								existingSources[src] = true
+							}
+						}
+					}
+				}
+			}
+
 			// De-duplicate by logical_id (keep first occurrence in BFS order)
 			if seenLogicalIDs[latestArtefact.LogicalID] {
 				log.Printf("[DEBUG] De-duplication: logical_id=%s already in context, skipping",
@@ -107,7 +136,7 @@ func (e *Engine) assembleContext(ctx context.Context, targetArtefact *blackboard
 
 	if len(queue) > 0 {
 		log.Printf("[WARN] Depth limit reached: max_depth=%d artefacts_pending=%d",
-			maxContextDepth, len(queue))
+			e.config.MaxContextDepth, len(queue))
 	}
 
 	// Filter to Standard and Answer artefacts only
