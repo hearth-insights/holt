@@ -385,7 +385,7 @@ func (e *Engine) waitForConsensusAndGrant(ctx context.Context, claim *blackboard
 }
 
 // getAgentsStillToSubmitBids returns a list of agent names that haven't submitted bids yet.
-func (e *Engine) getAgentsStillToSubmitBids(receivedBids map[string]blackboard.BidType) []string {
+func (e *Engine) getAgentsStillToSubmitBids(receivedBids map[string]blackboard.Bid) []string {
 	var waiting []string
 	for agentName := range e.agentRegistry {
 		if _, hasBid := receivedBids[agentName]; !hasBid {

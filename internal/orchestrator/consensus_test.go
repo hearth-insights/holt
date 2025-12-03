@@ -48,8 +48,8 @@ func TestWaitForConsensus(t *testing.T) {
 		bids, err := engine.WaitForConsensus(ctx, claimID)
 		assert.NoError(t, err)
 		assert.Len(t, bids, 2)
-		assert.Equal(t, blackboard.BidTypeExclusive, bids["agent-a"])
-		assert.Equal(t, blackboard.BidTypeIgnore, bids["agent-b"])
+		assert.Equal(t, blackboard.BidTypeExclusive, bids["agent-a"].BidType)
+		assert.Equal(t, blackboard.BidTypeIgnore, bids["agent-b"].BidType)
 	})
 
 	// Scenario 2: Consensus achieved after delay
@@ -57,7 +57,7 @@ func TestWaitForConsensus(t *testing.T) {
 		claimIDDelayed := "claim-delayed"
 		
 		// Start waiting in a goroutine
-		resultChan := make(chan map[string]blackboard.BidType)
+		resultChan := make(chan map[string]blackboard.Bid)
 		errChan := make(chan error)
 		
 		go func() {
@@ -108,40 +108,40 @@ func TestValidateAndSanitizeBids(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		input    map[string]blackboard.BidType
-		expected map[string]blackboard.BidType
+		input    map[string]blackboard.Bid
+		expected map[string]blackboard.Bid
 	}{
 		{
 			name: "AllValid",
-			input: map[string]blackboard.BidType{
-				"agent-a": blackboard.BidTypeExclusive,
-				"agent-b": blackboard.BidTypeIgnore,
+			input: map[string]blackboard.Bid{
+				"agent-a": {AgentName: "agent-a", BidType: blackboard.BidTypeExclusive},
+				"agent-b": {AgentName: "agent-b", BidType: blackboard.BidTypeIgnore},
 			},
-			expected: map[string]blackboard.BidType{
-				"agent-a": blackboard.BidTypeExclusive,
-				"agent-b": blackboard.BidTypeIgnore,
+			expected: map[string]blackboard.Bid{
+				"agent-a": {AgentName: "agent-a", BidType: blackboard.BidTypeExclusive},
+				"agent-b": {AgentName: "agent-b", BidType: blackboard.BidTypeIgnore},
 			},
 		},
 		{
 			name: "MixedValidAndInvalid",
-			input: map[string]blackboard.BidType{
-				"agent-a": blackboard.BidTypeExclusive,
-				"agent-b": "invalid_bid_type",
+			input: map[string]blackboard.Bid{
+				"agent-a": {AgentName: "agent-a", BidType: blackboard.BidTypeExclusive},
+				"agent-b": {AgentName: "agent-b", BidType: "invalid_bid_type"},
 			},
-			expected: map[string]blackboard.BidType{
-				"agent-a": blackboard.BidTypeExclusive,
-				"agent-b": blackboard.BidTypeIgnore,
+			expected: map[string]blackboard.Bid{
+				"agent-a": {AgentName: "agent-a", BidType: blackboard.BidTypeExclusive},
+				"agent-b": {AgentName: "agent-b", BidType: blackboard.BidTypeIgnore},
 			},
 		},
 		{
 			name: "AllInvalid",
-			input: map[string]blackboard.BidType{
-				"agent-a": "garbage",
-				"agent-b": "",
+			input: map[string]blackboard.Bid{
+				"agent-a": {AgentName: "agent-a", BidType: "garbage"},
+				"agent-b": {AgentName: "agent-b", BidType: ""},
 			},
-			expected: map[string]blackboard.BidType{
-				"agent-a": blackboard.BidTypeIgnore,
-				"agent-b": blackboard.BidTypeIgnore,
+			expected: map[string]blackboard.Bid{
+				"agent-a": {AgentName: "agent-a", BidType: blackboard.BidTypeIgnore},
+				"agent-b": {AgentName: "agent-b", BidType: blackboard.BidTypeIgnore},
 			},
 		},
 	}

@@ -198,6 +198,8 @@ func (e *Engine) handleClaimEvent(ctx context.Context, claim *blackboard.Claim, 
 		bidType = blackboard.BidTypeIgnore
 	}
 
+	log.Printf("[DEBUG] Submitting bid for claim_id=%s: agent=%s type=%s", claim.ID, e.config.AgentName, bidType)
+
 	err = e.bbClient.SetBid(ctx, claim.ID, e.config.AgentName, bidType)
 	if err != nil {
 		log.Printf("[ERROR] Failed to submit bid for claim_id=%s: %v", claim.ID, err)

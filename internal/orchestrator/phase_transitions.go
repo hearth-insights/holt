@@ -153,10 +153,36 @@ func (e *Engine) TransitionToNextPhase(ctx context.Context, claim *blackboard.Cl
 func (e *Engine) GrantNextPhase(ctx context.Context, claim *blackboard.Claim, phaseState *PhaseState, nextPhase string) error {
 	switch nextPhase {
 	case "parallel":
-		return e.GrantParallelPhase(ctx, claim, phaseState.AllBids)
+		// Reconstruct map[string]Bid from PhaseState data
+		bids := make(map[string]blackboard.Bid)
+		for agent, bidType := range phaseState.AllBids {
+			timestamp := int64(0)
+			if ts, ok := phaseState.BidTimestamps[agent]; ok {
+				timestamp = ts
+			}
+			bids[agent] = blackboard.Bid{
+				AgentName:   agent,
+				BidType:     bidType,
+				TimestampMs: timestamp,
+			}
+		}
+		return e.GrantParallelPhase(ctx, claim, bids)
 
 	case "exclusive":
-		return e.GrantExclusivePhase(ctx, claim, phaseState.AllBids)
+		// Reconstruct map[string]Bid from PhaseState data
+		bids := make(map[string]blackboard.Bid)
+		for agent, bidType := range phaseState.AllBids {
+			timestamp := int64(0)
+			if ts, ok := phaseState.BidTimestamps[agent]; ok {
+				timestamp = ts
+			}
+			bids[agent] = blackboard.Bid{
+				AgentName:   agent,
+				BidType:     bidType,
+				TimestampMs: timestamp,
+			}
+		}
+		return e.GrantExclusivePhase(ctx, claim, bids)
 
 	default:
 		return fmt.Errorf("unknown next phase: %s", nextPhase)
@@ -165,11 +191,11 @@ func (e *Engine) GrantNextPhase(ctx context.Context, claim *blackboard.Claim, ph
 
 // GrantExclusivePhase grants the claim to a single exclusive agent.
 // M3.4: Enhanced with controller-worker pattern support.
-func (e *Engine) GrantExclusivePhase(ctx context.Context, claim *blackboard.Claim, bids map[string]blackboard.BidType) error {
+func (e *Engine) GrantExclusivePhase(ctx context.Context, claim *blackboard.Claim, bids map[string]blackboard.Bid) error {
 	// Collect all agents with exclusive bids
 	var exclusiveBidders []string
-	for agentName, bidType := range bids {
-		if bidType == blackboard.BidTypeExclusive {
+	for agentName, bid := range bids {
+		if bid.BidType == blackboard.BidTypeExclusive {
 			exclusiveBidders = append(exclusiveBidders, agentName)
 		}
 	}

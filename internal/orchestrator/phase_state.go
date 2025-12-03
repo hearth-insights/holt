@@ -22,17 +22,28 @@ type PhaseState struct {
 	GrantedAgents     []string                      // Agents granted in this phase
 	ReceivedArtefacts map[string]string             // agentRole → artefactID
 	AllBids           map[string]blackboard.BidType // All original bids (for phase transition logic)
+	BidTimestamps     map[string]int64              // agentName → timestampMs (when bids were received)
 	StartTime         time.Time                     // When this phase started
 }
 
 // NewPhaseState creates a new phase state tracker for a claim.
-func NewPhaseState(claimID string, phase string, grantedAgents []string, allBids map[string]blackboard.BidType) *PhaseState {
+func NewPhaseState(claimID string, phase string, grantedAgents []string, allBids map[string]blackboard.Bid) *PhaseState {
+	// Extract bid types and timestamps
+	bidTypes := make(map[string]blackboard.BidType)
+	bidTimestamps := make(map[string]int64)
+
+	for agent, bid := range allBids {
+		bidTypes[agent] = bid.BidType
+		bidTimestamps[agent] = bid.TimestampMs
+	}
+
 	return &PhaseState{
 		ClaimID:           claimID,
 		Phase:             phase,
 		GrantedAgents:     grantedAgents,
 		ReceivedArtefacts: make(map[string]string),
-		AllBids:           allBids,
+		AllBids:           bidTypes,
+		BidTimestamps:     bidTimestamps,
 		StartTime:         time.Now(),
 	}
 }
@@ -246,10 +257,16 @@ func (e *Engine) handleWorkerSlotAvailable(ctx context.Context, role string) {
 
 // DetermineInitialPhase determines which phase a claim should start in based on bids.
 // Returns the claim status and the list of agents to grant.
-func DetermineInitialPhase(bids map[string]blackboard.BidType) (blackboard.ClaimStatus, string) {
-	hasReviewBids := HasBidsForPhase(bids, "review")
-	hasParallelBids := HasBidsForPhase(bids, "parallel")
-	hasExclusiveBids := HasBidsForPhase(bids, "exclusive")
+func DetermineInitialPhase(bids map[string]blackboard.Bid) (blackboard.ClaimStatus, string) {
+	// Extract bid types for HasBidsForPhase
+	bidTypes := make(map[string]blackboard.BidType)
+	for agent, bid := range bids {
+		bidTypes[agent] = bid.BidType
+	}
+
+	hasReviewBids := HasBidsForPhase(bidTypes, "review")
+	hasParallelBids := HasBidsForPhase(bidTypes, "parallel")
+	hasExclusiveBids := HasBidsForPhase(bidTypes, "exclusive")
 
 	// Debug logging to diagnose phase determination
 	log.Printf("[DEBUG] DetermineInitialPhase: hasReview=%v, hasParallel=%v, hasExclusive=%v, bids=%v",

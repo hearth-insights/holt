@@ -299,9 +299,22 @@ func displayHistoricalArtefacts(ctx context.Context, client *blackboard.Client, 
 
 		// Reconstruct bid_submitted events from PhaseState.AllBids
 		if primaryClaim.PhaseState != nil && len(primaryClaim.PhaseState.AllBids) > 0 {
-			// Bids come shortly after claim (preserve millisecond precision)
-			bidOffset := int64(1)
-			for agentName, bidType := range primaryClaim.PhaseState.AllBids {
+			// Sort agents to ensure deterministic event ordering (even with timestamps)
+			var agents []string
+			for agent := range primaryClaim.PhaseState.AllBids {
+				agents = append(agents, agent)
+			}
+			sort.Strings(agents)
+
+			for _, agentName := range agents {
+				bidType := primaryClaim.PhaseState.AllBids[agentName]
+				
+				// Use stored timestamp if available, otherwise fallback to claim timestamp + 1ms
+				bidTimestamp := claimTimestampMs + 1
+				if ts, ok := primaryClaim.PhaseState.BidTimestamps[agentName]; ok && ts > 0 {
+					bidTimestamp = ts
+				}
+
 				workflowEvent := &blackboard.WorkflowEvent{
 					Event: "bid_submitted",
 					Data: map[string]interface{}{
@@ -311,10 +324,9 @@ func displayHistoricalArtefacts(ctx context.Context, client *blackboard.Client, 
 					},
 				}
 				allEvents = append(allEvents, historicalEvent{
-					timestampMs:   claimTimestampMs + bidOffset,
+					timestampMs:   bidTimestamp,
 					workflowEvent: workflowEvent,
 				})
-				bidOffset++
 			}
 		}
 

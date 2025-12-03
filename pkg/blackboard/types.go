@@ -142,8 +142,9 @@ const (
 // Note: In Redis, bids are stored as a hash where key=agent_name, value=bid_type.
 // This struct is for in-memory representation.
 type Bid struct {
-	AgentName string  `json:"agent_name"` // Logical name of the agent
-	BidType   BidType `json:"bid_type"`   // Type of bid submitted
+	AgentName   string  `json:"agent_name"`   // Logical name of the agent
+	BidType     BidType `json:"bid_type"`     // Type of bid submitted
+	TimestampMs int64   `json:"timestamp_ms"` // Unix timestamp in milliseconds when bid was submitted
 }
 
 // PhaseState represents persisted phase execution state for restart resilience (M3.5).
@@ -153,6 +154,7 @@ type PhaseState struct {
 	GrantedAgents []string           `json:"granted_agents"`  // Agents granted in this phase
 	Received      map[string]string  `json:"received"`        // agentRole → artefactID (received artefacts)
 	AllBids       map[string]BidType `json:"all_bids"`        // agentName → bidType (all original bids)
+	BidTimestamps map[string]int64   `json:"bid_timestamps"`  // agentName → timestampMs (when bids were received)
 	StartTimeMs   int64              `json:"start_time_ms"`   // M3.9: Unix timestamp in milliseconds when phase started
 }
 
