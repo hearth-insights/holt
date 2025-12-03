@@ -14,6 +14,7 @@ import (
 	"github.com/dyluth/holt/pkg/blackboard"
 	"github.com/redis/go-redis/v9"
 	"github.com/spf13/cobra"
+	"strings"
 )
 
 var (
@@ -23,6 +24,9 @@ var (
 	hoardUntil        string
 	hoardType         string
 	hoardAgent        string
+	hoardWithSpine    bool
+	hoardFields       string
+	hoardJSON         bool
 )
 
 var hoardCmd = &cobra.Command{
@@ -40,6 +44,7 @@ Get Mode (with ARTEFACT_ID):
 Output Formats (list mode only):
   default - Human-readable table with ID, Type, Produced By, and Payload
   jsonl   - Line-delimited JSON, one artefact per line
+  --json  - Pretty-printed JSON array (customizable with --fields)
 
 Time Filters (list mode only):
   --since  - Show artefacts created after this time
@@ -48,6 +53,10 @@ Time Filters (list mode only):
 Content Filters (list mode only):
   --type   - Filter by artefact type (glob pattern: "Code*", "*Result")
   --agent  - Filter by agent role (exact match: "coder", "reviewer")
+
+Spine & Fields (list mode only):
+  --with-spine - Include system spine (config hash/git commit) in output
+  --fields     - Comma-separated list of fields to include in JSON output (e.g. "id,type,spine")
 
 Examples:
   # List all artefacts
@@ -63,7 +72,13 @@ Examples:
   holt hoard abc123
 
   # Filter by agent
-  holt hoard --agent=reviewer --since="2025-10-29T00:00:00Z"`,
+  holt hoard --agent=reviewer --since="2025-10-29T00:00:00Z"
+
+  # Show spine details
+  holt hoard --with-spine
+
+  # Custom JSON output
+  holt hoard --json --fields=id,type,spine`,
 	RunE: runHoard,
 }
 
@@ -79,6 +94,11 @@ func init() {
 	hoardCmd.Flags().StringVar(&hoardType, "type", "", "Filter by artefact type (glob pattern)")
 	hoardCmd.Flags().StringVar(&hoardAgent, "agent", "", "Filter by agent role (exact match)")
 
+	// New flags
+	hoardCmd.Flags().BoolVar(&hoardWithSpine, "with-spine", false, "Include system spine details")
+	hoardCmd.Flags().StringVar(&hoardFields, "fields", "", "Comma-separated list of fields for JSON output")
+	hoardCmd.Flags().BoolVar(&hoardJSON, "json", false, "Output as JSON array")
+
 	rootCmd.AddCommand(hoardCmd)
 }
 
@@ -91,17 +111,21 @@ func runHoard(cmd *cobra.Command, args []string) error {
 	// Validate output format (only applies to list mode)
 	var outputFormat hoard.OutputFormat
 	if !isGetMode {
-		switch hoardOutputFormat {
-		case "default":
-			outputFormat = hoard.OutputFormatDefault
-		case "jsonl":
-			outputFormat = hoard.OutputFormatJSONL
-		default:
-			return printer.Error(
-				"invalid output format",
-				fmt.Sprintf("Unknown format: %s", hoardOutputFormat),
-				[]string{"Valid formats: default, jsonl"},
-			)
+		if hoardJSON {
+			outputFormat = "json"
+		} else {
+			switch hoardOutputFormat {
+			case "default":
+				outputFormat = hoard.OutputFormatDefault
+			case "jsonl":
+				outputFormat = hoard.OutputFormatJSONL
+			default:
+				return printer.Error(
+					"invalid output format",
+					fmt.Sprintf("Unknown format: %s", hoardOutputFormat),
+					[]string{"Valid formats: default, jsonl"},
+				)
+			}
 		}
 	}
 
@@ -243,8 +267,26 @@ func runHoard(cmd *cobra.Command, args []string) error {
 			AgentRole:        hoardAgent,
 		}
 
+		// Parse fields
+		var fields []string
+		if hoardFields != "" {
+			// Split by comma
+			importStrings := strings.Split(hoardFields, ",")
+			for _, f := range importStrings {
+				fields = append(fields, strings.TrimSpace(f))
+			}
+		}
+
+		// Build list options
+		opts := &hoard.ListOptions{
+			Filters:   filterCriteria,
+			Format:    outputFormat,
+			WithSpine: hoardWithSpine,
+			Fields:    fields,
+		}
+
 		// List artefacts with filtering
-		err = hoard.ListArtefacts(ctx, bbClient, targetInstanceName, outputFormat, filterCriteria, os.Stdout)
+		err = hoard.ListArtefacts(ctx, bbClient, targetInstanceName, opts, os.Stdout)
 		if err != nil {
 			return fmt.Errorf("failed to list artefacts: %w", err)
 		}

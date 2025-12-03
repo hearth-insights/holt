@@ -117,7 +117,10 @@ func (e *Engine) CheckReviewPhaseCompletion(ctx context.Context, claim *blackboa
 	})
 
 	// M4.2: Check breakpoints after review consensus (before decision)
-	targetArtefact, _ := e.client.GetArtefact(ctx, claim.ArtefactID)
+	targetArtefact, err := e.client.GetArtefact(ctx, claim.ArtefactID)
+	if err != nil {
+		return fmt.Errorf("failed to fetch target artefact for breakpoint evaluation: %w", err)
+	}
 	e.evaluateBreakpointsAndPause(ctx, targetArtefact, claim, debug.EventReviewConsensusReached)
 
 	// M4.2: Re-fetch claim after potential debugger pause (may have been terminated)

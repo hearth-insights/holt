@@ -128,6 +128,15 @@ jobs:
 
       - name: Zip Independent Clan Docs
         run: |
+          # Calculate version info
+          VERSION=$(git describe --tags --always --dirty)
+          COMMIT=$(git rev-parse --short HEAD)
+          DATE=$(date -u '+%Y-%m-%d_%H:%M:%S')
+          METADATA="Version: $VERSION\nCommit: $COMMIT\nDate: $DATE"
+          
+          # Inject into README
+          sed -i "s/{{VERSION_METADATA}}/$METADATA/g" docs/independent-holt-clan-creation/README.md
+          
           cp scripts/download-holt.sh docs/independent-holt-clan-creation/
           zip -r independent-clan-docs.zip docs/independent-holt-clan-creation
 

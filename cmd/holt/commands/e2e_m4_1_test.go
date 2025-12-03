@@ -164,7 +164,7 @@ services:
 	originalClaim, err := bbClient.GetClaimByArtefactID(ctx, goalArtefact.ID)
 	require.NoError(t, err)
 	require.Equal(t, blackboard.ClaimStatusTerminated, originalClaim.Status)
-	require.Contains(t, originalClaim.TerminationReason, "missing agent")
+	require.Contains(t, originalClaim.TerminationReason, "Agent asked a clarifying question")
 	t.Logf("✓ Original claim terminated: %s", originalClaim.TerminationReason)
 
 	// Step 7: Run `holt questions` to list the question

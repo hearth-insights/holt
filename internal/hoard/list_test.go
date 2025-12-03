@@ -29,7 +29,7 @@ func TestListArtefacts(t *testing.T) {
 
 		// List artefacts
 		var buf bytes.Buffer
-		err = ListArtefacts(ctx, bbClient, "test-instance", OutputFormatDefault, nil, &buf)
+		err = ListArtefacts(ctx, bbClient, "test-instance", &ListOptions{Format: OutputFormatDefault}, &buf)
 		require.NoError(t, err)
 
 		output := buf.String()
@@ -50,7 +50,7 @@ func TestListArtefacts(t *testing.T) {
 
 		// List artefacts
 		var buf bytes.Buffer
-		err = ListArtefacts(ctx, bbClient, "test-instance", OutputFormatJSONL, nil, &buf)
+		err = ListArtefacts(ctx, bbClient, "test-instance", &ListOptions{Format: OutputFormatJSONL}, &buf)
 		require.NoError(t, err)
 
 		// JSONL format should be empty for no artefacts
@@ -84,7 +84,7 @@ func TestListArtefacts(t *testing.T) {
 
 		// List artefacts
 		var buf bytes.Buffer
-		err = ListArtefacts(ctx, bbClient, "test-instance", OutputFormatDefault, nil, &buf)
+		err = ListArtefacts(ctx, bbClient, "test-instance", &ListOptions{Format: OutputFormatDefault}, &buf)
 		require.NoError(t, err)
 
 		output := buf.String()
@@ -139,7 +139,7 @@ func TestListArtefacts(t *testing.T) {
 
 		// List artefacts
 		var buf bytes.Buffer
-		err = ListArtefacts(ctx, bbClient, "test-instance", OutputFormatDefault, nil, &buf)
+		err = ListArtefacts(ctx, bbClient, "test-instance", &ListOptions{Format: OutputFormatDefault}, &buf)
 		require.NoError(t, err)
 
 		output := buf.String()
@@ -190,7 +190,7 @@ func TestListArtefacts(t *testing.T) {
 
 		// List artefacts
 		var buf bytes.Buffer
-		err = ListArtefacts(ctx, bbClient, "test-instance", OutputFormatJSONL, nil, &buf)
+		err = ListArtefacts(ctx, bbClient, "test-instance", &ListOptions{Format: OutputFormatJSONL}, &buf)
 		require.NoError(t, err)
 
 		// Parse JSONL (one JSON object per line)
@@ -265,7 +265,7 @@ func TestListArtefacts(t *testing.T) {
 
 		// List artefacts in JSON format for easy verification
 		var buf bytes.Buffer
-		err = ListArtefacts(ctx, bbClient, "test-instance", OutputFormatJSONL, nil, &buf)
+		err = ListArtefacts(ctx, bbClient, "test-instance", &ListOptions{Format: OutputFormatJSONL}, &buf)
 		require.NoError(t, err)
 
 		// Parse JSONL
@@ -300,7 +300,7 @@ func TestListArtefacts(t *testing.T) {
 
 		// Try with invalid format
 		var buf bytes.Buffer
-		err = ListArtefacts(ctx, bbClient, "test-instance", OutputFormat("invalid"), nil, &buf)
+		err = ListArtefacts(ctx, bbClient, "test-instance", &ListOptions{Format: OutputFormat("invalid")}, &buf)
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "unknown output format")
@@ -338,7 +338,7 @@ func TestListArtefacts(t *testing.T) {
 
 		// List artefacts - should skip malformed one
 		var buf bytes.Buffer
-		err = ListArtefacts(ctx, bbClient, "test-instance", OutputFormatJSONL, nil, &buf)
+		err = ListArtefacts(ctx, bbClient, "test-instance", &ListOptions{Format: OutputFormatJSONL}, &buf)
 		require.NoError(t, err)
 
 		// Parse JSONL - should only have the valid artefact
@@ -380,7 +380,7 @@ func TestListArtefacts(t *testing.T) {
 
 		// List in default format - payload should be truncated
 		var buf bytes.Buffer
-		err = ListArtefacts(ctx, bbClient, "test-instance", OutputFormatDefault, nil, &buf)
+		err = ListArtefacts(ctx, bbClient, "test-instance", &ListOptions{Format: OutputFormatDefault}, &buf)
 		require.NoError(t, err)
 
 		output := buf.String()
@@ -391,7 +391,7 @@ func TestListArtefacts(t *testing.T) {
 
 		// List in JSON format - payload should be preserved
 		buf.Reset()
-		err = ListArtefacts(ctx, bbClient, "test-instance", OutputFormatJSONL, nil, &buf)
+		err = ListArtefacts(ctx, bbClient, "test-instance", &ListOptions{Format: OutputFormatJSONL}, &buf)
 		require.NoError(t, err)
 
 		// Parse JSONL

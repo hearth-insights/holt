@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/dyluth/holt/pkg/blackboard"
@@ -304,18 +305,33 @@ func TestHandleQuestionArtefact_UserRole(t *testing.T) {
 	err = client.CreateArtefact(ctx, questionArtefact)
 	require.NoError(t, err)
 
-	// Handle the Question - since "user" role is not in registry, this will terminate with missing agent
+	// Subscribe BEFORE action to catch the event
+	streamKey := fmt.Sprintf("holt:%s:workflow_events", engine.instanceName)
+	pubsub := client.GetRedisClient().Subscribe(ctx, streamKey)
+	defer pubsub.Close()
+	// Wait for subscription to be established
+	_, err = pubsub.Receive(ctx)
+	require.NoError(t, err)
+
+	// Handle the Question - should publish event and return nil (no feedback claim)
 	err = engine.handleQuestionArtefact(ctx, questionArtefact)
 	require.NoError(t, err)
 
-	// Verify: Claim should be terminated with missing agent error
+	// Verify: Claim should be terminated (question asked)
 	claim, err := client.GetClaim(ctx, targetClaim.ID)
 	require.NoError(t, err)
 	assert.Equal(t, blackboard.ClaimStatusTerminated, claim.Status)
-	assert.Contains(t, claim.TerminationReason, "missing agent")
+	assert.Contains(t, claim.TerminationReason, "clarifying question")
 
-	// Verify: No feedback claim created (user role doesn't exist)
+	// Verify: No feedback claim created
 	assert.Len(t, engine.pendingAssignmentClaims, 0)
+
+	// Verify: human_input_required event published
+	msg, err := pubsub.ReceiveMessage(ctx)
+	require.NoError(t, err)
+	
+	// The payload is the JSON of WorkflowEvent struct
+	assert.Contains(t, msg.Payload, "human_input_required")
 }
 
 // TestFindClaimByProducedArtefact tests claim lookup by artefact

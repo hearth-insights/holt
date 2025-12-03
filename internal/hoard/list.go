@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/dyluth/holt/internal/spine"
 	"github.com/dyluth/holt/pkg/blackboard"
 )
 
@@ -57,16 +58,26 @@ func (fc *FilterCriteria) matchesFilter(art *blackboard.Artefact) bool {
 	return true
 }
 
+// ListOptions defines all options for listing artefacts.
+type ListOptions struct {
+	Filters   *FilterCriteria
+	Format    OutputFormat
+	WithSpine bool
+	Fields    []string
+}
+
 // ListArtefacts retrieves all artefacts for an instance and writes them to the provided writer.
 // Uses Redis SCAN to iterate over artefact keys without blocking the server.
 // Applies filter criteria if provided. Sorts artefacts by creation time for stable output.
 // Skips malformed artefacts with a warning to stderr but continues processing.
-func ListArtefacts(ctx context.Context, bbClient *blackboard.Client, instanceName string, format OutputFormat, filters *FilterCriteria, w io.Writer) error {
+func ListArtefacts(ctx context.Context, bbClient *blackboard.Client, instanceName string, opts *ListOptions, w io.Writer) error {
 	// Scan for all artefact keys using Redis SCAN
 	pattern := fmt.Sprintf("holt:%s:artefact:*", instanceName)
 	iter := bbClient.RedisClient().Scan(ctx, 0, pattern, 0).Iterator()
 
 	var artefacts []*blackboard.Artefact
+	spineCache := make(map[string]*spine.SpineInfo)
+	spineInfos := make(map[string]*spine.SpineInfo) // Map of artefactID -> SpineInfo
 
 	// Iterate over all matching keys
 	for iter.Next(ctx) {
@@ -84,8 +95,20 @@ func ListArtefacts(ctx context.Context, bbClient *blackboard.Client, instanceNam
 		}
 
 		// Apply filters if provided
-		if filters != nil && !filters.matchesFilter(artefact) {
+		if opts.Filters != nil && !opts.Filters.matchesFilter(artefact) {
 			continue
+		}
+
+		// Resolve spine if requested
+		if opts.WithSpine {
+			spineInfo, err := spine.ResolveSpine(ctx, bbClient, artefact, spineCache)
+			if err != nil {
+				// Log error but continue? Or fail?
+				// Let's log warning and continue with detached spine
+				fmt.Fprintf(os.Stderr, "⚠️  Failed to resolve spine for artefact %s: %v\n", artefact.ID, err)
+			} else {
+				spineInfos[artefact.ID] = spineInfo
+			}
 		}
 
 		artefacts = append(artefacts, artefact)
@@ -102,15 +125,29 @@ func ListArtefacts(ctx context.Context, bbClient *blackboard.Client, instanceNam
 	})
 
 	// Format output based on requested format
-	switch format {
+	switch opts.Format {
 	case OutputFormatDefault:
-		FormatTable(w, artefacts, instanceName)
+		FormatTable(w, artefacts, spineInfos, instanceName)
 	case OutputFormatJSONL:
+		// JSONL doesn't support custom fields in this implementation yet, or we should update it?
+		// The design said "holt hoard --json" which implies a new format.
+		// Existing JSONL probably just dumps the artefact.
+		// Let's keep JSONL as is for backward compatibility unless fields are requested?
+		// But --fields is likely paired with --json (array).
+		// If user does --output=jsonl --fields=..., we should probably support it.
+		// But for now let's stick to the plan: --json is a new flag/format.
 		if err := FormatJSONL(w, artefacts); err != nil {
 			return fmt.Errorf("failed to format JSONL output: %w", err)
 		}
+	case "json": // New format for --json flag
+		data, err := FormatJSON(artefacts, spineInfos, opts.Fields)
+		if err != nil {
+			return fmt.Errorf("failed to format JSON output: %w", err)
+		}
+		w.Write(data)
+		w.Write([]byte("\n"))
 	default:
-		return fmt.Errorf("unknown output format: %s", format)
+		return fmt.Errorf("unknown output format: %s", opts.Format)
 	}
 
 	return nil

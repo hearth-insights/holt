@@ -14,6 +14,8 @@ import (
 //
 // M3.3: Called when review phase detects rejection feedback.
 func (e *Engine) CreateFeedbackClaim(ctx context.Context, originalClaim *blackboard.Claim, feedbackArtefacts []*blackboard.Artefact) error {
+	log.Printf("[Orchestrator] Creating feedback claim for claim %s with %d feedback artefacts", originalClaim.ID, len(feedbackArtefacts))
+
 	// Fetch the original artefact that was reviewed
 	targetArtefact, err := e.client.GetArtefact(ctx, originalClaim.ArtefactID)
 	if err != nil {

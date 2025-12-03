@@ -4,14 +4,14 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 
 	"github.com/dyluth/holt/pkg/blackboard"
 	"github.com/google/uuid"
 )
 
-// GetArtefact retrieves a single artefact by ID and writes it as pretty-printed JSON to the writer.
-// Returns an error if the artefact ID is invalid or the artefact does not exist.
-// Uses IsNotFound() to distinguish "not found" errors from other errors.
+// GetArtefact retrieves a single artefact by ID and prints it as JSON.
+// Resolves short IDs if needed.
 func GetArtefact(ctx context.Context, bbClient *blackboard.Client, artefactID string, w io.Writer) error {
 	// Validate artefact ID format
 	// Allow UUID (36 chars) or SHA-256 Hash (64 chars)
@@ -39,8 +39,15 @@ func GetArtefact(ctx context.Context, bbClient *blackboard.Client, artefactID st
 		return fmt.Errorf("failed to fetch artefact: %w", err)
 	}
 
+	// Resolve relationships
+	relationships, err := ResolveRelationships(ctx, bbClient, artefact)
+	if err != nil {
+		// Log warning to stderr but continue
+		fmt.Fprintf(os.Stderr, "⚠️  Failed to resolve relationships: %v\n", err)
+	}
+
 	// Format and write as JSON
-	if err := FormatSingleJSON(w, artefact); err != nil {
+	if err := FormatSingleJSON(w, artefact, relationships); err != nil {
 		return fmt.Errorf("failed to format artefact: %w", err)
 	}
 

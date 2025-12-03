@@ -90,6 +90,16 @@ func (e *Engine) handleQuestionArtefact(ctx context.Context, questionArtefact *b
 
 	log.Printf("[Orchestrator] Claim %s terminated: agent asked question %s", originalClaim.ID, questionArtefact.ID)
 
+	// M4.1: Special handling for questions targeting "user"
+	if targetArtefact.ProducedByRole == "user" {
+		if err := e.publishHumanInputRequiredEvent(ctx, questionArtefact.ID, payload.QuestionText, targetArtefact.ID); err != nil {
+			log.Printf("[Orchestrator] Failed to publish human_input_required event: %v", err)
+		}
+		// For user targets, we don't create a feedback claim or look up an agent.
+		// The event signals external intervention is needed.
+		return nil
+	}
+
 	// Find the agent that produced the target artefact
 	producerAgent, err := e.findAgentByRole(targetArtefact.ProducedByRole)
 	if err != nil {
@@ -126,13 +136,6 @@ func (e *Engine) handleQuestionArtefact(ctx context.Context, questionArtefact *b
 
 	// Track feedback claim for completion checking
 	e.pendingAssignmentClaims[feedbackClaim.ID] = targetArtefact.ID
-
-	// M4.1: If target role is "user", publish human_input_required event
-	if targetArtefact.ProducedByRole == "user" {
-		if err := e.publishHumanInputRequiredEvent(ctx, questionArtefact.ID, payload.QuestionText, targetArtefact.ID); err != nil {
-			log.Printf("[Orchestrator] Failed to publish human_input_required event: %v", err)
-		}
-	}
 
 	return nil
 }
