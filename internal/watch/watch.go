@@ -140,7 +140,7 @@ func StreamActivity(ctx context.Context, client *blackboard.Client, instanceName
 		}
 
 		// Connection error - attempt reconnection
-		fmt.Fprintf(writer, "⚠️  Connection to blackboard lost. Reconnecting...\n")
+		fmt.Fprintf(writer, "⚠️  Connection to blackboard lost: %v. Reconnecting...\n", err)
 
 		// Try to reconnect with timeout
 		reconnectCtx, cancel := context.WithTimeout(ctx, 60*time.Second)

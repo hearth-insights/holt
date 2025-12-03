@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 
 	dockerpkg "github.com/dyluth/holt/internal/docker"
@@ -23,6 +24,7 @@ var (
 	watchType             string
 	watchAgent            string
 	watchExitOnCompletion bool
+	watchDebugRedis       bool
 )
 
 var watchCmd = &cobra.Command{
@@ -79,6 +81,7 @@ func init() {
 
 	// Behavior flags
 	watchCmd.Flags().BoolVar(&watchExitOnCompletion, "exit-on-completion", false, "Exit with code 0 when Terminal artefact detected")
+	watchCmd.Flags().BoolVar(&watchDebugRedis, "debug-redis", false, "Enable verbose Redis debug logging")
 
 	rootCmd.AddCommand(watchCmd)
 }
@@ -160,6 +163,22 @@ func runWatch(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to parse Redis URL: %w", err)
 	}
 
+	// Debug logging for Redis
+	if watchDebugRedis {
+		// Enable internal Redis logging
+		rLogger := &redisLogger{Logger: log.New(os.Stderr, "REDIS: ", log.LstdFlags|log.Lmicroseconds)}
+		redis.SetLogger(rLogger)
+
+		fmt.Fprintf(os.Stderr, "🔍 Redis Debug Info:\n")
+		fmt.Fprintf(os.Stderr, "  URL: %s\n", redisURL)
+		fmt.Fprintf(os.Stderr, "  ReadTimeout: %v\n", redisOpts.ReadTimeout)
+		fmt.Fprintf(os.Stderr, "  WriteTimeout: %v\n", redisOpts.WriteTimeout)
+		fmt.Fprintf(os.Stderr, "  PoolSize: %d\n", redisOpts.PoolSize)
+		fmt.Fprintf(os.Stderr, "  MinIdleConns: %d\n", redisOpts.MinIdleConns)
+		fmt.Fprintf(os.Stderr, "  ConnMaxIdleTime: %v\n", redisOpts.ConnMaxIdleTime)
+		fmt.Fprintf(os.Stderr, "  ConnMaxLifetime: %v\n", redisOpts.ConnMaxLifetime)
+	}
+
 	bbClient, err := blackboard.NewClient(redisOpts, targetInstanceName)
 	if err != nil {
 		return fmt.Errorf("failed to create blackboard client: %w", err)
@@ -205,4 +224,13 @@ func runWatch(cmd *cobra.Command, args []string) error {
 // Returns (sinceMS, untilMS, error).
 func parseTimeFilters() (int64, int64, error) {
 	return timespec.ParseRange(watchSince, watchUntil)
+}
+
+// redisLogger wraps log.Logger to satisfy redis.internal.Logging interface
+type redisLogger struct {
+	*log.Logger
+}
+
+func (l *redisLogger) Printf(ctx context.Context, format string, v ...interface{}) {
+	l.Logger.Printf(format, v...)
 }

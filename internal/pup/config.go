@@ -40,6 +40,10 @@ type Config struct {
 
 	// BidScript is the command array to execute for dynamic bidding (from HOLT_AGENT_BID_SCRIPT)
 	BidScript []string
+
+	// MaxContextDepth is the maximum depth for context assembly BFS (from HOLT_MAX_CONTEXT_DEPTH)
+	// Defaults to 10 if not set.
+	MaxContextDepth int
 }
 
 // LoadConfig reads and validates configuration from environment variables.
@@ -48,9 +52,10 @@ type Config struct {
 // at startup before any resources are allocated.
 func LoadConfig() (*Config, error) {
 	cfg := &Config{
-		InstanceName: os.Getenv("HOLT_INSTANCE_NAME"),
-		AgentName:    os.Getenv("HOLT_AGENT_NAME"), // M3.7: This IS the role
-		RedisURL:     os.Getenv("REDIS_URL"),
+		InstanceName:    os.Getenv("HOLT_INSTANCE_NAME"),
+		AgentName:       os.Getenv("HOLT_AGENT_NAME"), // M3.7: This IS the role
+		RedisURL:        os.Getenv("REDIS_URL"),
+		MaxContextDepth: 10, // Default value
 	}
 
 	// Parse command array from JSON
@@ -78,6 +83,16 @@ func LoadConfig() (*Config, error) {
 			// We want to enforce the breaking change everywhere.
 			return nil, fmt.Errorf("failed to parse HOLT_BIDDING_STRATEGY as JSON object: %w", err)
 		}
+	}
+
+	// Parse max context depth
+	maxContextDepthStr := os.Getenv("HOLT_MAX_CONTEXT_DEPTH")
+	if maxContextDepthStr != "" {
+		var depth int
+		if _, err := fmt.Sscanf(maxContextDepthStr, "%d", &depth); err != nil {
+			return nil, fmt.Errorf("invalid HOLT_MAX_CONTEXT_DEPTH: %w", err)
+		}
+		cfg.MaxContextDepth = depth
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -123,6 +138,10 @@ func (c *Config) Validate() error {
 		}
 	} else {
 		log.Printf("[WARN] No static bidding_strategy configured for agent %s, relying entirely on bid_script", c.AgentName)
+	}
+
+	if c.MaxContextDepth <= 0 {
+		return fmt.Errorf("HOLT_MAX_CONTEXT_DEPTH must be a positive integer")
 	}
 
 	return nil

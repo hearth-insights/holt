@@ -384,6 +384,30 @@ func (c *Client) GetLatestVersion(ctx context.Context, logicalID string) (artefa
 	return artefactID, version, nil
 }
 
+// GetFirstVersion retrieves the artefact ID of the first version (lowest score) in a thread.
+// Returns ("", 0, redis.Nil) if the thread doesn't exist or is empty.
+// Used for "Direct V1 Link" strategy to recover original context from reworked artefacts.
+func (c *Client) GetFirstVersion(ctx context.Context, logicalID string) (artefactID string, version int, err error) {
+	key := ThreadKey(c.instanceName, logicalID)
+
+	// Get the member with the lowest score (ZRANGE with limit 1)
+	results, err := c.rdb.ZRangeWithScores(ctx, key, 0, 0).Result()
+	if err != nil {
+		return "", 0, fmt.Errorf("failed to get first version from thread: %w", err)
+	}
+
+	// Check if thread is empty
+	if len(results) == 0 {
+		return "", 0, redis.Nil
+	}
+
+	// Extract artefact ID and version
+	artefactID = results[0].Member.(string)
+	version = VersionFromScore(results[0].Score)
+
+	return artefactID, version, nil
+}
+
 // Subscription represents an active Pub/Sub subscription to artefact events.
 // Caller must call Close() when done to clean up resources.
 // Subscriptions deliver full artefact objects via the Events() channel.
@@ -494,6 +518,9 @@ func (c *Client) SubscribeArtefactEvents(ctx context.Context) (*Subscription, er
 	// Create cancellation context
 	subCtx, cancelFunc := context.WithCancel(ctx)
 
+	// Start keep-alive goroutine to prevent idle timeouts
+	go c.keepAlive(subCtx, pubsub)
+
 	// Start goroutine to process messages
 	go func() {
 		defer close(eventsChan)
@@ -560,6 +587,9 @@ func (c *Client) SubscribeClaimEvents(ctx context.Context) (*ClaimSubscription, 
 	// Create cancellation context
 	subCtx, cancelFunc := context.WithCancel(ctx)
 
+	// Start keep-alive goroutine to prevent idle timeouts
+	go c.keepAlive(subCtx, pubsub)
+
 	// Start goroutine to process messages
 	go func() {
 		defer close(eventsChan)
@@ -625,6 +655,9 @@ func (c *Client) SubscribeWorkflowEvents(ctx context.Context) (*WorkflowSubscrip
 
 	// Create cancellation context
 	subCtx, cancelFunc := context.WithCancel(ctx)
+
+	// Start keep-alive goroutine to prevent idle timeouts
+	go c.keepAlive(subCtx, pubsub)
 
 	// Start goroutine to process messages
 	go func() {
@@ -707,6 +740,9 @@ func (c *Client) SubscribeRawChannel(ctx context.Context, channel string) (*RawS
 
 	// Create cancellation context
 	subCtx, cancelFunc := context.WithCancel(ctx)
+
+	// Start keep-alive goroutine to prevent idle timeouts
+	go c.keepAlive(subCtx, pubsub)
 
 	// Start goroutine to process messages
 	go func() {
@@ -1370,4 +1406,26 @@ func (c *Client) UnlockGlobalLockdown(ctx context.Context, overrideAlert Securit
 	}
 
 	return nil
+}
+
+// keepAliveInterval is the interval between PINGs to keep the connection alive.
+// It is a variable to allow overriding in tests.
+var keepAliveInterval = 15 * time.Second
+
+// keepAlive periodically pings the PubSub connection to prevent idle timeouts.
+// This is necessary because some environments (like Docker userland proxy) close
+// idle connections after a timeout (often 60s), causing EOF errors.
+func (c *Client) keepAlive(ctx context.Context, pubsub *redis.PubSub) {
+	ticker := time.NewTicker(keepAliveInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			// Ignore error - if ping fails, the main subscription loop will likely fail too
+			_ = pubsub.Ping(ctx)
+		}
+	}
 }
