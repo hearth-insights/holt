@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"sort"
 	"sync"
 	"time"
@@ -1429,7 +1430,7 @@ func (c *Client) UnlockGlobalLockdown(ctx context.Context, overrideAlert Securit
 
 // keepAliveInterval is the interval between PINGs to keep the connection alive.
 // It is a variable to allow overriding in tests.
-var keepAliveInterval = 15 * time.Second
+var keepAliveInterval = 5 * time.Second
 
 // keepAlive periodically pings the PubSub connection to prevent idle timeouts.
 // This is necessary because some environments (like Docker userland proxy) close
@@ -1443,8 +1444,12 @@ func (c *Client) keepAlive(ctx context.Context, pubsub *redis.PubSub) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			// Ignore error - if ping fails, the main subscription loop will likely fail too
-			_ = pubsub.Ping(ctx)
+			// Send PING and log result for debugging
+			if err := pubsub.Ping(ctx); err != nil {
+				log.Printf("DEBUG: KeepAlive PING failed: %v", err)
+			} else {
+				// log.Printf("DEBUG: KeepAlive PING success") // Uncomment for very verbose logging
+			}
 		}
 	}
 }
