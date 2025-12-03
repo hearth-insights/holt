@@ -14,9 +14,9 @@ import (
 // Logs periodic waiting messages every 5 seconds if consensus not achieved.
 //
 // Returns:
-//   - map[string]blackboard.BidType: All bids received (agent_name -> bid_type)
+//   - map[string]blackboard.Bid: All bids received (agent_name -> Bid)
 //   - error: If context cancelled or Redis error
-func (e *Engine) WaitForConsensus(ctx context.Context, claimID string) (map[string]blackboard.BidType, error) {
+func (e *Engine) WaitForConsensus(ctx context.Context, claimID string) (map[string]blackboard.Bid, error) {
 	log.Printf("[Orchestrator] Waiting for consensus on claim_id=%s (expecting %d bids)", claimID, len(e.agentRegistry))
 
 	expectedBidCount := len(e.agentRegistry)
@@ -40,10 +40,10 @@ func (e *Engine) WaitForConsensus(ctx context.Context, claimID string) (map[stri
 			}
 
 			// Log any new bids that have arrived since last check
-			for agentName, bidType := range bids {
+			for agentName, bid := range bids {
 				if !seenBids[agentName] {
 					// New bid detected - log it
-					e.logBidArrival(claimID, agentName, bidType)
+					e.logBidArrival(claimID, agentName, bid.BidType)
 					seenBids[agentName] = true
 				}
 			}
@@ -90,27 +90,32 @@ func (e *Engine) logBidArrival(claimID, agentName string, bidType blackboard.Bid
 // Invalid bids are logged with warnings but do not block consensus.
 //
 // Returns a sanitized map where all invalid bids have been converted to BidTypeIgnore.
-func (e *Engine) validateAndSanitizeBids(claimID string, bids map[string]blackboard.BidType) map[string]blackboard.BidType {
-	sanitized := make(map[string]blackboard.BidType)
+func (e *Engine) validateAndSanitizeBids(claimID string, bids map[string]blackboard.Bid) map[string]blackboard.Bid {
+	sanitized := make(map[string]blackboard.Bid)
 
-	for agentName, bidType := range bids {
+	for agentName, bid := range bids {
 		// Validate bid type
-		if err := bidType.Validate(); err != nil {
+		if err := bid.BidType.Validate(); err != nil {
 			// Invalid bid - treat as ignore and log warning
 			log.Printf("[Orchestrator] WARN: Agent %s submitted invalid bid type '%s' for claim %s, treating as 'ignore'",
-				agentName, bidType, claimID)
+				agentName, bid.BidType, claimID)
 
 			e.logEvent("invalid_bid", map[string]interface{}{
 				"claim_id":     claimID,
 				"agent_name":   agentName,
-				"bid_type":     string(bidType),
+				"bid_type":     string(bid.BidType),
 				"action_taken": "treated_as_ignore",
 			})
 
-			sanitized[agentName] = blackboard.BidTypeIgnore
+			// Create sanitized bid (preserve timestamp if possible, or use original)
+			sanitized[agentName] = blackboard.Bid{
+				AgentName:   agentName,
+				BidType:     blackboard.BidTypeIgnore,
+				TimestampMs: bid.TimestampMs,
+			}
 		} else {
 			// Valid bid
-			sanitized[agentName] = bidType
+			sanitized[agentName] = bid
 		}
 	}
 

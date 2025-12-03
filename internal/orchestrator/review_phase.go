@@ -12,11 +12,11 @@ import (
 
 // GrantReviewPhase grants the claim to all agents that bid "review".
 // Updates the claim's GrantedReviewAgents field and keeps status as pending_review.
-func (e *Engine) GrantReviewPhase(ctx context.Context, claim *blackboard.Claim, bids map[string]blackboard.BidType) error {
+func (e *Engine) GrantReviewPhase(ctx context.Context, claim *blackboard.Claim, bids map[string]blackboard.Bid) error {
 	// Collect all agents with review bids
 	var reviewBidders []string
-	for agentName, bidType := range bids {
-		if bidType == blackboard.BidTypeReview {
+	for agentName, bid := range bids {
+		if bid.BidType == blackboard.BidTypeReview {
 			reviewBidders = append(reviewBidders, agentName)
 		}
 	}

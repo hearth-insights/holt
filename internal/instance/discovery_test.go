@@ -2,12 +2,14 @@ package instance
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"path/filepath"
 	"testing"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
 	dockerpkg "github.com/dyluth/holt/internal/docker"
 	"github.com/stretchr/testify/require"
@@ -214,6 +216,17 @@ func TestVerifyInstanceRunning(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("returns nil when instance containers are running", func(t *testing.T) {
+		// Cleanup any existing containers from previous runs
+		existing, _ := cli.ContainerList(ctx, types.ContainerListOptions{
+			All: true,
+			Filters: filters.NewArgs(
+				filters.Arg("label", fmt.Sprintf("%s=running-instance", dockerpkg.LabelInstanceName)),
+			),
+		})
+		for _, c := range existing {
+			_ = cli.ContainerRemove(ctx, c.ID, container.RemoveOptions{Force: true})
+		}
+
 		// Pull image if needed
 		pullImageIfNeeded(t, cli, ctx, "busybox:latest")
 
@@ -226,7 +239,7 @@ func TestVerifyInstanceRunning(t *testing.T) {
 
 		redisResp, err := cli.ContainerCreate(ctx, &container.Config{
 			Image:  "busybox:latest",
-			Cmd:    []string{"sleep", "10"},
+			Cmd:    []string{"sleep", "60"},
 			Labels: redisLabels,
 		}, nil, nil, nil, "")
 		require.NoError(t, err)
@@ -245,7 +258,7 @@ func TestVerifyInstanceRunning(t *testing.T) {
 
 		orchResp, err := cli.ContainerCreate(ctx, &container.Config{
 			Image:  "busybox:latest",
-			Cmd:    []string{"sleep", "10"},
+			Cmd:    []string{"sleep", "60"},
 			Labels: orchLabels,
 		}, nil, nil, nil, "")
 		require.NoError(t, err)

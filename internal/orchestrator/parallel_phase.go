@@ -11,11 +11,11 @@ import (
 
 // GrantParallelPhase grants the claim to all agents that bid "claim" (parallel).
 // Updates the claim's GrantedParallelAgents field and sets status to pending_parallel.
-func (e *Engine) GrantParallelPhase(ctx context.Context, claim *blackboard.Claim, bids map[string]blackboard.BidType) error {
+func (e *Engine) GrantParallelPhase(ctx context.Context, claim *blackboard.Claim, bids map[string]blackboard.Bid) error {
 	// Collect all agents with parallel bids
 	var parallelBidders []string
-	for agentName, bidType := range bids {
-		if bidType == blackboard.BidTypeParallel {
+	for agentName, bid := range bids {
+		if bid.BidType == blackboard.BidTypeParallel {
 			parallelBidders = append(parallelBidders, agentName)
 		}
 	}

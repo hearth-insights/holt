@@ -874,7 +874,7 @@ func (d *Debugger) printClaim(claimID string) {
 	bids, err := d.client.GetAllBids(d.ctx, claim.ID)
 	if err != nil {
 		printer.Warning("Failed to get bids: %v\n", err)
-		bids = make(map[string]blackboard.BidType) // Continue with empty bids
+		bids = make(map[string]blackboard.Bid) // Continue with empty bids
 	}
 
 	fmt.Println("\n" + strings.Repeat("─", 60))
@@ -890,8 +890,8 @@ func (d *Debugger) printClaim(claimID string) {
 
 		// Group bids by type
 		var reviewBids, parallelBids, exclusiveBids, ignoreBids []string
-		for agent, bidType := range bids {
-			switch bidType {
+		for agent, bid := range bids {
+			switch bid.BidType {
 			case blackboard.BidTypeReview:
 				reviewBids = append(reviewBids, agent)
 			case blackboard.BidTypeParallel:

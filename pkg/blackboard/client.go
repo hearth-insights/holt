@@ -294,7 +294,7 @@ func (c *Client) GetClaimByArtefactID(ctx context.Context, artefactID string) (*
 }
 
 // SetBid records an agent's bid on a claim and publishes a bid_submitted event.
-// Uses HSET on holt:{instance}:claim:{claim_id}:bids with key=agentName, value=bidType.
+// Uses HSET on holt:{instance}:claim:{claim_id}:bids with key=agentName, value=JSON(Bid).
 // Validates the bid type before writing.
 // Publishes bid_submitted event to workflow_events channel after successful write.
 func (c *Client) SetBid(ctx context.Context, claimID string, agentName string, bidType BidType) error {
@@ -303,17 +303,31 @@ func (c *Client) SetBid(ctx context.Context, claimID string, agentName string, b
 		return fmt.Errorf("invalid bid type: %w", err)
 	}
 
+	// Create bid object with timestamp
+	bid := Bid{
+		AgentName:   agentName,
+		BidType:     bidType,
+		TimestampMs: time.Now().UnixMilli(),
+	}
+
+	// Marshal to JSON
+	bidJSON, err := json.Marshal(bid)
+	if err != nil {
+		return fmt.Errorf("failed to marshal bid: %w", err)
+	}
+
 	// Write bid to Redis
 	key := ClaimBidsKey(c.instanceName, claimID)
-	if err := c.rdb.HSet(ctx, key, agentName, string(bidType)).Err(); err != nil {
+	if err := c.rdb.HSet(ctx, key, agentName, string(bidJSON)).Err(); err != nil {
 		return fmt.Errorf("failed to write bid to Redis: %w", err)
 	}
 
 	// Publish bid_submitted event
 	eventData := map[string]interface{}{
-		"claim_id":   claimID,
-		"agent_name": agentName,
-		"bid_type":   string(bidType),
+		"claim_id":     claimID,
+		"agent_name":   agentName,
+		"bid_type":     string(bidType),
+		"timestamp_ms": bid.TimestampMs,
 	}
 	if err := c.publishWorkflowEvent(ctx, "bid_submitted", eventData); err != nil {
 		return fmt.Errorf("failed to publish bid_submitted event: %w", err)
@@ -322,9 +336,10 @@ func (c *Client) SetBid(ctx context.Context, claimID string, agentName string, b
 	return nil
 }
 
-// GetAllBids retrieves all bids for a claim as a map of agent name to bid type.
+// GetAllBids retrieves all bids for a claim as a map of agent name to Bid struct.
 // Returns empty map if no bids exist (not an error).
-func (c *Client) GetAllBids(ctx context.Context, claimID string) (map[string]BidType, error) {
+// Expects JSON-encoded bids in Redis. Fails if data is not valid JSON.
+func (c *Client) GetAllBids(ctx context.Context, claimID string) (map[string]Bid, error) {
 	key := ClaimBidsKey(c.instanceName, claimID)
 
 	// Read all bids from Redis
@@ -333,10 +348,14 @@ func (c *Client) GetAllBids(ctx context.Context, claimID string) (map[string]Bid
 		return nil, fmt.Errorf("failed to read bids from Redis: %w", err)
 	}
 
-	// Convert string values to BidType
-	bids := make(map[string]BidType, len(rawBids))
-	for agentName, bidTypeStr := range rawBids {
-		bids[agentName] = BidType(bidTypeStr)
+	// Convert JSON values to Bid structs
+	bids := make(map[string]Bid, len(rawBids))
+	for agentName, bidJSON := range rawBids {
+		var bid Bid
+		if err := json.Unmarshal([]byte(bidJSON), &bid); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal bid for agent %s: %w", agentName, err)
+		}
+		bids[agentName] = bid
 	}
 
 	return bids, nil

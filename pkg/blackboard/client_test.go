@@ -434,7 +434,9 @@ func TestSetBid(t *testing.T) {
 		// Verify bid was written
 		bids, err := client.GetAllBids(ctx, claimID)
 		require.NoError(t, err)
-		assert.Equal(t, BidTypeReview, bids["agent1"])
+		assert.Equal(t, BidTypeReview, bids["agent1"].BidType)
+		assert.Equal(t, "agent1", bids["agent1"].AgentName)
+		assert.NotZero(t, bids["agent1"].TimestampMs)
 	})
 
 	t.Run("rejects invalid bid type", func(t *testing.T) {
@@ -459,7 +461,7 @@ func TestSetBid(t *testing.T) {
 		// Verify it was overwritten
 		bids, err := client.GetAllBids(ctx, claimID)
 		require.NoError(t, err)
-		assert.Equal(t, BidTypeExclusive, bids["agent1"])
+		assert.Equal(t, BidTypeExclusive, bids["agent1"].BidType)
 	})
 }
 
@@ -482,9 +484,9 @@ func TestGetAllBids(t *testing.T) {
 		bids, err := client.GetAllBids(ctx, claimID)
 		require.NoError(t, err)
 		assert.Len(t, bids, 3)
-		assert.Equal(t, BidTypeReview, bids["agent1"])
-		assert.Equal(t, BidTypeParallel, bids["agent2"])
-		assert.Equal(t, BidTypeIgnore, bids["agent3"])
+		assert.Equal(t, BidTypeReview, bids["agent1"].BidType)
+		assert.Equal(t, BidTypeParallel, bids["agent2"].BidType)
+		assert.Equal(t, BidTypeIgnore, bids["agent3"].BidType)
 	})
 
 	t.Run("returns empty map for no bids", func(t *testing.T) {

@@ -14,7 +14,7 @@ import (
 // M3.2: Processes review, parallel, and exclusive bids with phased execution.
 //
 // Returns error if Redis operations fail. Logs dormant claims if no bids in any phase.
-func (e *Engine) GrantClaim(ctx context.Context, claim *blackboard.Claim, bids map[string]blackboard.BidType) error {
+func (e *Engine) GrantClaim(ctx context.Context, claim *blackboard.Claim, bids map[string]blackboard.Bid) error {
 	// Determine initial phase based on bids
 	initialStatus, initialPhase := DetermineInitialPhase(bids)
 

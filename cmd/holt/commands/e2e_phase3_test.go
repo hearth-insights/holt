@@ -143,9 +143,9 @@ func TestE2E_Phase3_ThreePhaseWorkflow(t *testing.T) {
 	bids, err := env.BBClient.GetAllBids(ctx, claim.ID)
 	require.NoError(t, err, "Failed to get bids")
 	require.Len(t, bids, 3, "Expected 3 bids (one per agent)")
-	require.Equal(t, blackboard.BidTypeReview, bids["Reviewer"], "Reviewer should bid 'review'")
-	require.Equal(t, blackboard.BidTypeParallel, bids["ParallelWorker"], "Parallel worker should bid 'claim'")
-	require.Equal(t, blackboard.BidTypeExclusive, bids["Coder"], "Coder should bid 'exclusive'")
+	require.Equal(t, blackboard.BidTypeReview, bids["Reviewer"].BidType, "Reviewer should bid 'review'")
+	require.Equal(t, blackboard.BidTypeParallel, bids["ParallelWorker"].BidType, "Parallel worker should bid 'claim'")
+	require.Equal(t, blackboard.BidTypeExclusive, bids["Coder"].BidType, "Coder should bid 'exclusive'")
 	t.Logf("✓ All agents bid correctly: %v", bids)
 
 	// Step 6: Verify review phase execution

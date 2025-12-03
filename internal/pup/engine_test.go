@@ -110,7 +110,7 @@ func TestHandleClaimEvent(t *testing.T) {
 		bids, err := client.GetAllBids(ctx, claim.ID)
 		require.NoError(t, err)
 		assert.Len(t, bids, 1)
-		assert.Equal(t, blackboard.BidTypeExclusive, bids["test-agent"])
+		assert.Equal(t, blackboard.BidTypeExclusive, bids["test-agent"].BidType)
 		
 		// Verify NOT queued (only queued on grant)
 		select {

@@ -8,9 +8,9 @@ import (
 )
 
 func TestNewPhaseState(t *testing.T) {
-	bids := map[string]blackboard.BidType{
-		"agent1": blackboard.BidTypeReview,
-		"agent2": blackboard.BidTypeExclusive,
+	bids := map[string]blackboard.Bid{
+		"agent1": {AgentName: "agent1", BidType: blackboard.BidTypeReview, TimestampMs: 100},
+		"agent2": {AgentName: "agent2", BidType: blackboard.BidTypeExclusive, TimestampMs: 200},
 	}
 
 	ps := NewPhaseState("claim-123", "review", []string{"agent1"}, bids)
@@ -19,7 +19,10 @@ func TestNewPhaseState(t *testing.T) {
 	assert.Equal(t, "review", ps.Phase)
 	assert.Equal(t, []string{"agent1"}, ps.GrantedAgents)
 	assert.Empty(t, ps.ReceivedArtefacts)
-	assert.Equal(t, bids, ps.AllBids)
+	assert.Equal(t, blackboard.BidTypeReview, ps.AllBids["agent1"])
+	assert.Equal(t, blackboard.BidTypeExclusive, ps.AllBids["agent2"])
+	assert.Equal(t, int64(100), ps.BidTimestamps["agent1"])
+	assert.Equal(t, int64(200), ps.BidTimestamps["agent2"])
 	assert.False(t, ps.StartTime.IsZero())
 }
 
@@ -93,10 +96,10 @@ func TestHasBidsForPhase_NoBids(t *testing.T) {
 }
 
 func TestDetermineInitialPhase_ReviewFirst(t *testing.T) {
-	bids := map[string]blackboard.BidType{
-		"reviewer": blackboard.BidTypeReview,
-		"worker":   blackboard.BidTypeParallel,
-		"coder":    blackboard.BidTypeExclusive,
+	bids := map[string]blackboard.Bid{
+		"reviewer": {AgentName: "reviewer", BidType: blackboard.BidTypeReview},
+		"worker":   {AgentName: "worker", BidType: blackboard.BidTypeParallel},
+		"coder":    {AgentName: "coder", BidType: blackboard.BidTypeExclusive},
 	}
 
 	status, phase := DetermineInitialPhase(bids)
@@ -105,9 +108,9 @@ func TestDetermineInitialPhase_ReviewFirst(t *testing.T) {
 }
 
 func TestDetermineInitialPhase_SkipToParallel(t *testing.T) {
-	bids := map[string]blackboard.BidType{
-		"worker": blackboard.BidTypeParallel,
-		"coder":  blackboard.BidTypeExclusive,
+	bids := map[string]blackboard.Bid{
+		"worker": {AgentName: "worker", BidType: blackboard.BidTypeParallel},
+		"coder":  {AgentName: "coder", BidType: blackboard.BidTypeExclusive},
 	}
 
 	status, phase := DetermineInitialPhase(bids)
@@ -116,8 +119,8 @@ func TestDetermineInitialPhase_SkipToParallel(t *testing.T) {
 }
 
 func TestDetermineInitialPhase_SkipToExclusive(t *testing.T) {
-	bids := map[string]blackboard.BidType{
-		"coder": blackboard.BidTypeExclusive,
+	bids := map[string]blackboard.Bid{
+		"coder": {AgentName: "coder", BidType: blackboard.BidTypeExclusive},
 	}
 
 	status, phase := DetermineInitialPhase(bids)
@@ -126,9 +129,9 @@ func TestDetermineInitialPhase_SkipToExclusive(t *testing.T) {
 }
 
 func TestDetermineInitialPhase_NoBids(t *testing.T) {
-	bids := map[string]blackboard.BidType{
-		"agent1": blackboard.BidTypeIgnore,
-		"agent2": blackboard.BidTypeIgnore,
+	bids := map[string]blackboard.Bid{
+		"agent1": {AgentName: "agent1", BidType: blackboard.BidTypeIgnore},
+		"agent2": {AgentName: "agent2", BidType: blackboard.BidTypeIgnore},
 	}
 
 	status, phase := DetermineInitialPhase(bids)
@@ -137,7 +140,7 @@ func TestDetermineInitialPhase_NoBids(t *testing.T) {
 }
 
 func TestDetermineInitialPhase_EmptyBids(t *testing.T) {
-	bids := map[string]blackboard.BidType{}
+	bids := map[string]blackboard.Bid{}
 
 	status, phase := DetermineInitialPhase(bids)
 	assert.Equal(t, blackboard.ClaimStatusPendingReview, status)

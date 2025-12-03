@@ -1,6 +1,7 @@
 package watch
 
 import (
+	"bytes"
 	"context"
 	"testing"
 	"time"
@@ -388,4 +389,91 @@ type testWriter struct {
 func (w *testWriter) Write(p []byte) (n int, err error) {
 	*w.buf = append(*w.buf, p...)
 	return len(p), nil
+}
+
+func TestDisplayHistoricalArtefacts_DeterministicTimestamps(t *testing.T) {
+// Start miniredis server
+mr, err := miniredis.Run()
+require.NoError(t, err)
+defer mr.Close()
+
+ctx := context.Background()
+
+// Create blackboard client
+redisOpts := &redis.Options{
+Addr: mr.Addr(),
+}
+client, err := blackboard.NewClient(redisOpts, "test-instance")
+require.NoError(t, err)
+defer client.Close()
+
+// Create artefact
+artefactID := "test-artefact-id"
+artefact := &blackboard.Artefact{
+ID:              artefactID,
+LogicalID:       "logical-id",
+Version:         1,
+StructuralType:  blackboard.StructuralTypeStandard,
+Type:            "TestType",
+ProducedByRole:  "test-agent",
+Payload:         "test",
+SourceArtefacts: []string{},
+CreatedAtMs:     1000000, // Fixed timestamp
+}
+err = client.CreateArtefact(ctx, artefact)
+require.NoError(t, err)
+
+// Create claim with multiple bids
+claimID := "test-claim-id"
+claim := &blackboard.Claim{
+ID:                    claimID,
+ArtefactID:            artefactID,
+Status:                blackboard.ClaimStatusPendingReview,
+GrantedReviewAgents:   []string{},
+GrantedParallelAgents: []string{},
+GrantedExclusiveAgent: "",
+			PhaseState: &blackboard.PhaseState{
+				AllBids: map[string]blackboard.BidType{
+					"agent-a": blackboard.BidTypeExclusive,
+					"agent-b": blackboard.BidTypeIgnore,
+					"agent-c": blackboard.BidTypeReview,
+					"agent-d": blackboard.BidTypeParallel,
+					"agent-e": blackboard.BidTypeExclusive,
+				},
+				BidTimestamps: map[string]int64{
+					"agent-a": 1000001,
+					"agent-b": 1000002,
+					"agent-c": 1000003,
+					"agent-d": 1000004,
+					"agent-e": 1000005,
+				},
+			},
+}
+err = client.CreateClaim(ctx, claim)
+require.NoError(t, err)
+
+// Run displayHistoricalArtefacts multiple times and verify output is identical
+var firstOutput string
+
+for i := 0; i < 10; i++ {
+var buf bytes.Buffer
+formatter := &defaultFormatter{
+writer: &buf,
+client: client,
+}
+filters := &FilterCriteria{} // No filters
+
+err := displayHistoricalArtefacts(ctx, client, "test-instance", filters, formatter)
+require.NoError(t, err)
+
+currentOutput := buf.String()
+if i == 0 {
+firstOutput = currentOutput
+} else {
+if currentOutput != firstOutput {
+// Find the difference for better error reporting
+require.Equal(t, firstOutput, currentOutput, "Output mismatch on iteration %d", i)
+}
+}
+}
 }

@@ -22,9 +22,9 @@ func TestGrantReviewPhase(t *testing.T) {
 	}
 	require.NoError(t, e.client.CreateClaim(ctx, claim))
 
-	bids := map[string]blackboard.BidType{
-		"Reviewer": blackboard.BidTypeReview,
-		"Coder":    blackboard.BidTypeIgnore,
+	bids := map[string]blackboard.Bid{
+		"Reviewer": {AgentName: "Reviewer", BidType: blackboard.BidTypeReview},
+		"Coder":    {AgentName: "Coder", BidType: blackboard.BidTypeIgnore},
 	}
 
 	// Subscribe BEFORE action to catch the event
