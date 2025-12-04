@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dyluth/holt/pkg/blackboard"
+	"github.com/hearth-insights/holt/pkg/blackboard"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

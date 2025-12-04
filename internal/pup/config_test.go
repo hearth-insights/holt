@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/dyluth/holt/pkg/blackboard"
+	"github.com/hearth-insights/holt/pkg/blackboard"
 )
 
 func TestLoadConfig_Success(t *testing.T) {

@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dyluth/holt/internal/testutil"
-	"github.com/dyluth/holt/pkg/blackboard"
+	"github.com/hearth-insights/holt/internal/testutil"
+	"github.com/hearth-insights/holt/pkg/blackboard"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )

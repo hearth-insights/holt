@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/dyluth/holt/pkg/blackboard"
+	"github.com/hearth-insights/holt/pkg/blackboard"
 )
 
 // HealthServer provides HTTP health check endpoints for the orchestrator.

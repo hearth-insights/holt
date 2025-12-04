@@ -4,8 +4,8 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/dyluth/holt/internal/spine"
-	"github.com/dyluth/holt/pkg/blackboard"
+	"github.com/hearth-insights/holt/internal/spine"
+	"github.com/hearth-insights/holt/pkg/blackboard"
 )
 
 // SelectFields extracts specific fields from an artefact into a map.

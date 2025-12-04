@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dyluth/holt/internal/orchestrator/debug"
-	"github.com/dyluth/holt/pkg/blackboard"
+	"github.com/hearth-insights/holt/internal/orchestrator/debug"
+	"github.com/hearth-insights/holt/pkg/blackboard"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

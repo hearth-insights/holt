@@ -16,8 +16,8 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
-	dockerpkg "github.com/dyluth/holt/internal/docker"
-	"github.com/dyluth/holt/internal/instance"
+	dockerpkg "github.com/hearth-insights/holt/internal/docker"
+	"github.com/hearth-insights/holt/internal/instance"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

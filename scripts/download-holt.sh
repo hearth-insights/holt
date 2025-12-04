@@ -76,13 +76,13 @@ echo "Downloading binaries from $REPO ($VERSION)..."
 
 # Download holt CLI
 echo "Downloading holt CLI..."
-curl -L -o holt "$BASE_URL/$HOLT_BINARY"
+curl -f -L -o holt "$BASE_URL/$HOLT_BINARY"
 chmod +x holt
 echo "✓ holt downloaded"
 
 # Download holt-pup
 echo "Downloading holt-pup..."
-curl -L -o holt-pup "$BASE_URL/$PUP_BINARY"
+curl -f -L -o holt-pup "$BASE_URL/$PUP_BINARY"
 chmod +x holt-pup
 echo "✓ holt-pup downloaded"
 

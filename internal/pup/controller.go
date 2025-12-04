@@ -4,7 +4,7 @@ import (
 	"context"
 	"log"
 
-	"github.com/dyluth/holt/pkg/blackboard"
+	"github.com/hearth-insights/holt/pkg/blackboard"
 )
 
 // RunControllerMode runs a controller that only bids, never executes.

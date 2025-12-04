@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/dyluth/holt/internal/spine"
-	"github.com/dyluth/holt/pkg/blackboard"
+	"github.com/hearth-insights/holt/internal/spine"
+	"github.com/hearth-insights/holt/pkg/blackboard"
 )
 
 // OutputFormat specifies how to format the artefact list output.

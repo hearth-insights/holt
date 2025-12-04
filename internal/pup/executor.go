@@ -11,7 +11,7 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/dyluth/holt/pkg/blackboard"
+	"github.com/hearth-insights/holt/pkg/blackboard"
 )
 
 const (

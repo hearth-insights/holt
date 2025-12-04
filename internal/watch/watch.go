@@ -10,8 +10,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/dyluth/holt/internal/spine"
-	"github.com/dyluth/holt/pkg/blackboard"
+	"github.com/hearth-insights/holt/internal/spine"
+	"github.com/hearth-insights/holt/pkg/blackboard"
 )
 
 // OutputFormat defines the output format for watch streaming

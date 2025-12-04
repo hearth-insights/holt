@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dyluth/holt/internal/spine"
-	"github.com/dyluth/holt/pkg/blackboard"
+	"github.com/hearth-insights/holt/internal/spine"
+	"github.com/hearth-insights/holt/pkg/blackboard"
 )
 
 // FormatTable writes a list of artefacts as a human-readable table.

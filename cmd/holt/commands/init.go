@@ -3,8 +3,8 @@ package commands
 import (
 	"fmt"
 
-	"github.com/dyluth/holt/internal/git"
-	"github.com/dyluth/holt/internal/scaffold"
+	"github.com/hearth-insights/holt/internal/git"
+	"github.com/hearth-insights/holt/internal/scaffold"
 	"github.com/spf13/cobra"
 )
 

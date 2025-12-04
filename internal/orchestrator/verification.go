@@ -7,7 +7,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/dyluth/holt/pkg/blackboard"
+	"github.com/hearth-insights/holt/pkg/blackboard"
 )
 
 // convertToVerifiableArtefact converts a V1 Artefact to V2 VerifiableArtefact for verification.

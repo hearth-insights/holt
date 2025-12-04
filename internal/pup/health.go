@@ -10,8 +10,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/dyluth/holt/internal/config"
-	"github.com/dyluth/holt/pkg/blackboard"
+	"github.com/hearth-insights/holt/internal/config"
+	"github.com/hearth-insights/holt/pkg/blackboard"
 )
 
 // HealthServer provides an HTTP health check endpoint for the agent pup.

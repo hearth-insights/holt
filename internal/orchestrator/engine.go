@@ -8,10 +8,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/dyluth/holt/internal/config"
-	"github.com/dyluth/holt/internal/orchestrator/debug"
-	"github.com/dyluth/holt/internal/orchestrator/identity"
-	"github.com/dyluth/holt/pkg/blackboard"
+	"github.com/hearth-insights/holt/internal/config"
+	"github.com/hearth-insights/holt/internal/orchestrator/debug"
+	"github.com/hearth-insights/holt/internal/orchestrator/identity"
+	"github.com/hearth-insights/holt/pkg/blackboard"
 )
 
 // Engine is the core orchestrator that watches for artefacts and creates claims.

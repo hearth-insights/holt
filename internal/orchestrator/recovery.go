@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/dyluth/holt/pkg/blackboard"
+	"github.com/hearth-insights/holt/pkg/blackboard"
 )
 
 // RecoverState recovers orchestrator state from Redis after restart (M3.5).

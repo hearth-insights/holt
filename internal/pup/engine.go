@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/dyluth/holt/pkg/blackboard"
+	"github.com/hearth-insights/holt/pkg/blackboard"
 )
 
 // Engine represents the core execution logic of the agent pup.

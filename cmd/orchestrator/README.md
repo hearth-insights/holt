@@ -93,7 +93,7 @@ make build-orchestrator
 
 ```bash
 make docker-orchestrator
-docker run -e HOLT_INSTANCE_NAME=test -e REDIS_URL=redis://redis:6379 holt-orchestrator:latest
+docker run -e HOLT_INSTANCE_NAME=test -e REDIS_URL=redis://redis:6379 ghcr.io/hearth-insights/holt/holt-orchestrator:latest
 ```
 
 ## Testing

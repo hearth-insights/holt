@@ -3,7 +3,7 @@ package commands
 import (
 	"fmt"
 
-	"github.com/dyluth/holt/internal/printer"
+	"github.com/hearth-insights/holt/internal/printer"
 	"github.com/spf13/cobra"
 )
 

@@ -16,12 +16,12 @@ import (
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
-	"github.com/dyluth/holt/internal/config"
-	dockerpkg "github.com/dyluth/holt/internal/docker"
-	"github.com/dyluth/holt/internal/git"
-	"github.com/dyluth/holt/internal/instance"
-	"github.com/dyluth/holt/internal/printer"
-	"github.com/dyluth/holt/pkg/blackboard"
+	"github.com/hearth-insights/holt/internal/config"
+	dockerpkg "github.com/hearth-insights/holt/internal/docker"
+	"github.com/hearth-insights/holt/internal/git"
+	"github.com/hearth-insights/holt/internal/instance"
+	"github.com/hearth-insights/holt/internal/printer"
+	"github.com/hearth-insights/holt/pkg/blackboard"
 	"github.com/redis/go-redis/v9"
 	"github.com/spf13/cobra"
 )
@@ -275,6 +275,9 @@ func createInstance(ctx context.Context, cli *client.Client, cfg *config.HoltCon
 
 	// Step 4: Verify orchestrator image exists
 	orchestratorImage := "holt-orchestrator:latest"
+	if cfg.Orchestrator != nil && cfg.Orchestrator.Image != "" {
+		orchestratorImage = cfg.Orchestrator.Image
+	}
 	if err := verifyOrchestratorImage(ctx, cli, orchestratorImage); err != nil {
 		return err
 	}

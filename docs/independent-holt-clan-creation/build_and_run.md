@@ -71,7 +71,7 @@ docker pull ghcr.io/hearth-insights/holt/holt-orchestrator:latest
 ```
 
 ### Option B: Build Locally
-If you built from source using `make build-all`, the image `holt-orchestrator:latest` is already created.
+If you built from source using `make build-all`, the image `holt-orchestrator:latest` (and `ghcr.io/hearth-insights/holt/holt-orchestrator:latest`) is already created.
 To build just the image:
 
 ```bash

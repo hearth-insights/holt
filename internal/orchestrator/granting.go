@@ -6,8 +6,8 @@ import (
 	"log"
 	"sort"
 
-	"github.com/dyluth/holt/internal/orchestrator/debug"
-	"github.com/dyluth/holt/pkg/blackboard"
+	"github.com/hearth-insights/holt/internal/orchestrator/debug"
+	"github.com/hearth-insights/holt/pkg/blackboard"
 )
 
 // GrantClaim determines the initial phase and grants the claim accordingly.

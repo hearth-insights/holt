@@ -9,10 +9,10 @@ import (
 	"syscall"
 
 	"github.com/docker/docker/client"
-	"github.com/dyluth/holt/internal/config"
-	"github.com/dyluth/holt/internal/orchestrator"
-	"github.com/dyluth/holt/pkg/blackboard"
-	"github.com/dyluth/holt/pkg/version"
+	"github.com/hearth-insights/holt/internal/config"
+	"github.com/hearth-insights/holt/internal/orchestrator"
+	"github.com/hearth-insights/holt/pkg/blackboard"
+	"github.com/hearth-insights/holt/pkg/version"
 	"github.com/redis/go-redis/v9"
 )
 

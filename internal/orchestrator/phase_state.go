@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/dyluth/holt/pkg/blackboard"
+	"github.com/hearth-insights/holt/pkg/blackboard"
 )
 
 // PhaseState tracks the execution state of a single claim's current phase.

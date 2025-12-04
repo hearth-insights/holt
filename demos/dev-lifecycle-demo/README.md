@@ -311,4 +311,4 @@ Showing all artefacts:
 
 ## Support
 
-Issues: https://github.com/dyluth/holt/issues
+Issues: https://github.com/hearth-insights/holt/issues
