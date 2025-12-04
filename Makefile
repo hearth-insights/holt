@@ -260,7 +260,9 @@ docker-orchestrator:
 		--build-arg COMMIT=$(COMMIT) \
 		--build-arg DATE=$(BUILD_DATE) \
 		-t holt-orchestrator:latest .
+	@docker tag holt-orchestrator:latest ghcr.io/hearth-insights/holt/holt-orchestrator:latest
 	@echo "✓ Built: holt-orchestrator:latest"
+	@echo "✓ Tagged: ghcr.io/hearth-insights/holt/holt-orchestrator:latest"
 
 # Build everything (CLI + orchestrator Docker image + pup)
 build-all: build build-pup docker-orchestrator

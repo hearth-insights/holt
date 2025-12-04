@@ -275,6 +275,9 @@ func createInstance(ctx context.Context, cli *client.Client, cfg *config.HoltCon
 
 	// Step 4: Verify orchestrator image exists
 	orchestratorImage := "holt-orchestrator:latest"
+	if cfg.Orchestrator != nil && cfg.Orchestrator.Image != "" {
+		orchestratorImage = cfg.Orchestrator.Image
+	}
 	if err := verifyOrchestratorImage(ctx, cli, orchestratorImage); err != nil {
 		return err
 	}

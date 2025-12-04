@@ -12,8 +12,9 @@ import (
 
 // OrchestratorConfig specifies orchestrator behavior settings (M3.3, M4.6)
 type OrchestratorConfig struct {
-	MaxReviewIterations       *int `yaml:"max_review_iterations,omitempty"`        // How many times an artefact can be rejected and reworked (0 = unlimited, default = 3)
-	TimestampDriftToleranceMs *int `yaml:"timestamp_drift_tolerance_ms,omitempty"` // M4.6: Max allowed timestamp drift in milliseconds (default = 300000 = 5 minutes)
+	Image                     string `yaml:"image,omitempty"`                      // Docker image to use (default: holt-orchestrator:latest)
+	MaxReviewIterations       *int   `yaml:"max_review_iterations,omitempty"`      // How many times an artefact can be rejected and reworked (0 = unlimited, default = 3)
+	TimestampDriftToleranceMs *int   `yaml:"timestamp_drift_tolerance_ms,omitempty"` // M4.6: Max allowed timestamp drift in milliseconds (default = 300000 = 5 minutes)
 }
 
 // HoltConfig represents the top-level holt.yml configuration
