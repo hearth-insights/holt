@@ -3,7 +3,7 @@ package pup
 import (
 	"testing"
 
-	"github.com/dyluth/holt/pkg/blackboard"
+	"github.com/hearth-insights/holt/pkg/blackboard"
 )
 
 // TestFilterContextArtefacts verifies filtering to Standard, Answer, and Review (M3.3)

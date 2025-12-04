@@ -14,9 +14,9 @@ import (
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/client"
-	"github.com/dyluth/holt/internal/config"
-	dockerpkg "github.com/dyluth/holt/internal/docker"
-	"github.com/dyluth/holt/pkg/blackboard"
+	"github.com/hearth-insights/holt/internal/config"
+	dockerpkg "github.com/hearth-insights/holt/internal/docker"
+	"github.com/hearth-insights/holt/pkg/blackboard"
 	"github.com/google/uuid"
 )
 

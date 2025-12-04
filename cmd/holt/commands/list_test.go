@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dyluth/holt/internal/instance"
+	"github.com/hearth-insights/holt/internal/instance"
 	"github.com/stretchr/testify/assert"
 )
 

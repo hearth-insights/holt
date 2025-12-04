@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/dyluth/holt/internal/orchestrator/debug"
-	"github.com/dyluth/holt/pkg/blackboard"
+	"github.com/hearth-insights/holt/internal/orchestrator/debug"
+	"github.com/hearth-insights/holt/pkg/blackboard"
 )
 
 // TransitionToNextPhase atomically transitions a claim to the next phase.

@@ -10,9 +10,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/dyluth/holt/internal/pup"
-	"github.com/dyluth/holt/pkg/blackboard"
-	"github.com/dyluth/holt/pkg/version"
+	"github.com/hearth-insights/holt/internal/pup"
+	"github.com/hearth-insights/holt/pkg/blackboard"
+	"github.com/hearth-insights/holt/pkg/version"
 	"github.com/redis/go-redis/v9"
 )
 

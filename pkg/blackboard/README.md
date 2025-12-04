@@ -9,14 +9,14 @@ The blackboard is the central shared state system where all Holt components (orc
 ## Installation
 
 ```bash
-go get github.com/dyluth/holt/pkg/blackboard
+go get github.com/hearth-insights/holt/pkg/blackboard
 ```
 
 ## Quick Start
 
 ```go
 import (
-	"github.com/dyluth/holt/pkg/blackboard"
+	"github.com/hearth-insights/holt/pkg/blackboard"
 	"github.com/google/uuid"
 )
 
@@ -138,7 +138,7 @@ Full API documentation available via godoc:
 
 ```bash
 godoc -http=:6060
-# Navigate to localhost:6060/pkg/github.com/dyluth/holt/pkg/blackboard/
+# Navigate to localhost:6060/pkg/github.com/hearth-insights/holt/pkg/blackboard/
 ```
 
 ## License

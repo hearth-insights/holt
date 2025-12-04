@@ -1,4 +1,4 @@
-module github.com/dyluth/holt
+module github.com/hearth-insights/holt
 
 go 1.24
 

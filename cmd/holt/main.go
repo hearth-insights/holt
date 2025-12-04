@@ -3,8 +3,8 @@ package main
 import (
 	"os"
 
-	"github.com/dyluth/holt/cmd/holt/commands"
-	"github.com/dyluth/holt/pkg/version"
+	"github.com/hearth-insights/holt/cmd/holt/commands"
+	"github.com/hearth-insights/holt/pkg/version"
 )
 
 func main() {

@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"time"
 
-	dockerpkg "github.com/dyluth/holt/internal/docker"
-	"github.com/dyluth/holt/internal/instance"
-	"github.com/dyluth/holt/internal/printer"
-	"github.com/dyluth/holt/pkg/blackboard"
+	dockerpkg "github.com/hearth-insights/holt/internal/docker"
+	"github.com/hearth-insights/holt/internal/instance"
+	"github.com/hearth-insights/holt/internal/printer"
+	"github.com/hearth-insights/holt/pkg/blackboard"
 	"github.com/redis/go-redis/v9"
 	"github.com/spf13/cobra"
 )

@@ -5,7 +5,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/dyluth/holt/pkg/blackboard"
+	"github.com/hearth-insights/holt/pkg/blackboard"
 )
 
 // WaitForConsensus implements the full consensus bidding model for M3.1.

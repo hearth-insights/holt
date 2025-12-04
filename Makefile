@@ -9,7 +9,7 @@ COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
 BUILD_DATE := $(shell date -u '+%Y-%m-%d_%H:%M:%S')
 
 # Go build flags
-LDFLAGS := -ldflags "-X github.com/dyluth/holt/pkg/version.Version=$(VERSION) -X github.com/dyluth/holt/pkg/version.Commit=$(COMMIT) -X github.com/dyluth/holt/pkg/version.Date=$(BUILD_DATE)"
+LDFLAGS := -ldflags "-X github.com/hearth-insights/holt/pkg/version.Version=$(VERSION) -X github.com/hearth-insights/holt/pkg/version.Commit=$(COMMIT) -X github.com/hearth-insights/holt/pkg/version.Date=$(BUILD_DATE)"
 
 # Test flags (can be overridden)
 TEST_FLAGS ?= -v

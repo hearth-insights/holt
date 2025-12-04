@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/dyluth/holt/pkg/blackboard"
+	"github.com/hearth-insights/holt/pkg/blackboard"
 	"github.com/google/uuid"
 )
 

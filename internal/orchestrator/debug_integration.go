@@ -7,8 +7,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/dyluth/holt/internal/orchestrator/debug"
-	"github.com/dyluth/holt/pkg/blackboard"
+	"github.com/hearth-insights/holt/internal/orchestrator/debug"
+	"github.com/hearth-insights/holt/pkg/blackboard"
 	"github.com/google/uuid"
 )
 

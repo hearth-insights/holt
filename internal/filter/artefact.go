@@ -3,7 +3,7 @@ package filter
 import (
 	"path/filepath"
 
-	"github.com/dyluth/holt/pkg/blackboard"
+	"github.com/hearth-insights/holt/pkg/blackboard"
 )
 
 // Criteria defines filtering criteria for artefacts.

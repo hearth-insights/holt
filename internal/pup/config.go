@@ -6,7 +6,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/dyluth/holt/pkg/blackboard"
+	"github.com/hearth-insights/holt/pkg/blackboard"
 )
 
 // Config holds the agent pup's runtime configuration loaded from environment variables.

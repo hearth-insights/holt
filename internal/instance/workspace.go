@@ -11,7 +11,7 @@ import (
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
-	dockerpkg "github.com/dyluth/holt/internal/docker"
+	dockerpkg "github.com/hearth-insights/holt/internal/docker"
 )
 
 // GetCanonicalWorkspacePath gets the absolute, canonical workspace path from the Git repository.

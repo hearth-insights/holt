@@ -56,7 +56,7 @@ For comprehensive regulatory assurance documentation—including controls mappin
 
 ```bash
 # 1. Clone repository
-git clone https://github.com/dyluth/holt.git
+git clone https://github.com/hearth-insights/holt.git
 cd holt
 
 # 2. Build binaries
@@ -626,7 +626,7 @@ MIT License - See [LICENSE](./LICENSE) for details.
 
 ## Support
 
-- **Issues**: https://github.com/dyluth/holt/issues
+- **Issues**: https://github.com/hearth-insights/holt/issues
 - **Documentation**: Start with this README, then see `docs/`
 - **Examples**: See `agents/` directory for reference implementations
 

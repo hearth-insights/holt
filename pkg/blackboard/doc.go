@@ -28,7 +28,7 @@
 //
 // # Usage Example
 //
-//	import "github.com/dyluth/holt/pkg/blackboard"
+//	import "github.com/hearth-insights/holt/pkg/blackboard"
 //
 //	// Create an artefact
 //	artefact := &blackboard.Artefact{

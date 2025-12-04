@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/dyluth/holt/internal/orchestrator/debug"
-	"github.com/dyluth/holt/pkg/blackboard"
+	"github.com/hearth-insights/holt/internal/orchestrator/debug"
+	"github.com/hearth-insights/holt/pkg/blackboard"
 )
 
 // GrantReviewPhase grants the claim to all agents that bid "review".

@@ -15,8 +15,8 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/go-connections/nat"
-	dockerpkg "github.com/dyluth/holt/internal/docker"
-	"github.com/dyluth/holt/pkg/blackboard"
+	dockerpkg "github.com/hearth-insights/holt/internal/docker"
+	"github.com/hearth-insights/holt/pkg/blackboard"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

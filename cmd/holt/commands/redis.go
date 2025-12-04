@@ -7,9 +7,9 @@ import (
 	"strings"
 
 	"github.com/docker/docker/client"
-	"github.com/dyluth/holt/internal/config"
-	dockerpkg "github.com/dyluth/holt/internal/docker"
-	"github.com/dyluth/holt/internal/printer"
+	"github.com/hearth-insights/holt/internal/config"
+	dockerpkg "github.com/hearth-insights/holt/internal/docker"
+	"github.com/hearth-insights/holt/internal/printer"
 )
 
 // M4.4: RedisMode represents the Redis configuration mode

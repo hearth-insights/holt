@@ -7,9 +7,9 @@ import (
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
-	dockerpkg "github.com/dyluth/holt/internal/docker"
-	"github.com/dyluth/holt/internal/instance"
-	"github.com/dyluth/holt/internal/printer"
+	dockerpkg "github.com/hearth-insights/holt/internal/docker"
+	"github.com/hearth-insights/holt/internal/instance"
+	"github.com/hearth-insights/holt/internal/printer"
 	"github.com/spf13/cobra"
 )
 

@@ -13,7 +13,7 @@ import (
 	"time"
 
 	canonicaljson "github.com/gibson042/canonicaljson-go"
-	"github.com/dyluth/holt/pkg/blackboard"
+	"github.com/hearth-insights/holt/pkg/blackboard"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 )
