@@ -23,7 +23,7 @@ This file resides in the root of your project (or the directory where you run `h
 version: "1.0"
 agents:
   git-agent:
-    role: "Git Agent"
+
     image: "example-git-agent:latest"
     command: ["/app/run.sh"]
     bidding_strategy:
@@ -36,8 +36,8 @@ services:
     image: redis:7-alpine
 ```
 
-*   **agents**: A map of agent names to their configuration.
-    *   **role**: A human-readable role name.
+*   **agents**: A map of agent names (roles) to their configuration.
+    *   **key**: The agent's role (e.g., `git-agent`). The Orchestrator uses this identifier to route tasks and claims.
     *   **image**: The Docker image to use.
     *   **command**: The command to run inside the container.
     *   **workspace**: Configuration for the shared workspace. `mode: rw` means read-write access.

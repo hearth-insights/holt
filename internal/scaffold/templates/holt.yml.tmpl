@@ -1,12 +1,13 @@
 version: '1.0'
 
 # Defines the clan of agents available to the orchestrator
+orchestrator:
+  image: 'ghcr.io/hearth-insights/holt/holt-orchestrator:latest'
+
 agents:
   # Example agent demonstrating the basic structure
   example-agent:
-    # The agent's functional role for claim routing
-    # Multiple agents can share the same role
-    role: 'example'
+    # The agent's functional role is defined by its key (e.g., 'example-agent')
 
     # Docker build context
     build:
@@ -14,6 +15,15 @@ agents:
 
     # The command the pup will execute for this agent
     command: ["/usr/bin/run.sh"]
+
+    # Bidding Strategy: How the agent decides to accept work
+    # Option A: Static strategy (simplest)
+    bidding_strategy:
+      type: 'exclusive'
+      target_types: ['GoalDefined'] # Optional: limit to specific artefact types
+
+    # Option B: Dynamic script (advanced)
+    # bid_script: ["/usr/bin/bid.sh"]
 
     # Workspace mode: 'ro' for read-only, 'rw' for read-write
     workspace:
