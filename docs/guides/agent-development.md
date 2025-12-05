@@ -31,7 +31,7 @@ Holt agents are specialized, tool-equipped containers that execute work in respo
 
 - Runs as a Docker container with the **agent pup** binary as entrypoint
 - Executes a **tool script** (your custom logic) when work is assigned
-- Communicates via **stdin/stdout JSON contract**
+- Communicates via **stdin/FD 3 JSON contract**
 - Creates **immutable artefacts** as work products
 - Maintains complete **audit trail** of all actions
 
@@ -67,7 +67,7 @@ Holt agents are specialized, tool-equipped containers that execute work in respo
 │  │  - Reads JSON from stdin        │ │
 │  │  - Performs work (LLM, git,     │ │
 │  │    analysis, code generation)    │ │
-│  │  - Writes JSON to stdout        │ │
+│  │  - Writes JSON to FD 3        │ │
 │  └──────────────────────────────────┘ │
 │                                        │
 │  /workspace (mounted Git repo)        │
@@ -98,7 +98,7 @@ A core design principle in Holt is the **Principle of Least Privilege**. The typ
 
 ## Tool Contract Specification
 
-Your agent tool script must follow a strict stdin/stdout JSON contract.
+Your agent tool script must follow a strict stdin/FD 3 JSON contract.
 
 ### Input: JSON on stdin
 
@@ -158,9 +158,15 @@ When the pup executes your tool script, it passes a JSON object via stdin:
 - Provides complete historical context for informed decisions
 - **M3.3**: Review artefacts included for feedback-based iteration
 
-### Output: JSON on stdout
+### Output: JSON on FD 3
 
-Your tool script must output **exactly ONE** JSON object to stdout:
+**IMPORTANT**: Since M4.10, agents write their result JSON to **File Descriptor 3 (FD 3)**, NOT stdout.
+
+**Why FD 3?**
+- **Stdout/stderr are for logs** - Print anything! Tool output, debug messages, progress updates
+- **FD 3 is for the result** - Clean JSON only, parsed by pup
+
+Your tool script must output **exactly ONE** JSON object to FD 3:
 
 ```json
 {
@@ -234,8 +240,8 @@ echo "Goal: $goal" >&2
 # Perform work (this agent just echoes)
 result="Processed: $goal"
 
-# Output success JSON to stdout
-cat <<EOF
+# Output success JSON to FD 3
+cat <<EOF >&3
 {
   "artefact_type": "ProcessedGoal",
   "artefact_payload": "$result",
@@ -373,8 +379,8 @@ commit_hash=$(git rev-parse HEAD)
 
 echo "Committed as: $commit_hash" >&2
 
-# Output CodeCommit artefact
-cat <<EOF
+# Output CodeCommit artefact to FD 3
+cat <<EOF >&3
 {
   "artefact_type": "CodeCommit",
   "artefact_payload": "$commit_hash",
@@ -616,8 +622,8 @@ else
   echo "Fresh implementation (no feedback)" >&2
 fi
 
-# Output same format regardless
-cat <<EOF
+# Output same format regardless to FD 3
+cat <<EOF >&3
 {
   "artefact_type": "CodeCommit",
   "artefact_payload": "$commit_hash",
@@ -673,7 +679,7 @@ fi
 
 # Check precondition
 if ! command -v jq > /dev/null; then
-  cat <<EOF
+  cat <<EOF >&3
 {
   "structural_type": "Failure",
   "artefact_payload": "jq command not found - install jq in Dockerfile",
@@ -695,7 +701,7 @@ input=$(cat)
 filename=$(echo "$input" | jq -r '.target_artefact.payload')
 
 if [ -f "/workspace/$filename" ]; then
-  cat <<EOF
+  cat <<EOF >&3
 {
   "structural_type": "Failure",
   "artefact_payload": "File $filename already exists. Refusing to overwrite.",
@@ -757,8 +763,8 @@ git commit -m "[holt-agent: code-generator] Generated implementation"
 
 commit_hash=$(git rev-parse HEAD)
 
-# Output
-cat <<EOF
+# Output to FD 3
+cat <<EOF >&3
 {
   "artefact_type": "CodeCommit",
   "artefact_payload": "$commit_hash",
