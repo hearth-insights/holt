@@ -390,18 +390,14 @@ git config user.email "agent@holt.example"
 git config user.name "Holt Agent Name"
 ```
 
-**2. Stdout vs Stderr**:
-- **Stdout**: ONLY for the final JSON output that the pup reads
-- **Stderr**: ALL logging, debug output, and git command output
+**2. Stdout vs Stderr vs  FD 3 (>&3)**:
+- **Stdout**: All logging, tool output etc
+- **Stderr**: log out errors
+- **FD 3**: ONLY for the final JSON output that the pup reads >&3
 ```bash
-# Correct: Git output to stderr
-git commit -m "message" >&2
 
-# Correct: Debug logging to stderr
-echo "Processing artefact..." >&2
-
-# Correct: Final JSON to stdout (no >&2)
-cat <<EOF
+# Correct: Final JSON to FD 3 (no >&2)
+cat <<EOF >&3
 {
   "artefact_type": "RecipeYAML",
   "artefact_payload": "${commit_hash}",
@@ -412,7 +408,7 @@ EOF
 
 **3. Bid scripts**:
 - Receive full artefact as JSON on stdin
-- Output single bid type to stdout: `review`, `claim`, `exclusive`, or `ignore`
+- Output single bid type to FD 3: `review`, `claim`, `exclusive`, or `ignore`
 - Use `jq` for JSON parsing (ensure it's in Dockerfile)
 
 **4. Structural types**:

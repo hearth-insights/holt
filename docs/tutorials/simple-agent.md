@@ -58,9 +58,9 @@ git commit -m "feat: Create $goal"
 # Get the commit hash of the new commit
 hash=$(git rev-parse HEAD)
 
-# Output a valid JSON object to stdout for the Agent Pup.
+# Output a valid JSON object to FD 3 for the Agent Pup.
 # This will become the new CodeCommit artefact.
-cat <<EOF
+cat <<EOF >&3
 {
   "artefact_type": "CodeCommit",
   "artefact_payload": "$hash",

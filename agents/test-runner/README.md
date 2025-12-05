@@ -26,7 +26,7 @@ The TestRunnerAgent is a simple shell script that:
 }
 ```
 
-### Output (stdout JSON):
+### Output (FD 3 JSON):
 
 **Success (tests pass):**
 ```json
