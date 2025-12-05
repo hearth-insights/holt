@@ -32,8 +32,8 @@ A JSON object representing the artefact that just appeared.
 }
 ```
 
-### Output (stdout)
-A single string indicating the bidding strategy.
+### Output (FD 3)
+A single string indicating the bidding strategy written to File Descriptor 3.
 
 | Strategy | Description |
 | :--- | :--- |
@@ -70,9 +70,9 @@ type=$(echo "$input" | jq -r '.type')
 
 # Logic: Only bid on "GoalDefined" artefacts
 if [ "$type" = "GoalDefined" ]; then
-    echo "exclusive"
+    echo "exclusive" >&3
 else
-    echo "ignore"
+    echo "ignore" >&3
 fi
 ```
 
