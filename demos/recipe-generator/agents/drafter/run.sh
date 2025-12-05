@@ -29,7 +29,7 @@ if [ -n "$review_feedback" ]; then
 else
     # --- INITIAL DRAFT PATH ---
     echo "Drafter Agent: No feedback detected. Drafting initial recipe..." >&2
-    cat > recipe.yaml <<EOF
+    cat > recipe.yaml <<EOF >&3
 title: Spaghetti Bolognese
 prep_time: 15 minutes
 cook_time: 30 minutes
@@ -51,7 +51,7 @@ fi
 commit_hash=$(git rev-parse HEAD)
 echo "Drafter Agent: Committed changes as ${commit_hash}" >&2
 
-cat <<EOF
+cat <<EOF >&3
 {
   "artefact_type": "RecipeYAML",
   "artefact_payload": "${commit_hash}",

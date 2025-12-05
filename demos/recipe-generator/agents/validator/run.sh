@@ -23,7 +23,7 @@ if [ -n "$short_instruction" ]; then
 else
   echo "Validator Agent: Recipe looks good. Approving." >&2
   # APPROVAL: Output empty JSON object
-  cat <<EOF
+  cat <<EOF >&3
 {
   "artefact_type": "Review",
   "artefact_payload": "{}",

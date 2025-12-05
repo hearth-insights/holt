@@ -1,6 +1,6 @@
 #!/bin/sh
 # SecurityScannerAgent: Runs security scans on ChangeSet artefacts (M4.5)
-# Contract: Reads JSON from stdin, outputs Review artefact to stdout
+# Contract: Reads JSON from stdin, outputs Review artefact to FD 3 (not stdout)
 
 set -e
 
@@ -14,7 +14,7 @@ target_artefact=$(echo "$input" | jq -r '.target_artefact')
 artefact_type=$(echo "$target_artefact" | jq -r '.type')
 if [ "$artefact_type" != "ChangeSet" ]; then
     # Not a ChangeSet - ignore
-    cat <<EOF
+    cat <<EOF >&3
 {
   "artefact_type": "Review",
   "artefact_payload": "{}",
@@ -33,7 +33,7 @@ commit_hash=$(echo "$changeset_payload" | jq -r '.commit_hash')
 
 if [ -z "$commit_hash" ] || [ "$commit_hash" = "null" ]; then
     # Missing commit hash - create failure Review
-    cat <<EOF
+    cat <<EOF >&3
 {
   "artefact_type": "Review",
   "artefact_payload": "{\"security_issues\": \"ChangeSet payload missing commit_hash field\"}",
@@ -52,7 +52,7 @@ cd /workspace
 # Attempt git checkout
 if ! git checkout "$commit_hash" 2>&1 >&2; then
     # Checkout failed
-    cat <<EOF
+    cat <<EOF >&3
 {
   "artefact_type": "Review",
   "artefact_payload": "{\"security_issues\": \"Failed to checkout commit $commit_hash. Commit not found in repository.\"}",
@@ -75,7 +75,7 @@ scan_exit_code=${scan_exit_code:-0}
 if [ "$scan_exit_code" -eq 0 ]; then
     # No security issues found
     echo "[SecurityScanner] No security issues found" >&2
-    cat <<EOF
+    cat <<EOF >&3
 {
   "artefact_type": "Review",
   "artefact_payload": "{}",
@@ -105,7 +105,7 @@ else
     escaped_summary=$(echo "$issues_summary" | jq -Rs .)
 
     echo "[SecurityScanner] Found $issue_count security issues" >&2
-    cat <<EOF
+    cat <<EOF >&3
 {
   "artefact_type": "Review",
   "artefact_payload": "{\"security_issues\": $escaped_summary}",

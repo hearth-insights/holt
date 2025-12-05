@@ -25,7 +25,7 @@ tf_files=$(git show --name-only --format="" "$commit_hash" | grep '\.tf$' || tru
 if [ -z "$tf_files" ]; then
     echo "TfLint: ERROR - No .tf files found in commit" >&2
     rm -rf "$temp_dir"
-    cat <<EOF
+    cat <<EOF >&3
 {
   "artefact_type": "Review",
   "artefact_payload": "{\"error\": \"No Terraform files found in commit\"}",
@@ -72,7 +72,7 @@ if [ -n "$lint_exit" ] && [ "$lint_exit" != "0" ]; then
 else
     echo "TfLint: APPROVAL - No linting issues found" >&2
     # Empty JSON object signals approval
-    cat <<EOF
+    cat <<EOF >&3
 {
   "artefact_type": "Review",
   "artefact_payload": "{}",

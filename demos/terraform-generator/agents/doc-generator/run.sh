@@ -96,7 +96,7 @@ else
     echo "DocGenerator: Using mocked response (OPENAI_API_KEY not set)" >&2
 
     # MOCKED LLM RESPONSE: Hardcoded README.md content
-    cat > README.md <<'EOF'
+    cat > README.md <<'EOF' >&3
 # S3 Static Website Hosting Module
 
 Terraform module for provisioning an AWS S3 bucket configured for static website hosting with public access.
@@ -207,7 +207,7 @@ if [ -n "$original_branch" ] && [ "$original_branch" != "HEAD" ]; then
 fi
 
 # Output CodeCommit artefact with type "TerraformDocumentation"
-cat <<EOF
+cat <<EOF >&3
 {
   "artefact_type": "TerraformDocumentation",
   "artefact_payload": "$new_commit_hash",

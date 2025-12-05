@@ -1,6 +1,6 @@
 #!/bin/sh
 # TestRunnerAgent: Runs automated tests on ChangeSet artefacts (M4.5)
-# Contract: Reads JSON from stdin, outputs Review artefact to stdout
+# Contract: Reads JSON from stdin, outputs Review artefact to FD 3
 
 set -e
 
