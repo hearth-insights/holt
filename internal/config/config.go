@@ -85,10 +85,11 @@ type WorkspaceConfig struct {
 
 // WorkerConfig specifies worker configuration for controller-worker pattern (M3.4)
 type WorkerConfig struct {
-	Image         string           `yaml:"image"`                    // Worker image (can differ from controller)
-	MaxConcurrent int              `yaml:"max_concurrent,omitempty"` // Default: 1
-	Command       []string         `yaml:"command"`
-	Workspace     *WorkspaceConfig `yaml:"workspace,omitempty"`
+	Image          string           `yaml:"image"`                      // Worker image (can differ from controller)
+	MaxConcurrent  int              `yaml:"max_concurrent,omitempty"`   // Default: 1
+	Command        []string         `yaml:"command"`
+	Workspace      *WorkspaceConfig `yaml:"workspace,omitempty"`
+	KeepContainers bool             `yaml:"keep_containers,omitempty"` // M4.10: Retain worker containers for debugging (default: false)
 }
 
 // ResourcesConfig specifies resource limits and reservations
