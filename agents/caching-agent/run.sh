@@ -17,7 +17,8 @@ if [ "$CONTEXT_IS_DECLARED" = "false" ]; then
 	# First run - no cached context, produce checkpoint
 	echo "[caching-agent] First run - producing checkpoint with SDK docs" >&2
 
-	cat <<'EOF'
+	# M4.10: Output to FD 3
+	cat <<'EOF' >&3
 {
 	"artefact_type": "DesignSpec",
 	"artefact_payload": "Design based on first-time context discovery",
@@ -35,7 +36,8 @@ else
 	# Subsequent run - cached context available, use it
 	echo "[caching-agent] Cached run - using knowledge" >&2
 
-	cat <<'EOF'
+	# M4.10: Output to FD 3
+	cat <<'EOF' >&3
 {
 	"artefact_type": "DesignSpec",
 	"artefact_payload": "Design using cached SDK docs v2",

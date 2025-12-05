@@ -12,10 +12,12 @@ input=$(cat)
 echo "ERROR: Test agent was granted a claim, but it should always bid ignore!" >&2
 echo "This indicates a bug in the orchestrator or agent configuration." >&2
 
-# Output failure artefact
-cat <<EOF
+# M4.10: Output failure artefact to FD 3
+cat <<EOF >&3
 {
   "structural_type": "Failure",
-  "payload": "Test agent should never execute work (always bids ignore)"
+  "artefact_type": "ExecutionError",
+  "artefact_payload": "Test agent should never execute work (always bids ignore)",
+  "summary": "Test agent incorrectly executed"
 }
 EOF

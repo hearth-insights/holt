@@ -20,6 +20,15 @@ For any non-trivial task, load this core set of documents to understand the proj
 
 To supplement the core context, select from the lists below based on your specific task.
 
+### **Topic: Independent Holt Deployment (No Source Code)**
+- **`docs/independent-holt-clan-creation/`** - Complete guide for users who want to create Holt configurations and agents WITHOUT the full source code
+  - `README.md` - Overview and getting started
+  - `agent_interface.md` - The pup contract (stdin/stdout, logging)
+  - `agent_definition.md` - How to define agents in holt.yml
+  - `best_practices.md` - Agent design patterns and anti-patterns
+  - `cli_reference.md` - Complete CLI command reference
+  - `examples/` - Reference agent implementations
+
 ### **Topic: Onboarding & Contributing**
 - **`CONTRIBUTING.md`** (~1,000 tokens) - How to set up the environment and contribute.
 - **`docs/DEVELOPMENT_PROCESS.md`** (~2,000 tokens) - The mandatory design-first development lifecycle.

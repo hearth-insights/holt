@@ -10,10 +10,10 @@ input=$(cat)
 # Log to stderr (visible in agent logs)
 echo "Reviewer agent received claim, auto-approving..." >&2
 
-# Output Review artefact with approval payload
+# M4.10: Output Review artefact to FD 3 (not stdout)
 # Payload of "{}" indicates approval (no feedback)
 # Tool contract requires: artefact_type, artefact_payload, summary, structural_type
-cat <<EOF
+cat <<EOF >&3
 {
   "artefact_type": "Review",
   "artefact_payload": "{}",

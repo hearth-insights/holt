@@ -59,8 +59,8 @@ commit_hash=$(git rev-parse HEAD)
 
 echo "Commit hash: $commit_hash" >&2
 
-# Output CodeCommit JSON to stdout
-cat <<EOF
+# M4.10: Output CodeCommit JSON to FD 3 (not stdout)
+cat <<EOF >&3
 {
   "artefact_type": "CodeCommit",
   "artefact_payload": "$commit_hash",
