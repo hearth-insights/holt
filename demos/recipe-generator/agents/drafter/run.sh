@@ -29,7 +29,7 @@ if [ -n "$review_feedback" ]; then
 else
     # --- INITIAL DRAFT PATH ---
     echo "Drafter Agent: No feedback detected. Drafting initial recipe..." >&2
-    cat > recipe.yaml <<EOF >&3
+    cat > recipe.yaml <<EOF
 title: Spaghetti Bolognese
 prep_time: 15 minutes
 cook_time: 30 minutes

@@ -96,7 +96,7 @@ else
     echo "DocGenerator: Using mocked response (OPENAI_API_KEY not set)" >&2
 
     # MOCKED LLM RESPONSE: Hardcoded README.md content
-    cat > README.md <<'EOF' >&3
+    cat > README.md <<'EOF'
 # S3 Static Website Hosting Module
 
 Terraform module for provisioning an AWS S3 bucket configured for static website hosting with public access.
