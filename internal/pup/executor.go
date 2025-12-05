@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/hearth-insights/holt/pkg/blackboard"
@@ -74,13 +75,13 @@ func (e *Engine) executeWork(ctx context.Context, claim *blackboard.Claim) {
 	log.Printf("[INFO] Tool execution completed: claim_id=%s exit_code=%d duration=%s",
 		claim.ID, exitCode, duration)
 
-	// Parse tool output
-	output, err := e.parseToolOutput(stdout)
+	// Parse tool output from FD 3 (M4.10)
+	output, err := e.parseFD3Output(stdout)
 	if err != nil {
-		log.Printf("[ERROR] Failed to parse tool output: claim_id=%s error=%v stdout=%s",
+		log.Printf("[ERROR] Failed to parse FD 3 output: claim_id=%s error=%v fd3_result=%s",
 			claim.ID, err, truncate(stdout, 200))
 		e.createFailureArtefact(ctx, claim, exitCode, stdout, stderr,
-			fmt.Sprintf("Failed to parse tool output: %v", err))
+			fmt.Sprintf("Failed to parse FD 3 output: %v", err))
 		return
 	}
 
@@ -157,19 +158,20 @@ func (e *Engine) prepareToolInput(ctx context.Context, claim *blackboard.Claim, 
 }
 
 // executeToolSubprocess runs the agent command as a subprocess with timeout and output limits.
-// Returns exit code, stdout, stderr, and error.
+// M4.10: FD 3 Return Model - stdout/stderr stream to container logs, result JSON via FD 3.
 //
 // The subprocess is:
 //   - Given a 5-minute timeout via context
 //   - Run in /workspace directory
 //   - Fed input JSON via stdin (pipe closed after write)
-//   - Output captured with 10MB limit on stdout and stderr
+//   - stdout/stderr pass through to container logs (for `docker logs`)
+//   - Result JSON read from FD 3 (10MB limit)
 //
-// Returns (exitCode, stdout, stderr, error) where:
+// Returns (exitCode, fd3Result, "", error) where:
 //   - exitCode is the process exit code (0 = success, non-zero = failure, -1 = couldn't start)
-//   - stdout is the captured standard output (truncated at 10MB)
-//   - stderr is the captured standard error (truncated at 10MB)
-//   - error is non-nil if the process failed, timed out, or output exceeded limits
+//   - fd3Result is the JSON result from FD 3
+//   - third parameter is always "" (stderr is now streamed, not returned)
+//   - error is non-nil if the process failed, timed out, or FD 3 validation failed
 func (e *Engine) executeToolSubprocess(ctx context.Context, inputJSON string) (int, string, string, error) {
 	// Validate /workspace directory exists (fail-fast check)
 	if _, err := os.Stat("/workspace"); os.IsNotExist(err) {
@@ -195,24 +197,36 @@ func (e *Engine) executeToolSubprocess(ctx context.Context, inputJSON string) (i
 	// Set working directory
 	cmd.Dir = "/workspace"
 
+	// M4.10: Create pipe for FD 3 (result JSON)
+	fd3Reader, fd3Writer, err := os.Pipe()
+	if err != nil {
+		return -1, "", "", fmt.Errorf("failed to create FD 3 pipe: %w", err)
+	}
+	defer fd3Reader.Close()
+
 	// Create stdin pipe
 	stdinPipe, err := cmd.StdinPipe()
 	if err != nil {
+		fd3Writer.Close()
 		return -1, "", "", fmt.Errorf("failed to create stdin pipe: %w", err)
 	}
 
-	// Create limited readers for stdout and stderr
-	stdoutBuf := &bytes.Buffer{}
-	stderrBuf := &bytes.Buffer{}
-	cmd.Stdout = &limitedWriter{w: stdoutBuf, limit: maxOutputSize}
-	cmd.Stderr = &limitedWriter{w: stderrBuf, limit: maxOutputSize}
+	// M4.10: STREAM stdout/stderr to container (for docker logs)
+	// This is a major change - we no longer buffer these!
+	cmd.Stdout = os.Stdout // Pass through to container stdout
+	cmd.Stderr = os.Stderr // Pass through to container stderr
+
+	// M4.10: Attach FD 3 for result JSON
+	cmd.ExtraFiles = []*os.File{fd3Writer} // FD 3
+	log.Printf("[DEBUG] M4.10: Attached FD 3 for result JSON")
 
 	// Start process
 	if err := cmd.Start(); err != nil {
+		fd3Writer.Close()
 		return -1, "", "", fmt.Errorf("failed to start process: %w", err)
 	}
 
-	// Write input JSON to stdin and close pipe
+	// Write input JSON to stdin and close
 	go func() {
 		defer stdinPipe.Close()
 		if _, err := io.WriteString(stdinPipe, inputJSON); err != nil {
@@ -220,49 +234,86 @@ func (e *Engine) executeToolSubprocess(ctx context.Context, inputJSON string) (i
 		}
 	}()
 
+	// M4.10: Read result JSON from FD 3
+	// Close write end so we get EOF when agent closes it
+	fd3Writer.Close()
+
+	resultBuf := &bytes.Buffer{}
+	resultReader := &limitedReader{r: fd3Reader, limit: maxOutputSize}
+
+	// Read FD 3 in background (agent may write incrementally)
+	resultDone := make(chan error, 1)
+	go func() {
+		_, err := io.Copy(resultBuf, resultReader)
+		resultDone <- err
+	}()
+
 	// Wait for process to complete
-	err = cmd.Wait()
+	processErr := cmd.Wait()
 
-	stdout := stdoutBuf.String()
-	stderr := stderrBuf.String()
-
-	// Check for output size limit exceeded
-	if stdoutBuf.Len() >= maxOutputSize || stderrBuf.Len() >= maxOutputSize {
-		return -1, stdout, stderr, fmt.Errorf("tool output exceeded 10MB limit")
+	// Wait for FD 3 read to complete
+	if readErr := <-resultDone; readErr != nil {
+		log.Printf("[WARN] Error reading FD 3: %v", readErr)
 	}
+
+	resultJSON := resultBuf.String()
 
 	// Get exit code
 	exitCode := 0
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+	if processErr != nil {
+		if exitErr, ok := processErr.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
 		} else {
 			// Process couldn't be started or context timeout
 			if execCtx.Err() == context.DeadlineExceeded {
-				return -1, stdout, stderr, fmt.Errorf("tool execution timeout (5 minutes)")
+				return -1, "", "", fmt.Errorf("tool execution timeout (5 minutes)")
 			}
-			return -1, stdout, stderr, err
+			return -1, "", "", processErr
 		}
+	}
+
+	// M4.10: Validate FD 3 output
+	if len(resultJSON) == 0 {
+		return exitCode, "", "", fmt.Errorf("agent did not write result to FD 3. " +
+			"HINT: Use 'cat <<EOF >&3' to return JSON. See docs/AGENT_LOGGING_GUIDE.md")
+	}
+
+	// Check for output size limit
+	if resultBuf.Len() >= maxOutputSize {
+		return exitCode, "", "", fmt.Errorf("result JSON exceeded 10MB limit")
 	}
 
 	// Non-zero exit code is an error
 	if exitCode != 0 {
-		return exitCode, stdout, stderr, fmt.Errorf("process exited with code %d", exitCode)
+		return exitCode, resultJSON, "", fmt.Errorf("process exited with code %d", exitCode)
 	}
 
-	return exitCode, stdout, stderr, nil
+	// Return: exitCode, FD3 result, empty stderr (now unused), error
+	// Note: We no longer return stderr separately since it's streamed
+	return exitCode, resultJSON, "", nil
 }
 
-// parseToolOutput unmarshals and validates the tool's stdout JSON.
+// parseFD3Output unmarshals and validates the result JSON from FD 3.
+// M4.10: Renamed from parseToolOutput to clarify it reads from FD 3, not stdout.
 // Returns the parsed ToolOutput or an error if the JSON is invalid or missing required fields.
-func (e *Engine) parseToolOutput(stdout string) (*ToolOutput, error) {
-	if len(stdout) == 0 {
-		return nil, fmt.Errorf("tool produced no output on stdout")
+func (e *Engine) parseFD3Output(fd3Result string) (*ToolOutput, error) {
+	if len(fd3Result) == 0 {
+		return nil, fmt.Errorf("agent produced no output on FD 3. " +
+			"HINT: Write JSON result using 'cat <<EOF >&3'. See docs/AGENT_LOGGING_GUIDE.md")
+	}
+
+	// M4.10: Validate it's JSON (could be multiline, that's OK now)
+	trimmed := strings.TrimSpace(fd3Result)
+	if !strings.HasPrefix(trimmed, "{") && !strings.HasPrefix(trimmed, "[") {
+		return nil, fmt.Errorf("FD 3 output does not start with JSON. "+
+			"Found: %q. HINT: Use 'cat <<EOF >&3' for JSON. See docs/AGENT_LOGGING_GUIDE.md",
+			truncate(trimmed, 50))
 	}
 
 	var output ToolOutput
-	if err := json.Unmarshal([]byte(stdout), &output); err != nil {
-		return nil, fmt.Errorf("invalid JSON: %w", err)
+	if err := json.Unmarshal([]byte(trimmed), &output); err != nil {
+		return nil, fmt.Errorf("invalid JSON on FD 3: %w. "+
+			"HINT: Verify JSON syntax. See docs/AGENT_LOGGING_GUIDE.md", err)
 	}
 
 	if err := output.Validate(); err != nil {
@@ -640,6 +691,29 @@ func (lw *limitedWriter) Write(p []byte) (n int, err error) {
 	n, err = lw.w.Write(toWrite)
 	lw.written += n
 	return len(p), err // Return len(p) to satisfy the writer interface
+}
+
+// limitedReader wraps a reader and enforces a size limit (M4.10).
+// Used to limit bytes read from FD 3 to prevent unbounded memory growth.
+type limitedReader struct {
+	r     io.Reader
+	limit int
+	read  int
+}
+
+func (lr *limitedReader) Read(p []byte) (n int, err error) {
+	if lr.read >= lr.limit {
+		return 0, fmt.Errorf("read limit exceeded (%d bytes)", lr.limit)
+	}
+
+	maxRead := lr.limit - lr.read
+	if len(p) > maxRead {
+		p = p[:maxRead]
+	}
+
+	n, err = lr.r.Read(p)
+	lr.read += n
+	return n, err
 }
 
 // truncate limits a string to maxLen characters, appending "..." if truncated

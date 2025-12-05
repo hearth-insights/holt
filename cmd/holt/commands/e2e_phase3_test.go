@@ -258,7 +258,7 @@ services:
 set -e
 input=$(cat)
 echo "Rejecting reviewer received claim, providing feedback..." >&2
-cat <<EOF
+cat <<EOF >&3
 {
   "structural_type": "Review",
   "payload": "{\"issue\": \"needs tests\", \"severity\": \"high\"}"

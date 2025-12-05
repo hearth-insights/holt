@@ -19,7 +19,7 @@ tf_files=$(git show --name-only --format="" "$commit_hash" | grep '\.tf$' || tru
 
 if [ -z "$tf_files" ]; then
     echo "TerraformFmt: ERROR - No .tf files found in commit" >&2
-    cat <<EOF
+    cat <<EOF >&3
 {
   "artefact_type": "Review",
   "artefact_payload": "{\"error\": \"No Terraform files found in commit\"}",
@@ -62,11 +62,11 @@ if [ -n "$format_issues" ]; then
             artefact_type: "Review",
             artefact_payload: ({error: "Formatting issues found", files: $issues} | tostring),
             summary: "Review rejected: Terraform formatting issues"
-        }'
+        }' >&3
 else
     echo "TerraformFmt: APPROVAL - All Terraform files properly formatted" >&2
     # Empty JSON object signals approval
-    cat <<EOF
+    cat <<EOF >&3
 {
   "artefact_type": "Review",
   "artefact_payload": "{}",

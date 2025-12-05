@@ -1,6 +1,6 @@
 #!/bin/sh
 # TestRunnerAgent: Runs automated tests on ChangeSet artefacts (M4.5)
-# Contract: Reads JSON from stdin, outputs Review artefact to stdout
+# Contract: Reads JSON from stdin, outputs Review artefact to FD 3
 
 set -e
 
@@ -14,7 +14,7 @@ target_artefact=$(echo "$input" | jq -r '.target_artefact')
 artefact_type=$(echo "$target_artefact" | jq -r '.type')
 if [ "$artefact_type" != "ChangeSet" ]; then
     # Not a ChangeSet - ignore
-    cat <<EOF
+    cat <<EOF >&3
 {
   "artefact_type": "Review",
   "artefact_payload": "{}",
@@ -33,7 +33,7 @@ commit_hash=$(echo "$changeset_payload" | jq -r '.commit_hash')
 
 if [ -z "$commit_hash" ] || [ "$commit_hash" = "null" ]; then
     # Missing commit hash - create failure Review
-    cat <<EOF
+    cat <<EOF >&3
 {
   "artefact_type": "Review",
   "artefact_payload": "{\"test_failures\": \"ChangeSet payload missing commit_hash field\"}",
@@ -52,7 +52,7 @@ cd /workspace
 # Attempt git checkout
 if ! git checkout "$commit_hash" 2>&1 >&2; then
     # Checkout failed
-    cat <<EOF
+    cat <<EOF >&3
 {
   "artefact_type": "Review",
   "artefact_payload": "{\"test_failures\": \"Failed to checkout commit $commit_hash. Commit not found in repository.\"}",
@@ -74,7 +74,7 @@ test_exit_code=${test_exit_code:-0}
 if [ "$test_exit_code" -eq 0 ]; then
     # Tests passed
     echo "[TestRunner] All tests passed" >&2
-    cat <<EOF
+    cat <<EOF >&3
 {
   "artefact_type": "Review",
   "artefact_payload": "{}",
@@ -87,7 +87,7 @@ else
     # Escape special characters for JSON
     escaped_output=$(echo "$test_output" | jq -Rs .)
     echo "[TestRunner] Tests failed with exit code $test_exit_code" >&2
-    cat <<EOF
+    cat <<EOF >&3
 {
   "artefact_type": "Review",
   "artefact_payload": "{\"test_failures\": $escaped_output}",

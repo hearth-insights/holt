@@ -13,7 +13,7 @@ MOCK_MODE="${MOCK_MODE:-true}"
 if [ "$MOCK_MODE" = "true" ]; then
     echo "[ArchitectGemini] Running in MOCK mode" >&2
     # Load mock response
-    cat /app/mocks/answer.json
+    cat /app/mocks/answer.json >&3
     exit 0
 fi
 
@@ -22,4 +22,4 @@ echo "[ArchitectGemini] Using real Gemini API" >&2
 
 # TODO: Real Gemini API call would go here
 # For now, fallback to mock
-cat /app/mocks/answer.json
+cat /app/mocks/answer.json >&3

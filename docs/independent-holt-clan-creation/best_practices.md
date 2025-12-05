@@ -105,8 +105,65 @@ Use `bidding_strategy` to control the workflow flow and concurrency.
 *   **`ignore`**:
     *   **Opt-out**: The agent explicitly does not want to work on this bid.
 
+## Logging Best Practices (M4.10)
+
+Since M4.10, Holt uses the **FD 3 Return** architecture for agent logging:
+
+### The Three-Channel Model
+*   **FD 0 (stdin)**: JSON input from pup
+*   **FD 1 (stdout)**: Logs, tool output, debug prints (anything!)
+*   **FD 2 (stderr)**: Errors, warnings, stack traces
+*   **FD 3**: **Final JSON result ONLY** (`>&3`)
+
+### When to Use Each Channel
+
+**✅ Use stdout/stderr for**:
+- Progress updates: `echo "Processing 50%..."`
+- Tool output: `npm install` (full output visible)
+- Debug messages: `echo "DEBUG: Variable x = $x"`
+- Status updates: `echo "[INFO] Starting phase 2..."`
+
+**✅ Use FD 3 for**:
+- Final JSON result only: `cat result.json >&3`
+
+**❌ Common Mistakes**:
+- ❌ Writing logs to FD 3 (corrupts result)
+- ❌ Writing result to stdout (pup won't see it)
+- ❌ Silencing tools (`npm install > /dev/null`) - not needed anymore!
+
+### Viewing Logs
+```bash
+holt logs <agent-role>          # View agent logs
+holt logs -f <agent-role>       # Follow in real-time
+holt logs --since=1h orchestrator  # Historical logs
+```
+
+### Example (M4.10)
+```bash
+#!/bin/sh
+# Read input
+input=$(cat)
+
+# Be noisy! All this goes to docker logs
+echo "Starting work..."
+npm install  # Full output visible
+echo "Work complete!"
+
+# Write result to FD 3
+cat <<EOF >&3
+{
+  "artefact_type": "Result",
+  "artefact_payload": "data",
+  "summary": "Done"
+}
+EOF
+```
+
+**See Also**: [Agent Logging Guide](../AGENT_LOGGING_GUIDE.md) for comprehensive examples.
+
 ## Summary
 *   **Decompose** complex tasks.
 *   **Specialize** your agents.
 *   **Restrict** permissions.
 *   **Verify** outputs with reviewers.
+*   **Use FD 3** for results, stdout/stderr for logs (M4.10).

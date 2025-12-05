@@ -26,7 +26,7 @@ The SecurityScannerAgent is a simple shell script that:
 }
 ```
 
-### Output (stdout JSON):
+### Output (FD 3 JSON):
 
 **Success (no issues found):**
 ```json

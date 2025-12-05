@@ -17,8 +17,8 @@ echo "Target artefact type: $target_type" >&2
 # Simulate parallel work (e.g., running tests, generating docs)
 sleep 1
 
-# Output Standard artefact with completion message
-cat <<EOF
+# M4.10: Output Standard artefact to FD 3 with completion message
+cat <<EOF >&3
 {
   "artefact_type": "ParallelWorkComplete",
   "artefact_payload": "Parallel work completed successfully",

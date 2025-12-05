@@ -24,6 +24,7 @@ help:
 	@echo ""
 	@echo "Common workflows:"
 	@echo "  build-all           - Build everything (CLI + orchestrator + pup)"
+	@echo "  demos               - Build all demos using their respective Makefiles"
 	@echo "  build               - Build the holt CLI binary for current platform"
 	@echo "  docker-orchestrator - Build orchestrator Docker image (required for 'holt up')"
 	@echo ""
@@ -312,3 +313,29 @@ cleanup-docker:
 	@echo "Cleaning up Holt Docker networks..."
 	@docker network rm $$(docker network ls -q -f "label=holt.project=true") 2>/dev/null || true
 	@echo "✓ Cleanup complete"
+
+# Build all demos dynamically
+demos:
+	@echo "Building all demos found in demos/..."
+	@for dir in demos/*; do \
+		if [ -f "$$dir/Makefile" ]; then \
+			echo "--------------------------------------------------"; \
+			echo "Building demo in $$dir"; \
+			echo "--------------------------------------------------"; \
+			$(MAKE) -f $$dir/Makefile; \
+		fi \
+	done
+	@echo "✓ All demos built successfully."
+
+# Alias for backward compatibility (or if I just added it, renaming is fine)
+build-all-demos: demos
+
+# General phony targets
+.PHONY: all help build clean install test lint format vet verify build-all-demos clean-all-demos demos
+
+# Clean all demo images
+clean-all-demos:
+	@echo "Cleaning all demo images..."
+	@$(MAKE) -f demos/terraform-generator/Makefile clean-demo-terraform
+	@# Add other demos here as they are updated
+	@echo "✓ All demo images cleaned."

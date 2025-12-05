@@ -23,8 +23,8 @@ echo "Conditional reviewer received claim, checking version: $version" >&2
 # Reject version 1, approve version 2+
 if [ "$version" = "1" ]; then
     echo "Version 1 detected - REJECTING with feedback" >&2
-    # Output Review artefact with feedback payload (non-empty = rejection)
-    cat <<EOF
+    # M4.10: Output Review artefact to FD 3 with feedback payload (non-empty = rejection)
+    cat <<EOF >&3
 {
   "artefact_type": "Review",
   "artefact_payload": "{\"issue\": \"needs tests\", \"severity\": \"high\", \"details\": \"Please add unit tests for the implementation\"}",
@@ -34,8 +34,8 @@ if [ "$version" = "1" ]; then
 EOF
 else
     echo "Version $version detected - APPROVING" >&2
-    # Output Review artefact with approval payload (empty object = approval)
-    cat <<EOF
+    # M4.10: Output Review artefact to FD 3 with approval payload (empty object = approval)
+    cat <<EOF >&3
 {
   "artefact_type": "Review",
   "artefact_payload": "{}",

@@ -10,7 +10,7 @@ Holt agents are Docker containers that run a specific binary called `pup`. The `
 4.  **Enforces Schema**: Validates your agent's JSON output. If the output is malformed or violates the schema, `pup` rejects it and creates a `Failure` artefact. This prevents "hallucinations" from corrupting the Blackboard.
 5.  Publishes the result back to the Blackboard.
 
-Communication happens via **Standard Input (stdin)** and **Standard Output (stdout)**.
+Communication happens via **Standard Input (stdin)**, **Standard Output (stdout)** (for logs and bids), and **File Descriptor 3 (FD 3)** (for results).
 
 ---
 
@@ -32,8 +32,8 @@ A JSON object representing the artefact that just appeared.
 }
 ```
 
-### Output (stdout)
-A single string indicating the bidding strategy.
+### Output (FD 3)
+A single string indicating the bidding strategy written to File Descriptor 3.
 
 | Strategy | Description |
 | :--- | :--- |
@@ -70,9 +70,9 @@ type=$(echo "$input" | jq -r '.type')
 
 # Logic: Only bid on "GoalDefined" artefacts
 if [ "$type" = "GoalDefined" ]; then
-    echo "exclusive"
+    echo "exclusive" >&3
 else
-    echo "ignore"
+    echo "ignore" >&3
 fi
 ```
 
@@ -115,8 +115,16 @@ The `context_chain` is a chronological list of all artefacts that led to the cur
 The `context_chain` can grow large. If you are using a local LLM with a small context window, you should trim this list.
 *   **See Example**: [examples/trim_context.py](./examples/trim_context.py) demonstrates how to prioritize recent items and trim the context.
 
-### Output (stdout)
-A JSON object representing the **Result Artefact** you produced.
+### Output (FD 3 - M4.10)
+
+**IMPORTANT**: Since M4.10, agents write their result JSON to **File Descriptor 3 (FD 3)**, NOT stdout.
+
+**Why FD 3?**
+- **Stdout/stderr are for logs** - Print anything! Tool output, debug messages, progress updates
+- **FD 3 is for the result** - Clean JSON only, parsed by pup
+- **View logs with**: `holt logs <agent-role>`
+
+A JSON object representing the **Result Artefact** you produced:
 
 ```json
 {
@@ -131,27 +139,44 @@ A JSON object representing the **Result Artefact** you produced.
 >
 > **Strict Approval Rule**: To **APPROVE**, the payload MUST be an empty JSON object `{}` or array `[]`. **ANY** other content is treated as a rejection and triggers rework.
 
-### Example `run.sh`
+### Example `run.sh` (M4.10 FD 3 Return)
 ```bash
 #!/bin/sh
 set -e
 
-# Read input
+# Read input from stdin
 input=$(cat)
 
 # Extract payload
 goal=$(echo "$input" | jq -r '.target_artefact.payload')
 
-# Do work (e.g., generate content)
-result="Here is the recipe for: $goal"
+# Be noisy! All this goes to docker logs (visible via `holt logs`)
+echo "Starting work on: $goal"
+echo "Running expensive tool..."
+npm install  # Full output visible in logs
 
-# Output result JSON
-jq -n \
-  --arg type "RecipeResult" \
-  --arg payload "$result" \
-  --arg summary "Generated recipe" \
-  '{artefact_type: $type, artefact_payload: $payload, summary: $summary}'
+# Do work
+result="Here is the recipe for: $goal"
+echo "Work complete!"
+
+# Write result to FD 3 (>&3)
+cat <<EOF >&3
+{
+  "artefact_type": "RecipeResult",
+  "artefact_payload": "$result",
+  "summary": "Generated recipe"
+}
+EOF
 ```
+
+**Key Points**:
+- ✅ Logs go to stdout/stderr (seen in `holt logs`)
+- ✅ Result JSON goes to FD 3 (`>&3`)
+- ✅ Tools can be noisy (no more `> /dev/null 2>&1`)
+- ❌ Don't write result to stdout (pup won't see it)
+- ❌ Don't write logs to FD 3 (corrupts result)
+
+**See Also**: [Agent Logging Guide](../AGENT_LOGGING_GUIDE.md) for detailed examples in all languages.
 
 ## Summary
 1.  **Bid**: `Input JSON` -> `Strategy String`

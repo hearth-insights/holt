@@ -1,8 +1,10 @@
 package pup
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/hearth-insights/holt/pkg/blackboard"
@@ -92,9 +94,10 @@ func TestParseToolOutput_Valid(t *testing.T) {
 		"summary": "Implemented user login feature"
 	}`
 
-	output, err := engine.parseToolOutput(stdout)
+	// M4.10: parseToolOutput renamed to parseFD3Output
+	output, err := engine.parseFD3Output(stdout)
 	if err != nil {
-		t.Fatalf("parseToolOutput failed: %v", err)
+		t.Fatalf("parseFD3Output failed: %v", err)
 	}
 
 	if output.ArtefactType != "CodeCommit" {
@@ -138,9 +141,10 @@ func TestParseToolOutput_Invalid(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := engine.parseToolOutput(tt.stdout)
+			// M4.10: parseToolOutput renamed to parseFD3Output
+			_, err := engine.parseFD3Output(tt.stdout)
 			if err == nil {
-				t.Errorf("Expected parseToolOutput to fail for %s, but got nil error", tt.name)
+				t.Errorf("Expected parseFD3Output to fail for %s, but got nil error", tt.name)
 			}
 		})
 	}
@@ -311,4 +315,126 @@ type sliceWriter struct {
 func (sw *sliceWriter) Write(p []byte) (n int, err error) {
 	*sw.buf = append(*sw.buf, p...)
 	return len(p), nil
+}
+
+// M4.10: Unit tests for FD 3 Return Model
+
+// TestParseFD3Output_Validation verifies FD 3 result validation (M4.10)
+func TestParseFD3Output_Validation(t *testing.T) {
+	engine := &Engine{}
+
+	tests := []struct {
+		name       string
+		fd3Result  string
+		shouldFail bool
+		errSubstr  string
+	}{
+		{
+			name:       "valid JSON",
+			fd3Result:  `{"artefact_type":"Test","artefact_payload":"payload","summary":"ok"}`,
+			shouldFail: false,
+		},
+		{
+			name:       "valid JSON with whitespace",
+			fd3Result:  "  \n  {\"artefact_type\":\"Test\",\"artefact_payload\":\"\",\"summary\":\"ok\"}  \n  ",
+			shouldFail: false,
+		},
+		{
+			name:       "empty FD 3",
+			fd3Result:  "",
+			shouldFail: true,
+			errSubstr:  "no output on FD 3",
+		},
+		{
+			name:       "non-JSON on FD 3",
+			fd3Result:  "This is not JSON",
+			shouldFail: true,
+			errSubstr:  "does not start with JSON",
+		},
+		{
+			name:       "invalid JSON syntax",
+			fd3Result:  `{"artefact_type":"Test","artefact_payload":"missing quote}`,
+			shouldFail: true,
+			errSubstr:  "invalid JSON on FD 3",
+		},
+		{
+			name:       "missing required field",
+			fd3Result:  `{"artefact_type":"Test"}`,
+			shouldFail: true,
+			errSubstr:  "validation failed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			output, err := engine.parseFD3Output(tt.fd3Result)
+
+			if tt.shouldFail {
+				if err == nil {
+					t.Fatalf("Expected error containing %q, got nil", tt.errSubstr)
+				}
+				if tt.errSubstr != "" && !strings.Contains(err.Error(), tt.errSubstr) {
+					t.Fatalf("Expected error containing %q, got: %v", tt.errSubstr, err)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("Unexpected error: %v", err)
+				}
+				if output == nil {
+					t.Fatal("Expected non-nil output")
+				}
+			}
+		})
+	}
+}
+
+// TestLimitedReader_M4_10 verifies limitedReader enforces size limit
+func TestLimitedReader_M4_10(t *testing.T) {
+	t.Run("reads within limit", func(t *testing.T) {
+		data := []byte("Hello, World!")
+		reader := &limitedReader{
+			r:     bytes.NewReader(data),
+			limit: 100,
+		}
+
+		buf := make([]byte, len(data))
+		n, err := reader.Read(buf)
+		if err != nil {
+			t.Fatalf("Unexpected error: %v", err)
+		}
+		if n != len(data) {
+			t.Fatalf("Expected to read %d bytes, got %d", len(data), n)
+		}
+		if string(buf[:n]) != string(data) {
+			t.Fatalf("Expected %q, got %q", string(data), string(buf[:n]))
+		}
+	})
+
+	t.Run("enforces limit", func(t *testing.T) {
+		data := []byte("This is a long string that exceeds the limit")
+		reader := &limitedReader{
+			r:     bytes.NewReader(data),
+			limit: 10,
+		}
+
+		// Read first 10 bytes (within limit)
+		buf := make([]byte, 10)
+		n, err := reader.Read(buf)
+		if err != nil {
+			t.Fatalf("Unexpected error on first read: %v", err)
+		}
+		if n != 10 {
+			t.Fatalf("Expected to read 10 bytes, got %d", n)
+		}
+
+		// Try to read more (should fail with limit error)
+		buf2 := make([]byte, 5)
+		_, err = reader.Read(buf2)
+		if err == nil {
+			t.Fatal("Expected error when exceeding limit, got nil")
+		}
+		if !strings.Contains(err.Error(), "read limit exceeded") {
+			t.Fatalf("Expected 'read limit exceeded' error, got: %v", err)
+		}
+	})
 }

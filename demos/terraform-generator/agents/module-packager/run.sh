@@ -24,7 +24,7 @@ git checkout "$commit_hash" --quiet
 # Verify required files exist
 if [ ! -f "main.tf" ]; then
     echo "ModulePackager: ERROR - main.tf not found" >&2
-    cat <<EOF
+    cat <<EOF >&3
 {
   "structural_type": "Failure",
   "artefact_payload": "Missing required file: main.tf",
@@ -49,7 +49,7 @@ tar -czf "$package_name" main.tf README.md *.tf 2>/dev/null || tar -czf "$packag
 # Verify package was created
 if [ ! -f "$package_name" ]; then
     echo "ModulePackager: ERROR - Failed to create package" >&2
-    cat <<EOF
+    cat <<EOF >&3
 {
   "structural_type": "Failure",
   "artefact_payload": "Failed to create tar.gz package",
@@ -84,7 +84,7 @@ fi
 
 # Output Terminal artefact with type "PackagedModule"
 # This signals workflow completion
-cat <<EOF
+cat <<EOF >&3
 {
   "artefact_type": "PackagedModule",
   "structural_type": "Terminal",

@@ -24,8 +24,8 @@ echo "Target structural_type: $target_structural_type" >&2
 if [ "$target_type" = "GoalDefined" ] && [ "$target_structural_type" = "Standard" ] && [ -z "$has_sources" ]; then
   echo "Asking question about original GoalDefined artefact (no sources)..." >&2
 
-  # Output Question artefact
-  cat <<EOF
+  # M4.10: Output Question artefact to FD 3
+  cat <<EOF >&3
 {
   "structural_type": "Question",
   "artefact_type": "ClarificationNeeded",
@@ -36,8 +36,8 @@ EOF
 else
   echo "Not a GoalDefined artefact, producing standard work artefact instead..." >&2
 
-  # For non-GoalDefined artefacts, just produce a standard acknowledgement
-  cat <<EOF
+  # M4.10: For non-GoalDefined artefacts, output standard acknowledgement to FD 3
+  cat <<EOF >&3
 {
   "artefact_type": "Acknowledged",
   "artefact_payload": "Processed artefact $target_id",

@@ -58,9 +58,9 @@ git commit -m "feat: Create $goal"
 # Get the commit hash of the new commit
 hash=$(git rev-parse HEAD)
 
-# Output a valid JSON object to stdout for the Agent Pup.
+# Output a valid JSON object to FD 3 for the Agent Pup.
 # This will become the new CodeCommit artefact.
-cat <<EOF
+cat <<EOF >&3
 {
   "artefact_type": "CodeCommit",
   "artefact_payload": "$hash",
@@ -71,7 +71,7 @@ EOF
 
 ### Key Concepts Illustrated:
 
-- **Input/Output Contract**: The script reads a JSON object from `stdin` and writes a single JSON object to `stdout`. This is the fundamental contract between the Agent Pup and the tool script.
+- **Input/Output Contract**: The script reads a JSON object from `stdin` and writes a single JSON object to `FD 3` (File Descriptor 3). This is the fundamental contract between the Agent Pup and the tool script.
 - **Performing Work**: The agent uses standard, battle-hardened command-line tools (`touch`, `git`) to perform its task. Holt agents can use *any* tool that can be run in a container.
 - **Logging**: The script writes progress and debug information to `stderr`. This is how you provide visibility into the agent's operations, which can be viewed with the `holt logs git-agent` command.
 - **Producing an Artefact**: The script's final output is a JSON object that defines the next artefact to be created on the Blackboard. Here, it creates a `CodeCommit` artefact, providing the `hash` as the payload.
