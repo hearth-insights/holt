@@ -147,7 +147,7 @@ pending_review → pending_parallel → pending_exclusive → complete
 }
 ```
 
-### **Output (stdout JSON)**
+### **Output (FD 3 JSON)**
 ```json
 {
   "artefact_type": "string",

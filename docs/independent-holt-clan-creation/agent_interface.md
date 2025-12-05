@@ -10,7 +10,7 @@ Holt agents are Docker containers that run a specific binary called `pup`. The `
 4.  **Enforces Schema**: Validates your agent's JSON output. If the output is malformed or violates the schema, `pup` rejects it and creates a `Failure` artefact. This prevents "hallucinations" from corrupting the Blackboard.
 5.  Publishes the result back to the Blackboard.
 
-Communication happens via **Standard Input (stdin)** and **Standard Output (stdout)**.
+Communication happens via **Standard Input (stdin)**, **Standard Output (stdout)** (for logs and bids), and **File Descriptor 3 (FD 3)** (for results).
 
 ---
 
