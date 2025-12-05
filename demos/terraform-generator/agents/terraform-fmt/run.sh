@@ -62,7 +62,7 @@ if [ -n "$format_issues" ]; then
             artefact_type: "Review",
             artefact_payload: ({error: "Formatting issues found", files: $issues} | tostring),
             summary: "Review rejected: Terraform formatting issues"
-        }'
+        }' >&3
 else
     echo "TerraformFmt: APPROVAL - All Terraform files properly formatted" >&2
     # Empty JSON object signals approval

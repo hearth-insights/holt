@@ -24,6 +24,7 @@ help:
 	@echo ""
 	@echo "Common workflows:"
 	@echo "  build-all           - Build everything (CLI + orchestrator + pup)"
+	@echo "  demos               - Build all demos using their respective Makefiles"
 	@echo "  build               - Build the holt CLI binary for current platform"
 	@echo "  docker-orchestrator - Build orchestrator Docker image (required for 'holt up')"
 	@echo ""

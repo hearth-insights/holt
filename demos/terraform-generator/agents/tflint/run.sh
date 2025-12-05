@@ -68,7 +68,7 @@ if [ -n "$lint_exit" ] && [ "$lint_exit" != "0" ]; then
             artefact_type: "Review",
             artefact_payload: ({error: "TfLint found issues", output: $output} | tostring),
             summary: "Review rejected: Terraform linting issues"
-        }'
+        }' >&3
 else
     echo "TfLint: APPROVAL - No linting issues found" >&2
     # Empty JSON object signals approval
