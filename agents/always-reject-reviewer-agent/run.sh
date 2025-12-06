@@ -13,8 +13,8 @@ version=$(echo "$input" | grep -o '"version":[0-9]*' | head -1 | grep -o '[0-9]*
 
 echo "Always-reject reviewer received claim, version: $version - REJECTING" >&2
 
-# Always output Review artefact with feedback payload (non-empty = rejection)
-cat <<EOF
+# M4.10: Always output Review artefact to FD 3 with feedback payload (non-empty = rejection)
+cat <<EOF >&3
 {
   "artefact_type": "Review",
   "artefact_payload": "{\"issue\": \"still needs improvement\", \"version_reviewed\": $version}",

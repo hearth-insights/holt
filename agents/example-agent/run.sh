@@ -12,9 +12,9 @@ echo "Input: $input" >&2
 # Generate timestamp for unique payload
 timestamp=$(date +%s)
 
-# Output success JSON to stdout
-# This JSON will be parsed by the pup and converted to an artefact
-cat <<EOF
+# M4.10: Output success JSON to FD 3 (not stdout)
+# stdout/stderr are now for logs - result goes to FD 3
+cat <<EOF >&3
 {
   "artefact_type": "EchoSuccess",
   "artefact_payload": "echo-$timestamp",

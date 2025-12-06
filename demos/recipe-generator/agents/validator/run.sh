@@ -19,11 +19,11 @@ if [ -n "$short_instruction" ]; then
       artefact_type: "Review",
       artefact_payload: ({issue: $issue, line: $line} | tostring),
       summary: "Rejected: Instruction too short"
-    }'
+    }' >&3
 else
   echo "Validator Agent: Recipe looks good. Approving." >&2
   # APPROVAL: Output empty JSON object
-  cat <<EOF
+  cat <<EOF >&3
 {
   "artefact_type": "Review",
   "artefact_payload": "{}",

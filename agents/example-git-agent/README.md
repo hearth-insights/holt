@@ -88,7 +88,7 @@ holt hoard
 
 ```bash
 cd /workspace
-cat > my-file.txt <<EOF
+cat > my-file.txt <<EOF >&3
 # Content here
 EOF
 ```
@@ -157,7 +157,7 @@ filename=$(echo "$input" | grep -o '"payload":"[^"]*"' | head -1 | cut -d'"' -f4
 claim_id=$(echo "$input" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 ```
 
-### Output (stdout JSON)
+### Output (FD 3 JSON)
 
 **Required fields:**
 - `artefact_type`: "CodeCommit" (triggers git validation)

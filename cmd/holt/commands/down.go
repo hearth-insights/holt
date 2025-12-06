@@ -80,11 +80,12 @@ func runDown(cmd *cobra.Command, args []string) error {
 	}
 
 	// Find all containers for this instance
+	// M4.10: All=true ensures we clean up retained worker containers (keep_containers=true)
 	containerFilters := filters.NewArgs()
 	containerFilters.Add("label", fmt.Sprintf("%s=%s", dockerpkg.LabelInstanceName, targetInstanceName))
 
 	containers, err := cli.ContainerList(ctx, container.ListOptions{
-		All:     true,
+		All:     true, // M4.10: Include stopped containers (retained workers)
 		Filters: containerFilters,
 	})
 	if err != nil {

@@ -30,7 +30,7 @@ md_files=$(find . -name "*.md" -not -path "./.git/*" || true)
 if [ -z "$md_files" ]; then
     echo "MarkdownLint: WARNING - No markdown files found" >&2
     # Still output a CodeCommit artefact (no changes made)
-    cat <<EOF
+    cat <<EOF >&3
 {
   "artefact_type": "FormattedDocumentation",
   "artefact_payload": "$commit_hash",
@@ -83,7 +83,7 @@ if [ -n "$original_branch" ] && [ "$original_branch" != "HEAD" ]; then
 fi
 
 # Output CodeCommit artefact with type "FormattedDocumentation"
-cat <<EOF
+cat <<EOF >&3
 {
   "artefact_type": "FormattedDocumentation",
   "artefact_payload": "$new_commit_hash",

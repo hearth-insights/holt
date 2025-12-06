@@ -35,7 +35,7 @@ type Artefact struct {
 	ProducedByRole string   `json:"produced_by_role"`
 }
 
-// Output contract to pup (stdout)
+// Output contract to pup (FD 3)
 type Output struct {
 	StructuralType  string `json:"structural_type"`
 	ArtefactType    string `json:"artefact_type"`
@@ -49,7 +49,14 @@ type ReviewPayload struct {
 }
 
 func main() {
-	if err := Run(os.Stdin, os.Stdout, os.Stderr, os.Getenv); err != nil {
+	// M4.10: Open FD 3 for result JSON output
+	fd3 := os.NewFile(uintptr(3), "/dev/fd/3")
+	if fd3 == nil {
+		log.Fatalf("[HumanReviewer] Failed to open FD 3 for result output")
+	}
+	defer fd3.Close()
+
+	if err := Run(os.Stdin, fd3, os.Stderr, os.Getenv); err != nil {
 		log.Fatalf("[HumanReviewer] Error: %v", err)
 	}
 }

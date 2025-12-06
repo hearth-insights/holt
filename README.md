@@ -403,7 +403,7 @@ goal=$(echo "$input" | grep -o '"payload":"[^"]*"' | head -1 | cut -d'"' -f4)
 echo "Processing: $goal" >&2
 
 # Output result
-cat <<EOF
+cat <<EOF >&3
 {
   "artefact_type": "Processed",
   "artefact_payload": "Result for $goal",

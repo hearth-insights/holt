@@ -27,7 +27,7 @@ The HumanReviewerAgent is a Go binary that:
 }
 ```
 
-### Output (stdout JSON):
+### Output (FD 3 JSON):
 
 **Approval:**
 ```json

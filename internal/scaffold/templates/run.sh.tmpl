@@ -21,7 +21,7 @@ greeting_response="$greeting_response\nClaim type: $claim_type"
 
 # Generate output artefact (JSON format expected by pup)
 # In a real LLM-driven agent, this would be the LLM's response
-cat <<EOF
+cat <<EOF >&3
 {
   "artefact_type": "GreetingResponse",
   "artefact_payload": "$greeting_response",

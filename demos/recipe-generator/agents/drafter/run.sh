@@ -51,7 +51,7 @@ fi
 commit_hash=$(git rev-parse HEAD)
 echo "Drafter Agent: Committed changes as ${commit_hash}" >&2
 
-cat <<EOF
+cat <<EOF >&3
 {
   "artefact_type": "RecipeYAML",
   "artefact_payload": "${commit_hash}",

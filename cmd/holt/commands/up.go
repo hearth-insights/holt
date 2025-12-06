@@ -117,6 +117,20 @@ func runUp(cmd *cobra.Command, args []string) error {
 		)
 	}
 
+	// M4.10: Check for keep_containers setting and warn if enabled
+	var agentsWithRetention []string
+	for agentName, agent := range cfg.Agents {
+		if agent.Worker != nil && agent.Worker.KeepContainers {
+			agentsWithRetention = append(agentsWithRetention, agentName)
+		}
+	}
+	if len(agentsWithRetention) > 0 {
+		printer.Warning("Worker container retention enabled for: %s\n", strings.Join(agentsWithRetention, ", "))
+		printer.Warning("  Stopped containers will NOT be automatically removed.\n")
+		printer.Warning("  Use 'holt down' to clean up all containers.\n")
+		printer.Warning("  This is intended for debugging only. Disable in production.\n\n")
+	}
+
 	// Create Docker client
 	cli, err := dockerpkg.NewClient(ctx)
 	if err != nil {

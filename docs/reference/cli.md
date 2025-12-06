@@ -147,7 +147,7 @@ pending_review → pending_parallel → pending_exclusive → complete
 }
 ```
 
-### **Output (stdout JSON)**
+### **Output (FD 3 JSON)**
 ```json
 {
   "artefact_type": "string",
@@ -230,9 +230,27 @@ Inspects historical artefacts. Use the filtering flags to find specific artefact
 
 Retrieves and displays the full details for a single artefact.
 
-**`holt logs <agent-role|orchestrator>`**
+**`holt logs <agent-role|orchestrator> [flags]`** (M4.10)
 
-Views the logs for a specific running or stopped container (e.g., `holt logs Coder`).
+Views Docker container logs for agents or orchestrator. Streams logs from Docker, showing all stdout/stderr output including tool execution and debug prints.
+
+Flags:
+- `--follow, -f` - Follow logs in real-time (like `tail -f`)
+- `--since <duration>` - Show logs since time (e.g., `1h`, `30m`, `10s`)
+- `--tail <n>` - Show last N lines (default: all)
+- `--timestamps` - Include timestamps in output
+- `--name, -n <instance>` - Target specific instance (auto-inferred if omitted)
+
+Examples:
+```bash
+holt logs coder-agent                    # View all logs
+holt logs -f orchestrator                # Follow orchestrator logs
+holt logs --tail=100 test-runner         # Last 100 lines
+holt logs --since=1h --timestamps coder  # Last hour with timestamps
+holt logs coder | grep ERROR             # Filter with grep
+```
+
+**Note**: Since M4.10, agents write result JSON to FD 3, so logs show tool output and progress without JSON corruption. See [Agent Logging Guide](AGENT_LOGGING_GUIDE.md).
 
 ### **Cryptographic Verification & Security (M4.6+)**
 

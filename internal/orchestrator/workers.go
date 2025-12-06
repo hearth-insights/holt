@@ -23,14 +23,15 @@ import (
 // WorkerState tracks an active worker container
 // M3.4: Workers are ephemeral containers launched on-demand to execute granted claims
 type WorkerState struct {
-	ContainerID   string    // Docker container ID
-	ContainerName string    // holt-{instance}-{agent}-worker-{claim-short-id}
-	ClaimID       string    // Claim being executed
-	Role          string    // Agent role
-	AgentName     string    // Original agent name (e.g., "coder-controller")
-	LaunchedAt    time.Time // When worker was launched
-	Status        string    // "created", "running", "exited"
-	ExitCode      int       // Container exit code (when exited)
+	ContainerID    string    // Docker container ID
+	ContainerName  string    // holt-{instance}-{agent}-worker-{claim-short-id}
+	ClaimID        string    // Claim being executed
+	Role           string    // Agent role
+	AgentName      string    // Original agent name (e.g., "coder-controller")
+	LaunchedAt     time.Time // When worker was launched
+	Status         string    // "created", "running", "exited"
+	ExitCode       int       // Container exit code (when exited)
+	KeepContainer  bool      // M4.10: If true, container is retained after exit for debugging
 }
 
 // WorkerManager handles worker lifecycle management for the orchestrator
@@ -239,6 +240,7 @@ func (wm *WorkerManager) LaunchWorker(ctx context.Context, claim *blackboard.Cla
 		AgentName:     agentRole,
 		LaunchedAt:    time.Now(),
 		Status:        "running",
+		KeepContainer: agent.Worker.KeepContainers, // M4.10: Pass keep_containers setting from config
 	}
 	wm.activeWorkers[resp.ID] = workerState
 	wm.workersByRole[agentRole]++
@@ -375,6 +377,7 @@ func (wm *WorkerManager) handleWorkerError(ctx context.Context, worker *WorkerSt
 // cleanupWorker removes worker from tracking and Docker
 // M3.4: Decrements worker count and removes container
 // M3.5: Returns the worker's role so orchestrator can resume queued claims
+// M4.10: Conditionally removes container based on KeepContainer setting
 func (wm *WorkerManager) cleanupWorker(ctx context.Context, containerID string) string {
 	wm.workerLock.Lock()
 	worker := wm.activeWorkers[containerID]
@@ -388,10 +391,20 @@ func (wm *WorkerManager) cleanupWorker(ctx context.Context, containerID string) 
 	// to detect the exited state before cleanup
 	time.Sleep(2 * time.Second)
 
-	// Remove container
-	wm.dockerClient.ContainerRemove(ctx, containerID, types.ContainerRemoveOptions{
-		Force: true,
-	})
+	// M4.10: Conditionally remove container based on keep_containers setting
+	if worker != nil && worker.KeepContainer {
+		// Container retention enabled - skip removal for debugging
+		log.Printf("[Orchestrator] M4.10: Retaining worker container %s (keep_containers=true)", containerID[:12])
+		wm.logEvent("worker_retained", map[string]interface{}{
+			"container_id": containerID,
+			"role":         worker.Role,
+		})
+	} else {
+		// Default behavior: Remove container
+		wm.dockerClient.ContainerRemove(ctx, containerID, types.ContainerRemoveOptions{
+			Force: true,
+		})
+	}
 
 	var role string
 	if worker != nil {
@@ -399,6 +412,7 @@ func (wm *WorkerManager) cleanupWorker(ctx context.Context, containerID string) 
 		wm.logEvent("worker_cleanup", map[string]interface{}{
 			"container_id": containerID,
 			"role":         role,
+			"retained":     worker.KeepContainer, // M4.10: Log retention status
 		})
 	}
 

@@ -263,7 +263,7 @@ if [ -n "$original_branch" ] && [ "$original_branch" != "HEAD" ]; then
 fi
 
 # Output CodeCommit artefact with type "TerraformCode"
-cat <<EOF
+cat <<EOF >&3
 {
   "artefact_type": "TerraformCode",
   "artefact_payload": "$commit_hash",

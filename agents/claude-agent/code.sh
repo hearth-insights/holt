@@ -12,7 +12,7 @@ MOCK_MODE="${MOCK_MODE:-true}"
 if [ "$MOCK_MODE" = "true" ]; then
     echo "[CoderClaude] Running in MOCK mode" >&2
     # Load mock response
-    cat /app/mocks/changeset.json
+    cat /app/mocks/changeset.json  >&3
     exit 0
 fi
 
@@ -21,4 +21,4 @@ echo "[CoderClaude] Using real Claude API" >&2
 
 # TODO: Real Claude API call would go here
 # For now, fallback to mock
-cat /app/mocks/changeset.json
+cat /app/mocks/changeset.json  >&3

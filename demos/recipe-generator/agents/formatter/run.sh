@@ -32,7 +32,7 @@ new_commit_hash=$(git rev-parse HEAD)
 
 echo "Formatter Agent: Committed RECIPE.md as ${new_commit_hash}" >&2
 
-cat <<EOF
+cat <<EOF >&3
 {
   "artefact_type": "RecipeMarkdown",
   "artefact_payload": "${new_commit_hash}",
