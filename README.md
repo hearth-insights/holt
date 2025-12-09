@@ -1,4 +1,8 @@
 # Holt
+![Build Status](https://img.shields.io/github/actions/workflow/status/hearth-insights/holt/go.yml?style=flat-square)
+![Go Version](https://img.shields.io/github/go-mod/go-version/hearth-insights/holt?style=flat-square)
+![License](https://img.shields.io/github/license/hearth-insights/holt?style=flat-square)
+![Security](https://img.shields.io/badge/security-air--gapped-teal?style=flat-square)
 
 **Sovereign Orchestration for Regulated Industries**
 

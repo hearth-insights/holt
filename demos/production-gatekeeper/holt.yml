@@ -1,0 +1,26 @@
+version: '1.0'
+
+agents:
+  TestRunner:
+    image: holt-agent-gatekeeper:latest
+    command: ["/app/test_runner.sh"]
+    bidding_strategy:
+      type: exclusive
+      target_types:
+        - GoalDefined
+
+  Gatekeeper:
+    image: holt-agent-gatekeeper:latest
+    command: ["/app/gatekeeper.sh"]
+    bidding_strategy:
+      type: exclusive
+      target_types:
+        - TestResults
+
+  Deployer:
+    image: holt-agent-gatekeeper:latest
+    command: ["/app/deployer.sh"]
+    bidding_strategy:
+      type: exclusive
+      target_types:
+        - DeploymentManifest

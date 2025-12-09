@@ -783,30 +783,13 @@ func (f *defaultFormatter) FormatWorkflow(event *blackboard.WorkflowEvent, times
 		return err
 
 	case "human_input_required":
-		// M4.1: Display human input required event with distinct formatting
+		// M4.11: Display human input required event as compact single line
 		questionID, _ := event.Data["question_id"].(string)
 		questionText, _ := event.Data["question_text"].(string)
-		targetArtefactID, _ := event.Data["target_artefact_id"].(string)
-
-		_, err := fmt.Fprintf(f.writer, "[%s] ⚠️  HUMAN_INPUT_REQUIRED\n", timestamp)
-		if err != nil {
-			return err
-		}
-		_, err = fmt.Fprintf(f.writer, "  Question %s\n", shortID(questionID))
-		if err != nil {
-			return err
-		}
-		if questionText != "" {
-			_, err = fmt.Fprintf(f.writer, "  \"%s\"\n", questionText)
-			if err != nil {
-				return err
-			}
-		}
-		_, err = fmt.Fprintf(f.writer, "  Target: artefact %s\n", shortID(targetArtefactID))
-		if err != nil {
-			return err
-		}
-		_, err = fmt.Fprintf(f.writer, "\n  → Run: holt questions\n")
+		// targetArtefactID unused in compact view
+		
+		_, err := fmt.Fprintf(f.writer, "[%s] ⚠️  HUMAN_INPUT_REQUIRED: %s (id=%s)\n",
+			timestamp, questionText, shortID(questionID))
 		return err
 
 	default:
