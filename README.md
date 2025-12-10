@@ -1,6 +1,7 @@
 # Holt
 ![Build Status](https://img.shields.io/github/actions/workflow/status/hearth-insights/holt/go.yml?style=flat-square)
 ![Go Version](https://img.shields.io/github/go-mod/go-version/hearth-insights/holt?style=flat-square)
+![Latest Release](https://img.shields.io/github/v/release/hearth-insights/holt?style=flat-square&color=13756e)
 ![License](https://img.shields.io/github/license/hearth-insights/holt?style=flat-square)
 ![Security](https://img.shields.io/badge/security-air--gapped-13756e?style=flat-square)
 
@@ -126,6 +127,46 @@ ls -la hello.txt  # File created by agent!
 4. The agent created `hello.txt` in your workspace and committed it
 5. A `CodeCommit` artefact was created on the blackboard with the commit hash
 6. Complete audit trail preserved in Redis and Git history
+
+---
+
+## Architectural Trade-offs
+
+Holt makes specific design choices that optimise for regulatory compliance at the expense of development speed and ecosystem breadth. If your requirements prioritise auditability over flexibility, these trade-offs are defensible.
+
+| Requirement | General-Purpose Frameworks¹ | Holt |
+| :--- | :--- | :--- |
+| **Deterministic Execution** | Probabilistic (optimistic) | **Cryptographic Ledger (pessimistic)** |
+| **Deployment Model** | Cloud-first / API-dependent | **Air-gapped / Zero egress** |
+| **Audit Trail** | Application logs | **Immutable state machine** |
+| **Compliance Posture** | Bring-your-own controls | **Built-in (HIPAA/SOC2/ISO)** |
+| **Development Velocity** | **Rapid prototyping** | Slower (determinism overhead) |
+| **Ecosystem Integrations** | **Extensive** | Limited (by design) |
+
+¹ *LangChain, LlamaIndex, Haystack, CrewAI, AutoGPT*
+
+**When to use Holt:**
+You operate in a regulated environment where audit failures have material consequences (fines, licence revocation, criminal liability). You need forensic-grade proof of AI decision-making for regulators or internal audit.
+
+**When NOT to use Holt:**
+You're building consumer-facing products, internal tools without compliance constraints, or rapid prototypes where iteration speed matters more than auditability. In those cases, general-purpose frameworks' extensive ecosystems and flexibility are better suited.
+
+---
+
+## Who Should Use Holt?
+
+**You need Holt if:**
+- You operate in regulated industries (Healthcare, Finance, Government)
+- You require **forensic audit trails** for AI decisions
+- You must deploy in **air-gapped environments** (no cloud APIs)
+- You need **deterministic, reproducible** agent behaviour
+- You face **HIPAA, SOC 2, or ISO 27001** compliance requirements
+
+**You should NOT use Holt if:**
+- You prioritise rapid prototyping over auditability
+- You want pre-built integrations with cloud LLM APIs
+- You prefer low-code/no-code tools
+- Your use case doesn't require regulatory compliance
 
 ---
 
