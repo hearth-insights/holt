@@ -57,9 +57,17 @@ func (c *Checker) IsGitRoot() (bool, string, error) {
 		return false, "", err
 	}
 
-	// Clean both paths and compare
+	// Clean both paths and resolve symlinks for comparison
+	// This is critical for macOS where /var is a symlink to /private/var
 	currentDirClean := filepath.Clean(currentDir)
+	if resolved, err := filepath.EvalSymlinks(currentDirClean); err == nil {
+		currentDirClean = resolved
+	}
+
 	gitRootClean := filepath.Clean(gitRoot)
+	if resolved, err := filepath.EvalSymlinks(gitRootClean); err == nil {
+		gitRootClean = resolved
+	}
 
 	isRoot := currentDirClean == gitRootClean
 
