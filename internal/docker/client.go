@@ -17,7 +17,7 @@ func NewClient(ctx context.Context) (*client.Client, error) {
 
 	// Validate daemon is accessible
 	if _, err := cli.Ping(ctx); err != nil {
-		return nil, fmt.Errorf(`Docker daemon not accessible: %w
+		return nil, fmt.Errorf(`docker daemon not accessible: %w
 
 Ensure Docker is running:
   • macOS: Docker Desktop

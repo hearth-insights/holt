@@ -1,0 +1,30 @@
+cff-version: 1.2.0
+message: "If you use this software in a research or compliance context, please cite it as below."
+authors:
+  - name: "Hearth Insights"
+title: "Holt: The Sovereign AI Orchestrator for Regulated Industries"
+version: 0.1.0
+date-released: 2025-10-27
+url: "https://github.com/hearth-insights/holt"
+repository-code: "https://github.com/hearth-insights/holt"
+keywords:
+  - "docker"
+  - "redis"
+  - "golang"
+  - "fintech"
+  - "compliance"
+  - "hippa"
+  - "soc2"
+  - "audit-trail"
+  - "air-gapped"
+  - "air-gap"
+  - "regulatory-compliance"
+  - "regulated-industry"
+  - "financial-crimes"
+  - "agentic-ai"
+  - "ai-orchestration"
+  - "sovereign-ai"
+  - "kyc-aml"
+  - "deterministic-ai"
+license: "MIT"
+type: software

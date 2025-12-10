@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
 	dockerpkg "github.com/hearth-insights/holt/internal/docker"
@@ -32,7 +32,7 @@ func FindInstanceByWorkspace(ctx context.Context, cli *client.Client, workspaceP
 	filter := filters.NewArgs()
 	filter.Add("label", fmt.Sprintf("%s=true", dockerpkg.LabelProject))
 
-	containers, err := cli.ContainerList(ctx, types.ContainerListOptions{
+	containers, err := cli.ContainerList(ctx, container.ListOptions{
 		All:     true,
 		Filters: filter,
 	})
@@ -79,7 +79,7 @@ func GetInstanceRedisPort(ctx context.Context, cli *client.Client, instanceName 
 	filter.Add("label", fmt.Sprintf("%s=%s", dockerpkg.LabelInstanceName, instanceName))
 	filter.Add("label", fmt.Sprintf("%s=redis", dockerpkg.LabelComponent))
 
-	containers, err := cli.ContainerList(ctx, types.ContainerListOptions{
+	containers, err := cli.ContainerList(ctx, container.ListOptions{
 		All:     true,
 		Filters: filter,
 	})
@@ -88,14 +88,14 @@ func GetInstanceRedisPort(ctx context.Context, cli *client.Client, instanceName 
 	}
 
 	if len(containers) == 0 {
-		return 0, fmt.Errorf("Redis container not found for instance '%s'", instanceName)
+		return 0, fmt.Errorf("redis container not found for instance '%s'", instanceName)
 	}
 
 	// Get port from label
 	redisContainer := containers[0]
 	portStr, ok := redisContainer.Labels[dockerpkg.LabelRedisPort]
 	if !ok {
-		return 0, fmt.Errorf("Redis port label missing for instance '%s'", instanceName)
+		return 0, fmt.Errorf("redis port label missing for instance '%s'", instanceName)
 	}
 
 	port, err := strconv.Atoi(portStr)
@@ -114,7 +114,7 @@ func VerifyInstanceRunning(ctx context.Context, cli *client.Client, instanceName
 	filter := filters.NewArgs()
 	filter.Add("label", fmt.Sprintf("%s=%s", dockerpkg.LabelInstanceName, instanceName))
 
-	containers, err := cli.ContainerList(ctx, types.ContainerListOptions{
+	containers, err := cli.ContainerList(ctx, container.ListOptions{
 		All:     true,
 		Filters: filter,
 	})

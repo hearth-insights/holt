@@ -9,29 +9,28 @@ import (
 	"sync"
 	"time"
 
-	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/client"
+	"github.com/google/uuid"
 	"github.com/hearth-insights/holt/internal/config"
 	dockerpkg "github.com/hearth-insights/holt/internal/docker"
 	"github.com/hearth-insights/holt/pkg/blackboard"
-	"github.com/google/uuid"
 )
 
 // WorkerState tracks an active worker container
 // M3.4: Workers are ephemeral containers launched on-demand to execute granted claims
 type WorkerState struct {
-	ContainerID    string    // Docker container ID
-	ContainerName  string    // holt-{instance}-{agent}-worker-{claim-short-id}
-	ClaimID        string    // Claim being executed
-	Role           string    // Agent role
-	AgentName      string    // Original agent name (e.g., "coder-controller")
-	LaunchedAt     time.Time // When worker was launched
-	Status         string    // "created", "running", "exited"
-	ExitCode       int       // Container exit code (when exited)
-	KeepContainer  bool      // M4.10: If true, container is retained after exit for debugging
+	ContainerID   string    // Docker container ID
+	ContainerName string    // holt-{instance}-{agent}-worker-{claim-short-id}
+	ClaimID       string    // Claim being executed
+	Role          string    // Agent role
+	AgentName     string    // Original agent name (e.g., "coder-controller")
+	LaunchedAt    time.Time // When worker was launched
+	Status        string    // "created", "running", "exited"
+	ExitCode      int       // Container exit code (when exited)
+	KeepContainer bool      // M4.10: If true, container is retained after exit for debugging
 }
 
 // WorkerManager handles worker lifecycle management for the orchestrator
@@ -80,7 +79,7 @@ func (wm *WorkerManager) CleanupOrphanedWorkers(ctx context.Context) error {
 	containerFilters := filters.NewArgs()
 	containerFilters.Add("label", fmt.Sprintf("holt.instance=%s", wm.instanceName))
 
-	containers, err := wm.dockerClient.ContainerList(ctx, types.ContainerListOptions{
+	containers, err := wm.dockerClient.ContainerList(ctx, container.ListOptions{
 		All:     true, // Include stopped containers
 		Filters: containerFilters,
 	})
@@ -90,25 +89,25 @@ func (wm *WorkerManager) CleanupOrphanedWorkers(ctx context.Context) error {
 
 	orphanCount := 0
 
-	for _, container := range containers {
+	for _, ctr := range containers {
 		// Check if container is in activeWorkers
 		wm.workerLock.RLock()
-		_, isTracked := wm.activeWorkers[container.ID]
+		_, isTracked := wm.activeWorkers[ctr.ID]
 		wm.workerLock.RUnlock()
 
 		if !isTracked {
 			// Orphaned container - remove it
-			log.Printf("[Orchestrator] Removing orphaned worker container: %s (ID: %s)", container.Names, container.ID[:12])
+			log.Printf("[Orchestrator] Removing orphaned worker container: %s (ID: %s)", ctr.Names, ctr.ID[:12])
 
 			wm.logEvent("orphan_worker_cleanup", map[string]interface{}{
-				"container_id":   container.ID[:12],
-				"container_name": container.Names,
+				"container_id":   ctr.ID[:12],
+				"container_name": ctr.Names,
 			})
 
-			if err := wm.dockerClient.ContainerRemove(ctx, container.ID, types.ContainerRemoveOptions{
+			if err := wm.dockerClient.ContainerRemove(ctx, ctr.ID, container.RemoveOptions{
 				Force: true,
 			}); err != nil {
-				log.Printf("[Orchestrator] Warning: Failed to remove orphaned container %s: %v", container.ID[:12], err)
+				log.Printf("[Orchestrator] Warning: Failed to remove orphaned container %s: %v", ctr.ID[:12], err)
 				// Continue with other containers
 			} else {
 				orphanCount++
@@ -150,7 +149,7 @@ func (wm *WorkerManager) LaunchWorker(ctx context.Context, claim *blackboard.Cla
 		"container_name": containerName,
 		"claim_id":       claim.ID,
 		"role":           agentRole,
-		"agent_name":     agentRole, // M3.7: Agent name = role
+		"agent_name":     agentRole,                   // M3.7: Agent name = role
 		"image_id":       wm.truncateImageID(imageID), // M3.9
 	})
 
@@ -223,9 +222,9 @@ func (wm *WorkerManager) LaunchWorker(ctx context.Context, claim *blackboard.Cla
 	}
 
 	// Start container
-	if err := wm.dockerClient.ContainerStart(ctx, resp.ID, types.ContainerStartOptions{}); err != nil {
+	if err := wm.dockerClient.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
 		// Cleanup on start failure
-		wm.dockerClient.ContainerRemove(ctx, resp.ID, types.ContainerRemoveOptions{Force: true})
+		wm.dockerClient.ContainerRemove(ctx, resp.ID, container.RemoveOptions{Force: true})
 		return fmt.Errorf("failed to start worker container: %w", err)
 	}
 
@@ -401,7 +400,7 @@ func (wm *WorkerManager) cleanupWorker(ctx context.Context, containerID string) 
 		})
 	} else {
 		// Default behavior: Remove container
-		wm.dockerClient.ContainerRemove(ctx, containerID, types.ContainerRemoveOptions{
+		wm.dockerClient.ContainerRemove(ctx, containerID, container.RemoveOptions{
 			Force: true,
 		})
 	}
@@ -422,7 +421,7 @@ func (wm *WorkerManager) cleanupWorker(ctx context.Context, containerID string) 
 // getWorkerLogs retrieves container logs for failure debugging
 // M3.4: Returns last 100 lines of worker logs
 func (wm *WorkerManager) getWorkerLogs(ctx context.Context, containerID string) string {
-	options := types.ContainerLogsOptions{
+	options := container.LogsOptions{
 		ShowStdout: true,
 		ShowStderr: true,
 		Tail:       "100", // Last 100 lines

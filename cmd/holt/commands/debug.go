@@ -23,9 +23,9 @@ import (
 )
 
 var (
-	debugInstanceName      string
-	debugBreakpoints       []string // Repeatable --break flag
-	debugPauseOnStart      bool     // Pause immediately on attach
+	debugInstanceName string
+	debugBreakpoints  []string // Repeatable --break flag
+	debugPauseOnStart bool     // Pause immediately on attach
 )
 
 var debugCmd = &cobra.Command{
@@ -220,27 +220,27 @@ func runDebug(cmd *cobra.Command, args []string) error {
 
 // Debugger manages an interactive debug session
 type Debugger struct {
-	ctx           context.Context
-	client        *blackboard.Client
-	instanceName  string
-	sessionID     string
-	redisClient   *redis.Client
+	ctx          context.Context
+	client       *blackboard.Client
+	instanceName string
+	sessionID    string
+	redisClient  *redis.Client
 
 	// Cancellation and cleanup
-	cancelCtx     context.Context
-	cancelFunc    context.CancelFunc
-	wg            sync.WaitGroup
+	cancelCtx  context.Context
+	cancelFunc context.CancelFunc
+	wg         sync.WaitGroup
 
 	// State
-	mu            sync.RWMutex
-	isPaused      bool
-	pauseContext  *debug.PauseContext
-	breakpoints   map[string]*debug.Breakpoint
-	nextBPID      int
+	mu           sync.RWMutex
+	isPaused     bool
+	pauseContext *debug.PauseContext
+	breakpoints  map[string]*debug.Breakpoint
+	nextBPID     int
 
 	// Communication channels
-	eventCh       chan *debug.Event
-	commandQueue  chan string
+	eventCh      chan *debug.Event
+	commandQueue chan string
 }
 
 // NewDebugger creates a new debugger instance
@@ -688,24 +688,6 @@ func (d *Debugger) executor(input string) {
 }
 
 // completer provides auto-completion suggestions
-func (d *Debugger) completer(doc prompt.Document) []prompt.Suggest {
-	suggestions := []prompt.Suggest{
-		{Text: "continue", Description: "Resume workflow execution"},
-		{Text: "next", Description: "Single-step: process one event"},
-		{Text: "break", Description: "Set new breakpoint"},
-		{Text: "breakpoints", Description: "List active breakpoints"},
-		{Text: "clear", Description: "Clear breakpoint by ID"},
-		{Text: "print", Description: "Inspect artefact"},
-		{Text: "reviews", Description: "List pending reviews"},
-		{Text: "review", Description: "Manually review claim"},
-		{Text: "terminate", Description: "Kill current claim (permanent audit trail)"},
-		{Text: "forage", Description: "Start new workflow with goal"},
-		{Text: "help", Description: "Show command reference"},
-		{Text: "exit", Description: "End debug session"},
-	}
-
-	return prompt.FilterHasPrefix(suggestions, doc.GetWordBeforeCursor(), true)
-}
 
 // Command implementations
 

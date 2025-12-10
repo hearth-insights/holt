@@ -581,11 +581,6 @@ func validateAgentImages(ctx context.Context, cli *client.Client, cfg *config.Ho
 // Uses goroutines + WaitGroup for concurrent startup.
 // Validates health checks before reporting success.
 // Returns error immediately on first failure (fail-fast) and triggers rollback.
-func launchAgentContainers(ctx context.Context, cli *client.Client, cfg *config.HoltConfig, instanceName, runID, workspacePath, networkName, redisName string) error {
-	// M4.4: Construct Redis URL from container name (backward compatibility)
-	redisURL := fmt.Sprintf("redis://%s:6379", redisName)
-	return launchAgentContainersWithRedisURL(ctx, cli, cfg, instanceName, runID, workspacePath, networkName, redisURL)
-}
 
 // M4.4: launchAgentContainersWithRedisURL is the updated version that accepts a Redis URL
 // This supports both external and managed Redis modes
@@ -641,11 +636,6 @@ func launchAgentContainersWithRedisURL(ctx context.Context, cli *client.Client, 
 }
 
 // M3.7: agentRole parameter is the agent key from holt.yml (which IS the role)
-func launchAgentContainer(ctx context.Context, cli *client.Client, instanceName, runID, workspacePath, networkName, redisName, agentRole string, agent config.Agent) error {
-	// M4.4: Construct Redis URL from container name (backward compatibility)
-	redisURL := fmt.Sprintf("redis://%s:6379", redisName)
-	return launchAgentContainerWithRedisURL(ctx, cli, instanceName, runID, workspacePath, networkName, redisURL, agentRole, agent)
-}
 
 // M4.4: launchAgentContainerWithRedisURL is the updated version that accepts a Redis URL
 func launchAgentContainerWithRedisURL(ctx context.Context, cli *client.Client, instanceName, runID, workspacePath, networkName, redisURL, agentRole string, agent config.Agent) error {

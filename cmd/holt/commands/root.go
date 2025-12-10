@@ -84,7 +84,7 @@ func SetVersionInfo(v, c, d string) {
 
 func init() {
 	// Global configuration flag
-	rootCmd.PersistentFlags().StringVarP(&globalConfigPath, "config", "f", "",
+	rootCmd.PersistentFlags().StringVarP(&globalConfigPath, "config", "c", "",
 		"Path to holt.yml configuration file")
 
 	// Global verbosity flags (mutually exclusive)

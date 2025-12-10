@@ -160,10 +160,10 @@ func StreamActivity(ctx context.Context, client *blackboard.Client, instanceName
 func displayHistoricalArtefacts(ctx context.Context, client *blackboard.Client, instanceName string, filters *FilterCriteria, formatter eventFormatter) error {
 	// historicalEvent represents any event (artefact, claim, or workflow event) with a timestamp
 	type historicalEvent struct {
-		timestampMs     int64
-		artefact        *blackboard.Artefact
-		claim           *blackboard.Claim
-		workflowEvent   *blackboard.WorkflowEvent
+		timestampMs   int64
+		artefact      *blackboard.Artefact
+		claim         *blackboard.Claim
+		workflowEvent *blackboard.WorkflowEvent
 	}
 
 	var allEvents []historicalEvent
@@ -288,149 +288,148 @@ func displayHistoricalArtefacts(ctx context.Context, client *blackboard.Client, 
 		// Process each claim for this artefact
 		for _, primaryClaim := range claims {
 
-		// Timestamp for claim events - use artefact creation time
-		claimTimestampMs := artefact.CreatedAtMs
+			// Timestamp for claim events - use artefact creation time
+			claimTimestampMs := artefact.CreatedAtMs
 
-		// Add claim created event
-		allEvents = append(allEvents, historicalEvent{
-			timestampMs: claimTimestampMs,
-			claim:       primaryClaim,
-		})
+			// Add claim created event
+			allEvents = append(allEvents, historicalEvent{
+				timestampMs: claimTimestampMs,
+				claim:       primaryClaim,
+			})
 
-		// Reconstruct bid_submitted events from PhaseState.AllBids
-		if primaryClaim.PhaseState != nil && len(primaryClaim.PhaseState.AllBids) > 0 {
-			// Sort agents to ensure deterministic event ordering (even with timestamps)
-			var agents []string
-			for agent := range primaryClaim.PhaseState.AllBids {
-				agents = append(agents, agent)
-			}
-			sort.Strings(agents)
-
-			for _, agentName := range agents {
-				bidType := primaryClaim.PhaseState.AllBids[agentName]
-				
-				// Use stored timestamp if available, otherwise fallback to claim timestamp + 1ms
-				bidTimestamp := claimTimestampMs + 1
-				if ts, ok := primaryClaim.PhaseState.BidTimestamps[agentName]; ok && ts > 0 {
-					bidTimestamp = ts
+			// Reconstruct bid_submitted events from PhaseState.AllBids
+			if primaryClaim.PhaseState != nil && len(primaryClaim.PhaseState.AllBids) > 0 {
+				// Sort agents to ensure deterministic event ordering (even with timestamps)
+				var agents []string
+				for agent := range primaryClaim.PhaseState.AllBids {
+					agents = append(agents, agent)
 				}
+				sort.Strings(agents)
 
-				workflowEvent := &blackboard.WorkflowEvent{
-					Event: "bid_submitted",
-					Data: map[string]interface{}{
-						"agent_name": agentName,
-						"claim_id":   primaryClaim.ID,
-						"bid_type":   string(bidType),
-					},
-				}
-				allEvents = append(allEvents, historicalEvent{
-					timestampMs:   bidTimestamp,
-					workflowEvent: workflowEvent,
-				})
-			}
-		}
+				for _, agentName := range agents {
+					bidType := primaryClaim.PhaseState.AllBids[agentName]
 
-		// Reconstruct claim_granted events
-		grantOffset := int64(100) // Grants come ~100ms after bids
-
-		// Review phase grants
-		for _, agentName := range primaryClaim.GrantedReviewAgents {
-			workflowEvent := &blackboard.WorkflowEvent{
-				Event: "claim_granted",
-				Data: map[string]interface{}{
-					"agent_name":     agentName,
-					"claim_id":       primaryClaim.ID,
-					"grant_type":     "review",
-					"agent_image_id": primaryClaim.GrantedAgentImageID,
-				},
-			}
-			allEvents = append(allEvents, historicalEvent{
-				timestampMs:   claimTimestampMs + grantOffset,
-				workflowEvent: workflowEvent,
-			})
-			grantOffset += 1
-		}
-
-		// Parallel phase grants
-		for _, agentName := range primaryClaim.GrantedParallelAgents {
-			workflowEvent := &blackboard.WorkflowEvent{
-				Event: "claim_granted",
-				Data: map[string]interface{}{
-					"agent_name":     agentName,
-					"claim_id":       primaryClaim.ID,
-					"grant_type":     "claim",
-					"agent_image_id": primaryClaim.GrantedAgentImageID,
-				},
-			}
-			allEvents = append(allEvents, historicalEvent{
-				timestampMs:   claimTimestampMs + grantOffset,
-				workflowEvent: workflowEvent,
-			})
-			grantOffset += 1
-		}
-
-		// Exclusive phase grant
-		if primaryClaim.GrantedExclusiveAgent != "" {
-			workflowEvent := &blackboard.WorkflowEvent{
-				Event: "claim_granted",
-				Data: map[string]interface{}{
-					"agent_name":     primaryClaim.GrantedExclusiveAgent,
-					"claim_id":       primaryClaim.ID,
-					"grant_type":     "exclusive",
-					"agent_image_id": primaryClaim.GrantedAgentImageID,
-				},
-			}
-			allEvents = append(allEvents, historicalEvent{
-				timestampMs:   claimTimestampMs + grantOffset,
-				workflowEvent: workflowEvent,
-			})
-		}
-
-
-		// Reconstruct feedback_claim_created events for terminated claims
-		// The feedback claim is a separate claim (could be pending_assignment, complete, etc.)
-		// that has additional_context_ids populated with review artefact IDs
-		// Only do this for terminated claims to avoid showing the feedback_claim_created event multiple times
-		if primaryClaim.Status == blackboard.ClaimStatusTerminated {
-			// Find the feedback claim (has additional_context_ids and same artefact ID)
-			for _, otherClaim := range allClaimsByID {
-				if len(otherClaim.AdditionalContextIDs) > 0 &&
-					otherClaim.ArtefactID == artefact.ID &&
-					otherClaim.ID != primaryClaim.ID {
-
-					// Find the latest review timestamp to place these events after
-					latestReviewTs := claimTimestampMs
-					for _, reviewArtefact := range artefactsByID {
-						if reviewArtefact.StructuralType != blackboard.StructuralTypeReview {
-							continue
-						}
-						for _, sourceID := range reviewArtefact.SourceArtefacts {
-							if sourceID == artefact.ID && reviewArtefact.CreatedAtMs > latestReviewTs {
-								latestReviewTs = reviewArtefact.CreatedAtMs
-							}
-						}
+					// Use stored timestamp if available, otherwise fallback to claim timestamp + 1ms
+					bidTimestamp := claimTimestampMs + 1
+					if ts, ok := primaryClaim.PhaseState.BidTimestamps[agentName]; ok && ts > 0 {
+						bidTimestamp = ts
 					}
 
 					workflowEvent := &blackboard.WorkflowEvent{
-						Event: "feedback_claim_created",
+						Event: "bid_submitted",
 						Data: map[string]interface{}{
-							"target_agent_role": otherClaim.GrantedExclusiveAgent,
-							"feedback_claim_id": otherClaim.ID,
-							"iteration":         artefact.Version,
+							"agent_name": agentName,
+							"claim_id":   primaryClaim.ID,
+							"bid_type":   string(bidType),
 						},
 					}
-					// Feedback assignment comes 1ms after the last review
 					allEvents = append(allEvents, historicalEvent{
-						timestampMs:   latestReviewTs + 1,
+						timestampMs:   bidTimestamp,
 						workflowEvent: workflowEvent,
 					})
-
-					// NOTE: Don't add the feedback claim here - it will be processed
-					// in its own iteration of the claim loop
-					break
 				}
 			}
-		}
+
+			// Reconstruct claim_granted events
+			grantOffset := int64(100) // Grants come ~100ms after bids
+
+			// Review phase grants
+			for _, agentName := range primaryClaim.GrantedReviewAgents {
+				workflowEvent := &blackboard.WorkflowEvent{
+					Event: "claim_granted",
+					Data: map[string]interface{}{
+						"agent_name":     agentName,
+						"claim_id":       primaryClaim.ID,
+						"grant_type":     "review",
+						"agent_image_id": primaryClaim.GrantedAgentImageID,
+					},
+				}
+				allEvents = append(allEvents, historicalEvent{
+					timestampMs:   claimTimestampMs + grantOffset,
+					workflowEvent: workflowEvent,
+				})
+				grantOffset += 1
+			}
+
+			// Parallel phase grants
+			for _, agentName := range primaryClaim.GrantedParallelAgents {
+				workflowEvent := &blackboard.WorkflowEvent{
+					Event: "claim_granted",
+					Data: map[string]interface{}{
+						"agent_name":     agentName,
+						"claim_id":       primaryClaim.ID,
+						"grant_type":     "claim",
+						"agent_image_id": primaryClaim.GrantedAgentImageID,
+					},
+				}
+				allEvents = append(allEvents, historicalEvent{
+					timestampMs:   claimTimestampMs + grantOffset,
+					workflowEvent: workflowEvent,
+				})
+				grantOffset += 1
+			}
+
+			// Exclusive phase grant
+			if primaryClaim.GrantedExclusiveAgent != "" {
+				workflowEvent := &blackboard.WorkflowEvent{
+					Event: "claim_granted",
+					Data: map[string]interface{}{
+						"agent_name":     primaryClaim.GrantedExclusiveAgent,
+						"claim_id":       primaryClaim.ID,
+						"grant_type":     "exclusive",
+						"agent_image_id": primaryClaim.GrantedAgentImageID,
+					},
+				}
+				allEvents = append(allEvents, historicalEvent{
+					timestampMs:   claimTimestampMs + grantOffset,
+					workflowEvent: workflowEvent,
+				})
+			}
+
+			// Reconstruct feedback_claim_created events for terminated claims
+			// The feedback claim is a separate claim (could be pending_assignment, complete, etc.)
+			// that has additional_context_ids populated with review artefact IDs
+			// Only do this for terminated claims to avoid showing the feedback_claim_created event multiple times
+			if primaryClaim.Status == blackboard.ClaimStatusTerminated {
+				// Find the feedback claim (has additional_context_ids and same artefact ID)
+				for _, otherClaim := range allClaimsByID {
+					if len(otherClaim.AdditionalContextIDs) > 0 &&
+						otherClaim.ArtefactID == artefact.ID &&
+						otherClaim.ID != primaryClaim.ID {
+
+						// Find the latest review timestamp to place these events after
+						latestReviewTs := claimTimestampMs
+						for _, reviewArtefact := range artefactsByID {
+							if reviewArtefact.StructuralType != blackboard.StructuralTypeReview {
+								continue
+							}
+							for _, sourceID := range reviewArtefact.SourceArtefacts {
+								if sourceID == artefact.ID && reviewArtefact.CreatedAtMs > latestReviewTs {
+									latestReviewTs = reviewArtefact.CreatedAtMs
+								}
+							}
+						}
+
+						workflowEvent := &blackboard.WorkflowEvent{
+							Event: "feedback_claim_created",
+							Data: map[string]interface{}{
+								"target_agent_role": otherClaim.GrantedExclusiveAgent,
+								"feedback_claim_id": otherClaim.ID,
+								"iteration":         artefact.Version,
+							},
+						}
+						// Feedback assignment comes 1ms after the last review
+						allEvents = append(allEvents, historicalEvent{
+							timestampMs:   latestReviewTs + 1,
+							workflowEvent: workflowEvent,
+						})
+
+						// NOTE: Don't add the feedback claim here - it will be processed
+						// in its own iteration of the claim loop
+						break
+					}
+				}
+			}
 		} // End of loop over claims for this artefact
 
 		// Reconstruct review_approved/review_rejected events from Review artefacts
@@ -783,30 +782,13 @@ func (f *defaultFormatter) FormatWorkflow(event *blackboard.WorkflowEvent, times
 		return err
 
 	case "human_input_required":
-		// M4.1: Display human input required event with distinct formatting
+		// M4.11: Display human input required event as compact single line
 		questionID, _ := event.Data["question_id"].(string)
 		questionText, _ := event.Data["question_text"].(string)
-		targetArtefactID, _ := event.Data["target_artefact_id"].(string)
+		// targetArtefactID unused in compact view
 
-		_, err := fmt.Fprintf(f.writer, "[%s] ⚠️  HUMAN_INPUT_REQUIRED\n", timestamp)
-		if err != nil {
-			return err
-		}
-		_, err = fmt.Fprintf(f.writer, "  Question %s\n", shortID(questionID))
-		if err != nil {
-			return err
-		}
-		if questionText != "" {
-			_, err = fmt.Fprintf(f.writer, "  \"%s\"\n", questionText)
-			if err != nil {
-				return err
-			}
-		}
-		_, err = fmt.Fprintf(f.writer, "  Target: artefact %s\n", shortID(targetArtefactID))
-		if err != nil {
-			return err
-		}
-		_, err = fmt.Fprintf(f.writer, "\n  → Run: holt questions\n")
+		_, err := fmt.Fprintf(f.writer, "[%s] ⚠️  HUMAN_INPUT_REQUIRED: %s (id=%s)\n",
+			timestamp, questionText, shortID(questionID))
 		return err
 
 	default:
@@ -906,15 +888,6 @@ func truncateImageID(imageID string) string {
 	}
 
 	return imageID
-}
-
-// truncateID truncates a UUID to the first 8 characters for display.
-// M4.1: Used for displaying Question and artefact IDs in watch output.
-func truncateID(id string) string {
-	if len(id) >= 8 {
-		return id[:8]
-	}
-	return id
 }
 
 // formatTimestampMs formats a Unix millisecond timestamp as HH:MM:SS.mmm.

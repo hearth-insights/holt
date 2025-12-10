@@ -27,8 +27,8 @@ type HoltConfig struct {
 
 // BiddingStrategyConfig defines the agent's bidding behavior (M4.8)
 type BiddingStrategyConfig struct {
-	Type        string   `yaml:"type"`                   // Required: review, claim, exclusive, or ignore
-	TargetTypes []string `yaml:"target_types,omitempty"` // Optional: list of artefact types to bid on
+	Type        string   `yaml:"type" json:"type"`                   // Required: review, claim, exclusive, or ignore
+	TargetTypes []string `yaml:"target_types,omitempty" json:"target_types,omitempty"` // Optional: list of artefact types to bid on
 }
 
 // UnmarshalYAML implements custom unmarshalling to reject legacy string format (M4.8)

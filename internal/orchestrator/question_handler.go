@@ -15,6 +15,7 @@ import (
 type QuestionPayload struct {
 	QuestionText      string `json:"question_text"`
 	TargetArtefactID  string `json:"target_artefact_id"`
+	Routing           string `json:"routing,omitempty"` // "auto" (default) or "human"
 }
 
 // handleQuestionArtefact processes a Question artefact by terminating the original claim
@@ -90,7 +91,19 @@ func (e *Engine) handleQuestionArtefact(ctx context.Context, questionArtefact *b
 
 	log.Printf("[Orchestrator] Claim %s terminated: agent asked question %s", originalClaim.ID, questionArtefact.ID)
 
-	// M4.1: Special handling for questions targeting "user"
+	// M4.11: Production Gatekeeper - Direct to Human routing
+	// If the agent explicitly requests human routing, we bypass the producer feedback loop.
+	if payload.Routing == "human" {
+		log.Printf("[Orchestrator] Question %s requested direct-to-human routing", questionArtefact.ID)
+		if err := e.publishHumanInputRequiredEvent(ctx, questionArtefact.ID, payload.QuestionText, targetArtefact.ID); err != nil {
+			log.Printf("[Orchestrator] Failed to publish human_input_required event: %v", err)
+			return fmt.Errorf("failed to publish human_input_required event: %w", err)
+		}
+		// Bypass feedback claim creation
+		return nil
+	}
+
+	// M4.1: Special handling for questions targeting "user" (legacy implicit routing)
 	if targetArtefact.ProducedByRole == "user" {
 		if err := e.publishHumanInputRequiredEvent(ctx, questionArtefact.ID, payload.QuestionText, targetArtefact.ID); err != nil {
 			log.Printf("[Orchestrator] Failed to publish human_input_required event: %v", err)

@@ -76,32 +76,6 @@ func HasBidsForPhase(bids map[string]blackboard.BidType, phase string) bool {
 }
 
 // isGrantedAgent checks if an agent role is in the granted agents list.
-func isGrantedAgent(claim *blackboard.Claim, agentRole string, phase string) bool {
-	var grantedList []string
-
-	switch phase {
-	case "review":
-		grantedList = claim.GrantedReviewAgents
-	case "parallel":
-		grantedList = claim.GrantedParallelAgents
-	case "exclusive":
-		if claim.GrantedExclusiveAgent == "" {
-			return false
-		}
-		// For exclusive, check if the role matches the single granted agent's role
-		// Note: In M3.2 we need to map agent name to role, which we'll do when processing artefacts
-		return claim.GrantedExclusiveAgent != ""
-	default:
-		return false
-	}
-
-	for _, granted := range grantedList {
-		if granted == agentRole {
-			return true
-		}
-	}
-	return false
-}
 
 // persistPhaseState writes phase state to the claim in Redis (M3.5).
 // This enables orchestrator restart resilience by persisting all phase tracking state.
@@ -132,8 +106,8 @@ func (e *Engine) pauseGrantForQueue(ctx context.Context, claim *blackboard.Claim
 	// Update claim with queue metadata
 	claim.GrantQueue = &blackboard.GrantQueue{
 		PausedAtMs: pausedAt, // M3.9: Field renamed
-		AgentName: agentName,
-		Position:  0, // Not populated in M3.5 - ZSET score provides ordering
+		AgentName:  agentName,
+		Position:   0, // Not populated in M3.5 - ZSET score provides ordering
 	}
 
 	// Persist claim with queue metadata
