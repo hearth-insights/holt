@@ -1,7 +1,7 @@
 # Holt
-![Build Status](https://img.shields.io/github/actions/workflow/status/hearth-insights/holt/go.yml?style=flat-square)
+![Build Status](https://img.shields.io/github/actions/workflow/status/hearth-insights/holt/ci.yml?style=flat-square)
 ![Go Version](https://img.shields.io/github/go-mod/go-version/hearth-insights/holt?style=flat-square)
-![Latest Release](https://img.shields.io/github/v/release/hearth-insights/holt?style=flat-square&color=13756e)
+![Latest Tag](https://img.shields.io/github/v/tag/hearth-insights/holt?style=flat-square&color=13756e)
 ![License](https://img.shields.io/github/license/hearth-insights/holt?style=flat-square)
 ![Security](https://img.shields.io/badge/security-air--gapped-13756e?style=flat-square)
 
