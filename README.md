@@ -2,18 +2,26 @@
 ![Build Status](https://img.shields.io/github/actions/workflow/status/hearth-insights/holt/go.yml?style=flat-square)
 ![Go Version](https://img.shields.io/github/go-mod/go-version/hearth-insights/holt?style=flat-square)
 ![License](https://img.shields.io/github/license/hearth-insights/holt?style=flat-square)
-![Security](https://img.shields.io/badge/security-air--gapped-teal?style=flat-square)
+![Security](https://img.shields.io/badge/security-air--gapped-13756e?style=flat-square)
 
-**Sovereign Orchestration for Regulated Industries**
+**Holt: The sovereign AI orchestrator for regulated industries. Build secure, air-gapped, and fully auditable agent workflows that run entirely on your infrastructure.**
 
-Holt is the open-source control plane for regulated AI. It enables organizations to orchestrate autonomous agents in high-compliance environments—from Financial Crime investigations (AML/KYC) to Clinical Data Processing—while maintaining a **cryptographically-verifiable audit trail** of every decision.
+> **Build an Agent in 5 Minutes:** Skip the platform build. Use the [Agent Development Kit (ADK)](docs/independent-holt-clan-creation/README.md).
 
 ---
 
-## The Sovereign Guarantee
+## The Audit Paradox
 
-Holt provides absolute operational sovereignty for organizations that cannot tolerate data egress or dependency on external infrastructure:
+Standard AI agents operate as black boxes—opaque, cloud-dependent, and impossible to audit. Holt resolves this paradox with a glass box architecture that provides absolute operational sovereignty:
 
+| Feature | Standard AI Agents ("Black Box") | Holt ("Glass Box") |
+| :--- | :--- | :--- |
+| **Auditability** | Opaque / Logs only | **Cryptographic Ledger** |
+| **Connectivity** | Cloud-Dependent / APIs | **Air-Gapped / Zero Egress** |
+| **State** | Ephemeral / Probabilistic | **Immutable / Deterministic** |
+| **Compliance** | "Trust me" | **Forensic Proof** |
+
+**What this means in practice:**
 *   **Air-Gap Ready**: Compiled as a static Go binary with zero external dependencies. Runs in isolated environments without internet access—bunkers, private clouds, or on-premises infrastructure.
 *   **Zero Egress**: Your data never leaves your security perimeter. No SaaS API calls. No cloud processing. All computation happens within your controlled environment.
 *   **No 'Phone Home'**: No licensing servers, telemetry, or hidden upstreams. Absolute code sovereignty with full source availability.
@@ -36,19 +44,22 @@ graph LR
 *   **Absolute Data Sovereignty**: Self-hosted by default, allowing for deployment in **air-gapped environments**. The entire platform runs on your infrastructure, ensuring no data, metadata, or logs ever leave your security perimeter.
 *   **Cryptographically-Verifiable Audit Trail**: The central "Blackboard" acts as a chronological, append-only ledger with temporal ordering guarantees, providing a complete audit trail of every action taken by every agent.
 
----
-
-## Compliance and Security
-
-Holt is architected to support the stringent security and compliance requirements of regulated industries. Its self-hosted nature, chronological audit trail, and declarative policies provide the foundation needed to build a compliant system.
-
-For comprehensive regulatory assurance documentation—including controls mapping, audit defense theory, and enterprise architecture—see our compliance suite:
-
-**[➡️ Holt: Regulatory Assurance Suite](./docs/compliance/)**
+<div align="center">
+  <img src="https://github.com/user-attachments/assets/6eded66e-a339-4d6a-9049-9c935a3bc4a4" alt="Forensic demo of an agent swarm executing a workflow" width="100%">
+  <p><em>Forensic demo of an agent swarm executing a workflow.</em></p>
+</div>
 
 ---
 
 ## Quick Start
+
+### ⚡️ Instant Demo
+
+Want to see the audit trail in action? Run the demo script (requires Docker):
+
+```bash
+curl -sL https://raw.githubusercontent.com/hearth-insights/holt/main/scripts/quickstart.sh | bash
+```
 
 ### Prerequisites
 
@@ -115,6 +126,16 @@ ls -la hello.txt  # File created by agent!
 4. The agent created `hello.txt` in your workspace and committed it
 5. A `CodeCommit` artefact was created on the blackboard with the commit hash
 6. Complete audit trail preserved in Redis and Git history
+
+---
+
+## Compliance and Security
+
+Holt is architected to support the stringent security and compliance requirements of regulated industries. Its self-hosted nature, chronological audit trail, and declarative policies provide the foundation needed to build a compliant system.
+
+For comprehensive regulatory assurance documentation—including controls mapping, audit defense theory, and enterprise architecture—see our compliance suite:
+
+**[➡️ Holt: Regulatory Assurance Suite](./docs/compliance/)**
 
 ---
 
@@ -231,7 +252,7 @@ A lightweight Go binary that runs as the entrypoint in every agent container. It
 - Creates artefacts from tool output
 - Operates concurrently to remain responsive
 
-**Key insight:** The pup handles orchestration complexity. You just write the tool logic.
+**Key insight:** The pup handles orchestration complexity. You write the tool logic.
 
 ### Agents
 
@@ -576,7 +597,7 @@ Each component (orchestrator, CLI, agent pup) has one job and does it excellentl
 
 ### Container-Native by Design
 
-Agents can use any tool that can be containerized - not just Python functions. This enables orchestration of compilers, CLIs, infrastructure tools, and more.
+Agents can use any tool that can be containerised—Python functions, compilers, CLIs, infrastructure tools, and more.
 
 ---
 
