@@ -1,9 +1,9 @@
 # Holt
-![Build Status](https://img.shields.io/github/actions/workflow/status/hearth-insights/holt/ci.yml?style=flat-square)
-![Go Version](https://img.shields.io/github/go-mod/go-version/hearth-insights/holt?style=flat-square)
-![Latest Tag](https://img.shields.io/github/v/tag/hearth-insights/holt?style=flat-square&color=13756e)
-![License](https://img.shields.io/github/license/hearth-insights/holt?style=flat-square)
-![Security](https://img.shields.io/badge/security-air--gapped-13756e?style=flat-square)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/hearth-insights/holt/ci.yml?style=flat-square)](https://github.com/hearth-insights/holt/actions/workflows/ci.yml)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/hearth-insights/holt?style=flat-square)](https://github.com/hearth-insights/holt/blob/main/go.mod)
+[![Latest Tag](https://img.shields.io/github/v/tag/hearth-insights/holt?style=flat-square&color=13756e)](https://github.com/hearth-insights/holt/tags)
+[![License](https://img.shields.io/github/license/hearth-insights/holt?style=flat-square)](https://github.com/hearth-insights/holt/blob/main/LICENSE)
+[![Security](https://img.shields.io/badge/security-air--gapped-13756e?style=flat-square)](#compliance-and-security)
 
 **Holt: The sovereign AI orchestrator for regulated industries. Build secure, air-gapped, and fully auditable agent workflows that run entirely on your infrastructure.**
 
