@@ -166,12 +166,3 @@ func detectManagedRedisContainerExists(ctx context.Context, cli *client.Client, 
 // M4.4: validateExternalRedisConnection attempts to connect to external Redis URI
 // This is a basic validation during holt up to fail fast if Redis is unreachable
 // Returns nil if connection succeeds, error otherwise
-func validateExternalRedisConnection(ctx context.Context, uri string) error {
-	// Import redis client
-	// Note: This is a basic check - actual connection logic happens in orchestrator/agents
-	// For now, we'll skip validation to avoid adding redis dependency to CLI
-	// The orchestrator will fail clearly if connection is invalid
-
-	printer.Debug("Skipping external Redis connection validation (will be validated by orchestrator)\n")
-	return nil
-}

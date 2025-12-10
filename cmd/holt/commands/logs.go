@@ -3,10 +3,10 @@ package commands
 import (
 	"context"
 	"fmt"
-	"io"
 
-	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/container"
 	dockerclient "github.com/docker/docker/client"
+	"github.com/docker/docker/pkg/stdcopy"
 	dockerpkg "github.com/hearth-insights/holt/internal/docker"
 	"github.com/hearth-insights/holt/internal/instance"
 	"github.com/hearth-insights/holt/internal/printer"
@@ -101,7 +101,7 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	}
 
 	// Build log options
-	logOptions := types.ContainerLogsOptions{
+	logOptions := container.LogsOptions{
 		ShowStdout: true,
 		ShowStderr: true,
 		Follow:     logsFollow,
@@ -120,10 +120,10 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	}
 	defer reader.Close()
 
-	// Copy logs to stdout
-	// Docker logs use a multiplexed stream format - we use io.Copy which handles it
-	_, err = io.Copy(cmd.OutOrStdout(), reader)
-	if err != nil && err != io.EOF {
+	// Copy logs to stdout/stderr
+	// Docker logs use a multiplexed stream format that needs demultiplexing
+	_, err = stdcopy.StdCopy(cmd.OutOrStdout(), cmd.ErrOrStderr(), reader)
+	if err != nil {
 		return fmt.Errorf("error streaming logs: %w", err)
 	}
 

@@ -29,7 +29,7 @@ func run(ctx context.Context, args []string, getEnv func(string) string) error {
 	// We use a custom flag set to avoid polluting the global flag set
 	fs := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	showVersion := fs.Bool("version", false, "Show version information")
-	
+
 	// Parse flags (skipping program name)
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
@@ -45,31 +45,31 @@ func run(ctx context.Context, args []string, getEnv func(string) string) error {
 	redisURL := getEnv("REDIS_URL")
 
 	if instanceName == "" || redisURL == "" {
-		return fmt.Errorf("Error: HOLT_INSTANCE_NAME and REDIS_URL must be set")
+		return fmt.Errorf("error: HOLT_INSTANCE_NAME and REDIS_URL must be set")
 	}
 
 	// 2. Parse Redis URL
 	redisOpts, err := redis.ParseURL(redisURL)
 	if err != nil {
-		return fmt.Errorf("Error: Invalid REDIS_URL: %v", err)
+		return fmt.Errorf("error: Invalid REDIS_URL: %v", err)
 	}
 
 	// 3. Create blackboard client
 	bbClient, err := blackboard.NewClient(redisOpts, instanceName)
 	if err != nil {
-		return fmt.Errorf("Error: Failed to create blackboard client: %v", err)
+		return fmt.Errorf("error: Failed to create blackboard client: %v", err)
 	}
 	defer bbClient.Close()
 
 	// 4. Verify Redis connectivity
 	if err := bbClient.Ping(ctx); err != nil {
-		return fmt.Errorf("Error: Redis not accessible: %v", err)
+		return fmt.Errorf("error: Redis not accessible: %v", err)
 	}
 
 	// 5. Load holt.yml configuration from workspace
 	cfg, err := config.Load("/workspace/holt.yml")
 	if err != nil {
-		return fmt.Errorf("Error: Failed to load holt.yml: %v", err)
+		return fmt.Errorf("error: Failed to load holt.yml: %v", err)
 	}
 
 	fmt.Printf("Orchestrator starting for instance '%s' with %d agents\n", instanceName, len(cfg.Agents))
@@ -156,7 +156,7 @@ func run(ctx context.Context, args []string, getEnv func(string) string) error {
 		return <-errCh
 	case runErr := <-errCh:
 		if runErr != nil {
-			return fmt.Errorf("Orchestrator error: %v", runErr)
+			return fmt.Errorf("orchestrator error: %v", runErr)
 		}
 	case <-ctx.Done():
 		// Context cancelled externally (e.g. in tests)

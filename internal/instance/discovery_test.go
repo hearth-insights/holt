@@ -176,7 +176,7 @@ func TestGetInstanceRedisPort(t *testing.T) {
 	t.Run("returns error when Redis container not found", func(t *testing.T) {
 		_, err := GetInstanceRedisPort(ctx, cli, "nonexistent-instance")
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "Redis container not found")
+		require.Contains(t, err.Error(), "redis container not found")
 	})
 
 	t.Run("returns error when port label missing", func(t *testing.T) {
@@ -217,7 +217,7 @@ func TestVerifyInstanceRunning(t *testing.T) {
 
 	t.Run("returns nil when instance containers are running", func(t *testing.T) {
 		// Cleanup any existing containers from previous runs
-		existing, _ := cli.ContainerList(ctx, types.ContainerListOptions{
+		existing, _ := cli.ContainerList(ctx, container.ListOptions{
 			All: true,
 			Filters: filters.NewArgs(
 				filters.Arg("label", fmt.Sprintf("%s=running-instance", dockerpkg.LabelInstanceName)),

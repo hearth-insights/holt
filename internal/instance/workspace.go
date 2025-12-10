@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
 	dockerpkg "github.com/hearth-insights/holt/internal/docker"
@@ -118,7 +118,7 @@ func CheckWorkspaceCollision(ctx context.Context, cli *client.Client, workspaceP
 	filter := filters.NewArgs()
 	filter.Add("label", fmt.Sprintf("%s=true", dockerpkg.LabelProject))
 
-	containers, err := cli.ContainerList(ctx, types.ContainerListOptions{
+	containers, err := cli.ContainerList(ctx, container.ListOptions{
 		All:     true,
 		Filters: filter,
 	})

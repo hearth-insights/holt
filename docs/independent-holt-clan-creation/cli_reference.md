@@ -57,6 +57,34 @@ holt forage --watch --goal "Refactor auth module"
 
 ---
 
+---
+
+### `logs`
+View logs for an agent or orchestrator container.
+
+**Usage**: `holt logs <role-or-orchestrator> [flags]`
+
+**Flags**:
+*   `-f, --follow`: Follow log output (like `tail -f`).
+*   `-n, --name string`: Target instance name (auto-inferred if omitted).
+*   `--since string`: Show logs since timestamp (e.g. `1h`, `30m`).
+*   `--tail string`: Number of lines to show from end (default "all").
+*   `--timestamps`: Show timestamps.
+
+**Examples**:
+```bash
+# View orchestrator logs
+holt logs orchestrator
+
+# Follow agent logs
+holt logs -f coder-agent
+
+# View last 100 lines
+holt logs --tail=100 reviewer
+```
+
+---
+
 ### `watch`
 Monitor real-time workflow progress and agent activity with powerful filtering.
 

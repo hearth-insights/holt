@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
 	dockerpkg "github.com/hearth-insights/holt/internal/docker"
@@ -52,7 +52,7 @@ func GenerateDefaultName(ctx context.Context, cli *client.Client) (string, error
 	filter := filters.NewArgs()
 	filter.Add("label", fmt.Sprintf("%s=true", dockerpkg.LabelProject))
 
-	containers, err := cli.ContainerList(ctx, types.ContainerListOptions{
+	containers, err := cli.ContainerList(ctx, container.ListOptions{
 		All:     true,
 		Filters: filter,
 	})
@@ -85,7 +85,7 @@ func CheckNameCollision(ctx context.Context, cli *client.Client, instanceName st
 	filter := filters.NewArgs()
 	filter.Add("label", fmt.Sprintf("%s=%s", dockerpkg.LabelInstanceName, instanceName))
 
-	containers, err := cli.ContainerList(ctx, types.ContainerListOptions{
+	containers, err := cli.ContainerList(ctx, container.ListOptions{
 		All:     true,
 		Filters: filter,
 	})

@@ -6,7 +6,7 @@ import (
 	"net"
 	"strconv"
 
-	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
 	dockerpkg "github.com/hearth-insights/holt/internal/docker"
@@ -27,7 +27,7 @@ func FindNextAvailablePort(ctx context.Context, cli *client.Client) (int, error)
 	filter.Add("label", fmt.Sprintf("%s=true", dockerpkg.LabelProject))
 	filter.Add("label", fmt.Sprintf("%s=redis", dockerpkg.LabelComponent))
 
-	containers, err := cli.ContainerList(ctx, types.ContainerListOptions{
+	containers, err := cli.ContainerList(ctx, container.ListOptions{
 		All:     true,
 		Filters: filter,
 	})

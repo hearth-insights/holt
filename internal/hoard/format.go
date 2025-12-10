@@ -19,7 +19,6 @@ func FormatTable(w io.Writer, artefacts []*blackboard.Artefact, spineInfos map[s
 		return
 	}
 
-
 	// Print header
 	fmt.Fprintf(w, "Artefacts for instance '%s':\n\n", instanceName)
 
@@ -136,27 +135,9 @@ func FormatJSONL(w io.Writer, artefacts []*blackboard.Artefact) error {
 
 // artefactToMap converts an Artefact struct to a map[string]interface{}.
 // This is useful for dynamic field selection and adding extra fields like 'spine'.
-func artefactToMap(art *blackboard.Artefact) (map[string]interface{}, error) {
-	data, err := json.Marshal(art)
-	if err != nil {
-		return nil, err
-	}
-	var m map[string]interface{}
-	err = json.Unmarshal(data, &m)
-	return m, err
-}
 
 // spineToMap converts a SpineInfo struct to a map[string]interface{}.
 // This is useful for merging spine information into an artefact map.
-func spineToMap(info *spine.SpineInfo) (map[string]interface{}, error) {
-	data, err := json.Marshal(info)
-	if err != nil {
-		return nil, err
-	}
-	var m map[string]interface{}
-	err = json.Unmarshal(data, &m)
-	return m, err
-}
 
 // FormatSingleJSON writes a single artefact as pretty-printed JSON.
 // Optionally includes relationship information if provided.
