@@ -73,21 +73,23 @@ git commit --allow-empty -m "Genesis" > /dev/null 2>&1
 # Clean up build artifacts
 rm -rf "$BUILD_DIR"
 
+# Clean up scaffolded agents (quickstart uses its own container)
+rm -rf agents/
+
 # Config
 cat > holt.yml <<EOF
 version: "1.0"
 orchestrator:
   image: "ghcr.io/hearth-insights/holt/holt-orchestrator:latest"
 agents:
-  git-agent:
+  GitAgent:
     role: "Git Agent"
     image: "example-git-agent:latest"
     command: ["/app/run.sh"]
     workspace:
       mode: rw
     bidding_strategy:
-      type: "static"
-      price: 10
+      type: "exclusive"
 services:
   redis:
     image: redis:7-alpine
