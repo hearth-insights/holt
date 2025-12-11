@@ -76,6 +76,8 @@ rm -rf "$BUILD_DIR"
 # Config
 cat > holt.yml <<EOF
 version: "1.0"
+orchestrator:
+  image: "ghcr.io/hearth-insights/holt/holt-orchestrator:latest"
 agents:
   git-agent:
     role: "Git Agent"
@@ -83,14 +85,34 @@ agents:
     command: ["/app/run.sh"]
     workspace:
       mode: rw
+    bidding_strategy:
+      type: "static"
+      price: 10
 services:
   redis:
     image: redis:7-alpine
 EOF
 
+# Setup Git Ignore
+cat > .gitignore <<EOF
+bin/
+holt-demo-*
+*.log
+EOF
+
+# Commit initialization
+git add holt.yml .gitignore
+git commit -m "Initialize Holt demonstration" > /dev/null 2>&1
+
 # Run Workflow
 echo -e "${TEAL}::: SYSTEM ONLINE. EXECUTING WORKFLOW :::${NC}"
-"$TARGET_DIR/bin/holt" up -d > /dev/null 2>&1
+# Capture output to log file but stream errors if it fails
+if ! "$TARGET_DIR/bin/holt" up -d > holt_up.log 2>&1; then
+    echo -e "${RED}Error starting Holt instance:${NC}"
+    cat holt_up.log
+    exit 1
+fi
+
 "$TARGET_DIR/bin/holt" forage --goal "audit_proof.txt" > /dev/null
 
 # Show Proof
