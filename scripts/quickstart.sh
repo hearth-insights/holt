@@ -28,54 +28,88 @@ if ! command -v docker &> /dev/null; then
     exit 1
 fi
 
-# Store CWD to return to later
-TARGET_DIR=$(pwd)
+# 1. Download Binaries
+echo -e "${GREEN}1. Downloading Holt binaries...${NC}"
 
-# Create a temporary workspace for building Holt (keeps user source clean)
-BUILD_DIR=$(mktemp -d -t holt-build-XXXXXX)
-# Ensure cleanup on exit/error
-trap "rm -rf $BUILD_DIR" EXIT
+# Detect OS/Arch logic inlined from download-holt.sh
+OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+ARCH="$(uname -m)"
+case "$ARCH" in
+    x86_64) ARCH="amd64" ;;
+    aarch64|arm64) ARCH="arm64" ;;
+esac
 
-echo "Build Workspace: $BUILD_DIR"
+# Use release/download/latest pattern as verified
+BASE_URL="https://github.com/hearth-insights/holt/releases/download/latest"
+HOLT_BINARY="holt-$OS-$ARCH"
+PUP_BINARY="holt-pup-$OS-$ARCH"
 
-# Clone (shallow)
-echo -e "${GREEN}1. Retrieving Holt...${NC}"
-git clone --depth 1 https://github.com/hearth-insights/holt.git "$BUILD_DIR" > /dev/null 2>&1
+mkdir -p bin
+cd bin
 
-# Build (Simulated for speed in demo, or actual build if Go is present)
-# For the sake of a quick demo, we will check if the user has Go.
-# If not, we would pull a Docker image.
-# Assuming Go for now as per README prerequisites.
-if command -v go &> /dev/null; then
-    echo -e "${GREEN}2. Compiling binaries...${NC}"
-    # Build in temp dir
-    (cd "$BUILD_DIR" && make build > /dev/null 2>&1)
-    
-    # Install binaries to local bin/
-    mkdir -p "$TARGET_DIR/bin"
-    cp "$BUILD_DIR/bin/holt" "$TARGET_DIR/bin/"
-else
-    echo "Error: go 1.21+ is required for this source build demo."
+echo "Fetching $HOLT_BINARY..."
+if ! curl -f -L -o holt "$BASE_URL/$HOLT_BINARY"; then
+    echo -e "${RED}Error: Failed to download holt binary.${NC}"
     exit 1
 fi
+chmod +x holt
 
-# Setup Agent
-echo -e "${GREEN}3. Provisioning 'Git-Agent' container...${NC}"
-# Use the Dockerfile from the build dir context
-(cd "$BUILD_DIR" && docker build -t example-git-agent:latest -f agents/example-git-agent/Dockerfile . > /dev/null 2>&1)
+echo "Fetching $PUP_BINARY..."
+if ! curl -f -L -o holt-pup "$BASE_URL/$PUP_BINARY"; then
+    echo -e "${RED}Error: Failed to download holt-pup binary.${NC}"
+    exit 1
+fi
+chmod +x holt-pup
 
-# Initialize Project in TARGET_DIR
-echo -e "${GREEN}4. Initializing forensic environment...${NC}"
-git init > /dev/null 2>&1
-git commit --allow-empty -m "Genesis" > /dev/null 2>&1
+cd ..
+echo "✓ Binaries installed to ./bin/"
 
-# Run holt init in current dir using the newly built binary
-"$TARGET_DIR/bin/holt" init > /dev/null
+# 2. Scaffold Configuration and Agent
+echo -e "${GREEN}2. Scaffolding demo environment...${NC}"
 
-# Clean up scaffolded agents (quickstart uses its own container)
-rm -rf agents/
+# Create Agent Directory
+mkdir -p agents/GitAgent
 
-# Config
+# Create Agent Run Script
+cat > agents/GitAgent/run.sh <<'EOF'
+#!/bin/sh
+set -e
+echo "Starting Git Agent..."
+# Loop forever doing "work" (foraging)
+while true; do
+    echo "Agent heartbeat..."
+    sleep 60
+done
+EOF
+chmod +x agents/GitAgent/run.sh
+
+# Create Agent Bid Script
+cat > agents/GitAgent/bid.sh <<'EOF'
+#!/bin/sh
+# Echo a JSON bid
+echo '{"price": 10, "confidence": 1.0, "reasoning": "Ready to work"}'
+EOF
+chmod +x agents/GitAgent/bid.sh
+
+# Create Dockerfile
+# We COPY the pre-downloaded holt-pup binary into the image
+cat > agents/GitAgent/Dockerfile <<EOF
+FROM alpine:latest
+RUN apk --no-cache add git ca-certificates jq
+WORKDIR /app
+# Copy the binary we downloaded
+COPY holt-pup /app/pup
+COPY run.sh /app/run.sh
+COPY bid.sh /app/bid.sh
+RUN chmod +x /app/run.sh /app/bid.sh
+# Configure git for the agent
+RUN git config --global user.email "agent@holt.local" && \
+    git config --global user.name "Holt Git Agent" && \
+    git config --global --add safe.directory /workspace
+ENTRYPOINT ["/app/pup"]
+EOF
+
+# Create holt.yml
 cat > holt.yml <<EOF
 version: "1.0"
 orchestrator:
@@ -94,31 +128,41 @@ services:
     image: redis:7-alpine
 EOF
 
-# Setup Git Ignore
+# Create .gitignore
 cat > .gitignore <<EOF
 bin/
 holt-demo-*
 *.log
 EOF
 
-# Commit initialization
-git add holt.yml .gitignore
-git commit -m "Initialize Holt demonstration" > /dev/null 2>&1
+# 3. Build Agent Image
+echo -e "${GREEN}3. Building agent container...${NC}"
+# We need to copy holt-pup to the agent dir context for the build
+cp bin/holt-pup agents/GitAgent/
+# Build
+(cd agents/GitAgent && docker build -t example-git-agent:latest . > /dev/null)
+# Clean up the binary from agent source dir
+rm agents/GitAgent/holt-pup
 
-# Run Workflow
+# 4. Initialize Git Repo
+echo -e "${GREEN}4. Initializing git repository...${NC}"
+git init > /dev/null
+git add .
+git commit -m "Initialize Holt demonstration" > /dev/null
+
+# 5. Run Workflow
 echo -e "${TEAL}::: SYSTEM ONLINE. EXECUTING WORKFLOW :::${NC}"
-# Capture output to log file but stream errors if it fails
-if ! "$TARGET_DIR/bin/holt" up -d > holt_up.log 2>&1; then
+if ! "./bin/holt" up > holt_up.log 2>&1; then
     echo -e "${RED}Error starting Holt instance:${NC}"
     cat holt_up.log
     exit 1
 fi
 
-"$TARGET_DIR/bin/holt" forage --goal "audit_proof.txt" > /dev/null
+"./bin/holt" forage --goal "audit_proof.txt" > /dev/null
 
 # Show Proof
 echo -e "${TEAL}::: AUDIT TRAIL GENERATED :::${NC}"
-"$TARGET_DIR/bin/holt" hoard
+"./bin/holt" hoard
 echo -e "${GREEN}Proof of Work:${NC}"
 ls -la audit_proof.txt
 
