@@ -145,7 +145,7 @@ agents:
     bidding_strategy:
       type: "exclusive"
       target_types:
-        - "Goal"
+        - "GoalDefined"
 services:
   redis:
     image: redis:7-alpine
