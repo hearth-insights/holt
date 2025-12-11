@@ -80,8 +80,7 @@ input=$(cat)
 echo "Git agent received input: $input" >&2
 
 # Extract filename from payload using jq (default to audit_proof.txt if empty)
-# Typically payload comes in target_artefact.payload or similar depending on the claim structure
-# For GoalDefined claims, the goal payload is the target.
+# The Goal artefact payload is the filename.
 filename=$(echo "$input" | jq -r '.target_artefact.payload // "audit_proof.txt"')
 
 echo "Creating file: $filename" >&2
@@ -112,23 +111,7 @@ cat <<RESULT >&3
 }
 RESULT
 EOF
-
-# Create Agent Bid Script
-cat > agents/GitAgent/bid.sh <<'EOF'
-#!/bin/sh
-# Read input from stdin
-input=$(cat)
-# Extract artefact type
-type=$(echo "$input" | jq -r '.target_artefact.type // empty')
-
-if [ "$type" = "Goal" ]; then
-    echo "exclusive"
-else
-    # Ignore other artefacts (like my own CodeCommit output) to prevent loops
-    echo "ignore"
-fi
-EOF
-chmod +x agents/GitAgent/bid.sh
+chmod +x agents/GitAgent/run.sh
 
 # Create Dockerfile
 # We COPY the pre-downloaded holt-pup binary into the image
@@ -139,8 +122,7 @@ WORKDIR /app
 # Copy the binary we downloaded
 COPY holt-pup /app/pup
 COPY run.sh /app/run.sh
-COPY bid.sh /app/bid.sh
-RUN chmod +x /app/run.sh /app/bid.sh
+RUN chmod +x /app/run.sh
 # Configure git for the agent
 RUN git config --global user.email "agent@holt.local" && \
     git config --global user.name "Holt Git Agent" && \
@@ -162,6 +144,8 @@ agents:
       mode: rw
     bidding_strategy:
       type: "exclusive"
+      target_types:
+        - "Goal"
 services:
   redis:
     image: redis:7-alpine
