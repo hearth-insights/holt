@@ -371,6 +371,12 @@ func displayHistoricalArtefacts(ctx context.Context, client *blackboard.Client, 
 
 			// Exclusive phase grant
 			if primaryClaim.GrantedExclusiveAgent != "" {
+				// M3.3: Skip synthetic grant events for feedback claims (rework)
+				// These are direct assignments, not competitive grants, and shouldn't appear
+				// as "granted" at the original artefact creation time.
+				if len(primaryClaim.AdditionalContextIDs) > 0 {
+					continue
+				}
 				workflowEvent := &blackboard.WorkflowEvent{
 					Event: "claim_granted",
 					Data: map[string]interface{}{
