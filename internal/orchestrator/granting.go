@@ -21,11 +21,31 @@ func (e *Engine) GrantClaim(ctx context.Context, claim *blackboard.Claim, bids m
 	// Check for dormant claim (no bids in any phase)
 	if initialPhase == "" {
 		log.Printf("[Orchestrator] No bids in any phase for claim %s, claim becomes dormant", claim.ID)
-		e.logEvent("claim_dormant", map[string]interface{}{
+
+		// Update claim status to Dormant so it persists (M3.9 history fix)
+		claim.Status = blackboard.ClaimStatusDormant
+		if err := e.client.UpdateClaim(ctx, claim); err != nil {
+			log.Printf("[Orchestrator] Failed to update claim status to dormant: %v", err)
+		}
+
+		// Create a "dormant" phase state to persist the bids
+		dormantState := NewPhaseState(claim.ID, "dormant", []string{}, bids)
+		if err := e.persistPhaseState(ctx, claim, dormantState); err != nil {
+			log.Printf("[Orchestrator] Failed to persist dormant phase state: %v", err)
+		}
+
+		eventData := map[string]interface{}{
 			"claim_id": claim.ID,
 			"reason":   "no_bids_in_any_phase",
 			"bids":     bids,
-		})
+		}
+
+		// Publish to Redis for watch visibility
+		if err := e.client.PublishWorkflowEvent(ctx, "claim_dormant", eventData); err != nil {
+			log.Printf("[Orchestrator] Failed to publish claim_dormant event: %v", err)
+		}
+
+		e.logEvent("claim_dormant", eventData)
 		return nil
 	}
 

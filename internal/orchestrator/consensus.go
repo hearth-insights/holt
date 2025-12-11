@@ -79,11 +79,18 @@ func (e *Engine) WaitForConsensus(ctx context.Context, claimID string) (map[stri
 // logBidArrival logs a single bid arrival event.
 func (e *Engine) logBidArrival(claimID, agentName string, bidType blackboard.BidType) {
 	log.Printf("[Orchestrator] Received %s bid from %s for claim %s", bidType, agentName, claimID)
-	e.logEvent("bid_received", map[string]interface{}{
+	// Publish event to Redis for real-time monitoring (watch command)
+	eventData := map[string]interface{}{
 		"claim_id":   claimID,
 		"agent_name": agentName,
 		"bid_type":   string(bidType),
-	})
+	}
+	if err := e.client.PublishWorkflowEvent(context.Background(), "bid_received", eventData); err != nil {
+		log.Printf("[Orchestrator] Failed to publish bid_received event: %v", err)
+	}
+
+	// Also log to internal JSON logger
+	e.logEvent("bid_received", eventData)
 }
 
 // validateAndSanitizeBids checks each bid for validity and treats invalid bids as "ignore".

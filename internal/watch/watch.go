@@ -258,12 +258,14 @@ func displayHistoricalArtefacts(ctx context.Context, client *blackboard.Client, 
 	// Sort claims for each artefact (we'll process them in order)
 	for _, claims := range claimsByArtefact {
 		sort.Slice(claims, func(i, j int) bool {
-			// Terminated claims come before complete/pending_assignment claims
-			// This ensures we show: original claim (terminated) → feedback claim (pending_assignment/complete)
-			if claims[i].Status == blackboard.ClaimStatusTerminated && claims[j].Status != blackboard.ClaimStatusTerminated {
+			// Terminated or Dormant claims come before complete/pending_assignment claims
+			// This ensures we show: original claim (terminated/dormant) → feedback claim (pending_assignment/complete)
+			if (claims[i].Status == blackboard.ClaimStatusTerminated || claims[i].Status == blackboard.ClaimStatusDormant) &&
+				(claims[j].Status != blackboard.ClaimStatusTerminated && claims[j].Status != blackboard.ClaimStatusDormant) {
 				return true
 			}
-			if claims[i].Status != blackboard.ClaimStatusTerminated && claims[j].Status == blackboard.ClaimStatusTerminated {
+			if (claims[i].Status != blackboard.ClaimStatusTerminated && claims[i].Status != blackboard.ClaimStatusDormant) &&
+				(claims[j].Status == blackboard.ClaimStatusTerminated || claims[j].Status == blackboard.ClaimStatusDormant) {
 				return false
 			}
 			// Otherwise maintain order by ID (arbitrary but consistent)
@@ -435,6 +437,33 @@ func displayHistoricalArtefacts(ctx context.Context, client *blackboard.Client, 
 						break
 					}
 				}
+			}
+
+			// Reconstruct claim_dormant event for dormant claims
+			if primaryClaim.Status == blackboard.ClaimStatusDormant {
+				// Determine timestamp (slightly after bids)
+				dormantTimestamp := claimTimestampMs + 200 // Arbitrary small offset after consensus
+
+				// Try to use phase state bid timestamps to place it after the last bid
+				if primaryClaim.PhaseState != nil {
+					for _, ts := range primaryClaim.PhaseState.BidTimestamps {
+						if ts > dormantTimestamp {
+							dormantTimestamp = ts + 1
+						}
+					}
+				}
+
+				workflowEvent := &blackboard.WorkflowEvent{
+					Event: "claim_dormant",
+					Data: map[string]interface{}{
+						"claim_id": primaryClaim.ID,
+						"reason":   "no_bids_in_any_phase", // We don't persist reason separately but this is the only path to dormant currently
+					},
+				}
+				allEvents = append(allEvents, historicalEvent{
+					timestampMs:   dormantTimestamp,
+					workflowEvent: workflowEvent,
+				})
 			}
 		} // End of loop over claims for this artefact
 
@@ -722,6 +751,21 @@ func (f *defaultFormatter) FormatWorkflow(event *blackboard.WorkflowEvent, times
 		bidType, _ := event.Data["bid_type"].(string)
 		_, err := fmt.Fprintf(f.writer, "[%s] 🙋 Bid submitted: agent=%s, claim=%s, type=%s\n",
 			timestamp, agentName, shortID(claimID), bidType)
+		return err
+
+	case "bid_received":
+		agentName, _ := event.Data["agent_name"].(string)
+		claimID, _ := event.Data["claim_id"].(string)
+		bidType, _ := event.Data["bid_type"].(string)
+		_, err := fmt.Fprintf(f.writer, "[%s] 📩 Bid received : agent=%s, claim=%s, type=%s\n",
+			timestamp, agentName, shortID(claimID), bidType)
+		return err
+
+	case "claim_dormant":
+		claimID, _ := event.Data["claim_id"].(string)
+		reason, _ := event.Data["reason"].(string)
+		_, err := fmt.Fprintf(f.writer, "[%s] 💤 Claim dormant: claim=%s, reason=%s\n",
+			timestamp, shortID(claimID), reason)
 		return err
 
 	case "claim_granted":
