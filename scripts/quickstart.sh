@@ -6,7 +6,7 @@
 set -e
 
 GREEN='\033[0;32m'
-TEAL='\033[0;36m' # Brand alignment
+TEAL='\033[0;36m' 
 RED='\033[0;31m'
 NC='\033[0m'
 
@@ -24,7 +24,7 @@ echo "Initializing demonstration environment in current directory..."
 
 # Check prerequisites
 if ! command -v docker &> /dev/null; then
-    echo "Error: docker is required."
+    echo -e "${RED}Error: docker is required.${NC}"
     exit 1
 fi
 
@@ -33,6 +33,9 @@ TARGET_DIR=$(pwd)
 
 # Create a temporary workspace for building Holt (keeps user source clean)
 BUILD_DIR=$(mktemp -d -t holt-build-XXXXXX)
+# Ensure cleanup on exit/error
+trap "rm -rf $BUILD_DIR" EXIT
+
 echo "Build Workspace: $BUILD_DIR"
 
 # Clone (shallow)
@@ -53,7 +56,6 @@ if command -v go &> /dev/null; then
     cp "$BUILD_DIR/bin/holt" "$TARGET_DIR/bin/"
 else
     echo "Error: go 1.21+ is required for this source build demo."
-    rm -rf "$BUILD_DIR"
     exit 1
 fi
 
@@ -69,9 +71,6 @@ git commit --allow-empty -m "Genesis" > /dev/null 2>&1
 
 # Run holt init in current dir using the newly built binary
 "$TARGET_DIR/bin/holt" init > /dev/null
-
-# Clean up build artifacts
-rm -rf "$BUILD_DIR"
 
 # Clean up scaffolded agents (quickstart uses its own container)
 rm -rf agents/
@@ -122,11 +121,6 @@ echo -e "${TEAL}::: AUDIT TRAIL GENERATED :::${NC}"
 "$TARGET_DIR/bin/holt" hoard
 echo -e "${GREEN}Proof of Work:${NC}"
 ls -la audit_proof.txt
-
-# Cleanup (optional - for a persistent demo we might want to keep it running? 
-# But conventionally quickstarts clean up. Let's keep it running so user can play per request)
-# "$TARGET_DIR/bin/holt" down > /dev/null 2>&1
-# echo -e "${TEAL}Demo complete. Infrastructure torn down.${NC}"
 
 echo ""
 echo -e "${GREEN}Demo environment ready!${NC}"
