@@ -116,8 +116,17 @@ EOF
 # Create Agent Bid Script
 cat > agents/GitAgent/bid.sh <<'EOF'
 #!/bin/sh
-# Echo a JSON bid
-echo '{"price": 10, "confidence": 1.0, "reasoning": "Ready to work"}'
+# Read input from stdin
+input=$(cat)
+# Extract artefact type
+type=$(echo "$input" | jq -r '.target_artefact.type // empty')
+
+if [ "$type" = "Goal" ]; then
+    echo '{"price": 10, "confidence": 1.0, "reasoning": "I can achieve this goal"}'
+else
+    # Ignore other artefacts (like my own CodeCommit output) to prevent loops
+    echo '{"price": 0, "confidence": 0.0, "reasoning": "Not a goal"}'
+fi
 EOF
 chmod +x agents/GitAgent/bid.sh
 
