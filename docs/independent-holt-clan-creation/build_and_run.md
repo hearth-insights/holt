@@ -88,28 +88,23 @@ docker build -t my-agent:latest .
 
 Ensure the tag (`my-agent:latest`) matches the `image` field in your `holt.yaml`.
 
-## 4. Initialize Holt
-If you haven't already, initialize a new Holt project.
 
-```bash
-./holt init
-```
 
-## 5. Start Holt
+## 4. Start Holt
 Start the Holt orchestrator and services.
 
 ```bash
 ./holt up
 ```
 
-## 6. Run a Workflow
+## 5. Run a Workflow
 Submit a goal to the system.
 
 ```bash
 ./holt forage --goal "Create a file named hello.txt"
 ```
 
-## 7. Monitor
+## 6. Monitor
 Watch the progress.
 
 ```bash

@@ -11,19 +11,7 @@ These flags are available for all commands:
 
 ## Commands
 
-### `init`
-Initialize a new Holt project with default configuration and example agent.
 
-**Usage**: `holt init [flags]`
-
-**Flags**:
-*   `--force`: Force reinitialization (removes existing `holt.yml` and `agents/`).
-
-**Creates**:
-*   `holt.yml`: Project configuration file.
-*   `agents/example-agent/`: Example agent demonstrating the Holt agent contract.
-
----
 
 ### `up`
 Start a new Holt instance in the current Git repository.

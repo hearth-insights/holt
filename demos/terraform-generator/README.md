@@ -95,7 +95,6 @@ git commit -m "Add Holt configuration"
 #### 4. Initialize and Run
 
 ```bash
-holt init
 holt up
 
 # Optional: Set OpenAI API key for real LLM generation
