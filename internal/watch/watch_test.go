@@ -3,6 +3,7 @@ package watch
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -572,25 +573,30 @@ func TestDisplayHistoricalArtefacts_FeedbackClaim_Comprehensive(t *testing.T) {
 
 	// ASSERTIONS
 
+	// Helper to format consistent timestamp using same logic as watch.go (which uses local time)
+	fmtTime := func(ms int64) string {
+		return time.UnixMilli(ms).Format("15:04:05.000")
+	}
+
 	// 1. Check Original Artefact Creation
-	require.Contains(t, output, "[01:00:01.000] ✨ Artefact created: by=coder, type=Code")
+	require.Contains(t, output, fmt.Sprintf("[%s] ✨ Artefact created: by=coder, type=Code", fmtTime(1000)))
 
 	// 2. Check Original Claim Creation
-	require.Contains(t, output, "[01:00:01.000] ⏳ Claim created: claim=original, artefact=original, status=terminated")
+	require.Contains(t, output, fmt.Sprintf("[%s] ⏳ Claim created: claim=original, artefact=original, status=terminated", fmtTime(1000)))
 
 	// 3. Check Bid Submitted (reconstructed from PhaseState)
-	require.Contains(t, output, "[01:00:01.001] 🙋 Bid submitted: agent=reviewer, claim=original, type=review")
+	require.Contains(t, output, fmt.Sprintf("[%s] 🙋 Bid submitted: agent=reviewer, claim=original, type=review", fmtTime(1001)))
 
 	// 4. Check Claim Granted (Review) - synthetic event from Grants list
 	// Note: We populated GrantedReviewAgents, so this should appear. Timestamp is +100ms offset in logic.
-	require.Contains(t, output, "[01:00:01.100] 🏆 Claim granted: agent=reviewer, claim=original, type=review")
+	require.Contains(t, output, fmt.Sprintf("[%s] 🏆 Claim granted: agent=reviewer, claim=original, type=review", fmtTime(1100)))
 
 	// 5. Check Review Rejection (from Review Artefact)
-	require.Contains(t, output, "[01:00:02.000] ❌ Review Rejected: by=reviewer for artefact original (review: review-a)")
+	require.Contains(t, output, fmt.Sprintf("[%s] ❌ Review Rejected: by=reviewer for artefact original (review: review-a)", fmtTime(2000)))
 
 	// 6. Check Rework Assignment (synthetic event from feedback claim existence)
 	// Logic: timestamp = latest_review_ts (2000) + 1 = 2001ms = 2.001s
-	require.Contains(t, output, "[01:00:02.001] 🔄 Rework Assigned: to=coder for claim feedback (iteration 1)")
+	require.Contains(t, output, fmt.Sprintf("[%s] 🔄 Rework Assigned: to=coder for claim feedback (iteration 1)", fmtTime(2001)))
 
 	// 7. CRITICAL: Check absence of misleading "Exclusive Grant"
 	// Before fix, this would appear at t=1000 + some offset, claiming "exclusive" grant to "coder".
