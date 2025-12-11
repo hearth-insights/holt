@@ -122,10 +122,10 @@ input=$(cat)
 type=$(echo "$input" | jq -r '.target_artefact.type // empty')
 
 if [ "$type" = "Goal" ]; then
-    echo '{"price": 10, "confidence": 1.0, "reasoning": "I can achieve this goal"}'
+    echo "exclusive"
 else
     # Ignore other artefacts (like my own CodeCommit output) to prevent loops
-    echo '{"price": 0, "confidence": 0.0, "reasoning": "Not a goal"}'
+    echo "ignore"
 fi
 EOF
 chmod +x agents/GitAgent/bid.sh
