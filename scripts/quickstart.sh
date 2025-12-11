@@ -42,7 +42,8 @@ esac
 # Use release/download/latest pattern as verified
 BASE_URL="https://github.com/hearth-insights/holt/releases/download/latest"
 HOLT_BINARY="holt-$OS-$ARCH"
-PUP_BINARY="holt-pup-$OS-$ARCH"
+# Agent container is Linux-based, so we must download the Linux binary for pup
+PUP_BINARY="holt-pup-linux-$ARCH"
 
 mkdir -p bin
 cd bin
