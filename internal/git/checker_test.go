@@ -609,3 +609,66 @@ func TestGetDirtyFiles(t *testing.T) {
 		})
 	}
 }
+
+// TestIsGitRootFromSymlink explicitly verifies the fix for the macOS /var -> /private/var issue
+// by explicitly creating a symlink and running the check from there.
+func TestIsGitRootFromSymlink(t *testing.T) {
+	// 1. Create a real directory
+	realDir, err := os.MkdirTemp("", "git-real-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(realDir)
+
+	// Resolve any system symlinks in the realDir itself first (to be clean)
+	realDir, err = filepath.EvalSymlinks(realDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. Initialize git in the real directory
+	cmd := exec.Command("git", "init")
+	cmd.Dir = realDir
+	if err := cmd.Run(); err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. Create a symlink to the real directory
+	// We need a path that doesn't exist yet for the symlink
+	symlinkDir := filepath.Join(os.TempDir(), "git-sym-test-link")
+	// Cleanup any previous run
+	os.Remove(symlinkDir)
+	defer os.Remove(symlinkDir)
+
+	if err := os.Symlink(realDir, symlinkDir); err != nil {
+		t.Skipf("Skipping symlink test due to permission/OS error: %v", err)
+	}
+
+	// 4. Run the check from the symlink directory
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(originalDir)
+
+	if err := os.Chdir(symlinkDir); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify we are actually in a symlinked path that differs from resolved path
+	cwd, _ := os.Getwd()
+	resolvedCwd, _ := filepath.EvalSymlinks(cwd)
+	if cwd == resolvedCwd {
+		t.Logf("Warning: CWD %s is already resolved to %s, test might not reproduce the issue strictly", cwd, resolvedCwd)
+	}
+
+	checker := NewChecker()
+	isRoot, gitRoot, err := checker.IsGitRoot()
+	if err != nil {
+		t.Fatalf("IsGitRoot() returned error: %v", err)
+	}
+
+	if !isRoot {
+		t.Errorf("IsGitRoot() = false, want true. CWD: %s, GitRoot: %s", cwd, gitRoot)
+	}
+}
