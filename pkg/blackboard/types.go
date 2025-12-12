@@ -88,9 +88,9 @@ type Claim struct {
 	GrantQueue *GrantQueue `json:"grant_queue,omitempty"` // Queue metadata when paused at max_concurrent
 
 	// M3.5: Grant tracking (for re-triggering on restart)
-	LastGrantAgent    string `json:"last_grant_agent,omitempty"`    // Last agent granted this claim
-	LastGrantTime     int64  `json:"last_grant_time,omitempty"`     // Unix timestamp of last grant
-	ArtefactExpected  bool   `json:"artefact_expected,omitempty"`   // Whether we're waiting for artefact from granted agent
+	LastGrantAgent   string `json:"last_grant_agent,omitempty"`  // Last agent granted this claim
+	LastGrantTime    int64  `json:"last_grant_time,omitempty"`   // Unix timestamp of last grant
+	ArtefactExpected bool   `json:"artefact_expected,omitempty"` // Whether we're waiting for artefact from granted agent
 
 	// M3.9: Agent version auditing
 	GrantedAgentImageID string `json:"granted_agent_image_id,omitempty"` // Docker image ID of agent that was granted this claim
@@ -118,6 +118,9 @@ const (
 
 	// ClaimStatusTerminated indicates the claim was terminated (failure or review feedback)
 	ClaimStatusTerminated ClaimStatus = "terminated"
+
+	// ClaimStatusDormant indicates the claim received no viable bids and is sleeping
+	ClaimStatusDormant ClaimStatus = "dormant"
 )
 
 // BidType represents an agent's interest level in a claim.
@@ -150,12 +153,12 @@ type Bid struct {
 // PhaseState represents persisted phase execution state for restart resilience (M3.5).
 // Stored as JSON-encoded fields in the Claim Redis hash.
 type PhaseState struct {
-	Current       string             `json:"current"`         // Current phase: "review", "parallel", or "exclusive"
-	GrantedAgents []string           `json:"granted_agents"`  // Agents granted in this phase
-	Received      map[string]string  `json:"received"`        // agentRole → artefactID (received artefacts)
-	AllBids       map[string]BidType `json:"all_bids"`        // agentName → bidType (all original bids)
-	BidTimestamps map[string]int64   `json:"bid_timestamps"`  // agentName → timestampMs (when bids were received)
-	StartTimeMs   int64              `json:"start_time_ms"`   // M3.9: Unix timestamp in milliseconds when phase started
+	Current       string             `json:"current"`        // Current phase: "review", "parallel", or "exclusive"
+	GrantedAgents []string           `json:"granted_agents"` // Agents granted in this phase
+	Received      map[string]string  `json:"received"`       // agentRole → artefactID (received artefacts)
+	AllBids       map[string]BidType `json:"all_bids"`       // agentName → bidType (all original bids)
+	BidTimestamps map[string]int64   `json:"bid_timestamps"` // agentName → timestampMs (when bids were received)
+	StartTimeMs   int64              `json:"start_time_ms"`  // M3.9: Unix timestamp in milliseconds when phase started
 }
 
 // GrantQueue represents grant queue metadata for paused claims (M3.5).
@@ -237,7 +240,7 @@ func (cs ClaimStatus) Validate() error {
 	switch cs {
 	case ClaimStatusPendingReview, ClaimStatusPendingParallel,
 		ClaimStatusPendingExclusive, ClaimStatusPendingAssignment,
-		ClaimStatusComplete, ClaimStatusTerminated:
+		ClaimStatusComplete, ClaimStatusTerminated, ClaimStatusDormant:
 		return nil
 	default:
 		return fmt.Errorf("unknown claim status: %q", cs)

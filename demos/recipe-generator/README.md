@@ -56,29 +56,25 @@ This demo showcases **Phase 3.7** features of Holt:
     git init && git commit --allow-empty -m "Initial commit"
     ```
 
-4.  **Initialize Holt**:
-    ```bash
-    # Make sure 'holt' is in your PATH
-    holt init
-    ```
 
-5.  **Copy the demo's configuration**:
+
+4.  **Copy the demo's configuration**:
     ```bash
     # Replace <holt-repo> with the path to your Holt repository
     cp <holt-repo>/demos/recipe-generator/holt.yml .
     ```
 
-6.  **Start the Holt instance**:
+5.  **Start the Holt instance**:
     ```bash
     holt up
     ```
 
-7.  **Run the workflow and watch the agents collaborate**:
+6.  **Run the workflow and watch the agents collaborate**:
     ```bash
     holt forage --watch --goal "Create a recipe for a classic spaghetti bolognese"
     ```
 
-8.  **Inspect the results**:
+7.  **Inspect the results**:
     ```bash
     ls -l               # Should show recipe.yaml and RECIPE.md
     git log --oneline   # Should show 4+ commits

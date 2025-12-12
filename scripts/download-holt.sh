@@ -64,7 +64,7 @@ echo "Detected system: $OS/$ARCH"
 
 # Determine download URLs
 if [ "$VERSION" = "latest" ]; then
-    BASE_URL="https://github.com/$REPO/releases/latest/download"
+    BASE_URL="https://github.com/$REPO/releases/download/latest"
 else
     BASE_URL="https://github.com/$REPO/releases/download/$VERSION"
 fi

@@ -83,13 +83,10 @@ mkdir my-project && cd my-project
 git init
 git commit --allow-empty -m "Initial commit"
 
-# 4. Initialize Holt
-holt init
-
-# 5. Build example git agent
+# 4. Build example git agent
 docker build -t example-git-agent:latest -f agents/example-git-agent/Dockerfile ..
 
-# 6. Configure agent in holt.yml
+# 5. Configure agent in holt.yml
 cat > holt.yml <<EOF
 version: "1.0"
 agents:
@@ -104,16 +101,16 @@ services:
     image: redis:7-alpine
 EOF
 
-# 7. Start Holt instance
+# 6. Start Holt instance
 holt up
 
-# 8. Create workflow
+# 7. Create workflow
 holt forage --goal "hello.txt"
 
-# 9. Watch agent execute
+# 8. Watch agent execute
 holt watch
 
-# 10. View results
+# 9. View results
 holt hoard
 git log --oneline
 ls -la hello.txt  # File created by agent!
@@ -390,9 +387,6 @@ See **[docs/DEBUGGING_GUIDE.md](./docs/DEBUGGING_GUIDE.md)** for comprehensive w
 ### Instance Management
 
 ```bash
-# Initialize new Holt project
-holt init
-
 # Start Holt instance (auto-incremented name: default-1, default-2, ...)
 holt up
 
@@ -626,7 +620,7 @@ We use battle-hardened tools (Docker, Redis, Git) rather than building custom so
 
 ### Zero-Configuration, Progressively Enhanced
 
-`holt init && holt up` creates a working system. Smart defaults cover 90% of use cases. Advanced features available when needed.
+`holt up` creates a working system. Smart defaults cover 90% of use cases. Advanced features available when needed.
 
 ### Auditability as a Core Feature
 
