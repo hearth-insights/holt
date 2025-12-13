@@ -27,6 +27,12 @@ func ArtefactToHash(a *Artefact) (map[string]interface{}, error) {
 		return nil, fmt.Errorf("failed to marshal context_for_roles: %w", err)
 	}
 
+	// M5.1: Ensure metadata is valid JSON (default to empty object)
+	metadata := a.Metadata
+	if metadata == "" {
+		metadata = "{}"
+	}
+
 	hash := map[string]interface{}{
 		"id":                a.ID,
 		"logical_id":        a.LogicalID,
@@ -36,9 +42,10 @@ func ArtefactToHash(a *Artefact) (map[string]interface{}, error) {
 		"payload":           a.Payload,
 		"source_artefacts":  string(sourceArtefactsJSON),
 		"produced_by_role":  a.ProducedByRole,
-		"created_at_ms":     a.CreatedAtMs,                   // M3.9
+		"created_at_ms":     a.CreatedAtMs,               // M3.9
 		"context_for_roles": string(contextForRolesJSON), // M4.3
-		"claim_id":          a.ClaimID,                       // M4.6
+		"claim_id":          a.ClaimID,                   // M4.6
+		"metadata":          metadata,                    // M5.1
 	}
 
 	return hash, nil
@@ -81,6 +88,12 @@ func HashToArtefact(hash map[string]string) (*Artefact, error) {
 	// M3.9: Parse created_at_ms
 	createdAtMs, _ := strconv.ParseInt(hash["created_at_ms"], 10, 64)
 
+	// M5.1: Parse metadata (default to empty object if missing)
+	metadata := hash["metadata"]
+	if metadata == "" {
+		metadata = "{}"
+	}
+
 	artefact := &Artefact{
 		ID:              hash["id"],
 		LogicalID:       hash["logical_id"],
@@ -93,6 +106,7 @@ func HashToArtefact(hash map[string]string) (*Artefact, error) {
 		CreatedAtMs:     createdAtMs,        // M3.9
 		ContextForRoles: contextForRoles,    // M4.3
 		ClaimID:         hash["claim_id"],   // M4.6
+		Metadata:        metadata,           // M5.1
 	}
 
 	return artefact, nil

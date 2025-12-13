@@ -2,6 +2,7 @@ package blackboard
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -1383,4 +1384,317 @@ func TestZSetOperations(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, []string{"claim-1", "claim-2"}, members)
 	})
+}
+
+// M5.1: Test GetDescendants with simple tree
+func TestGetDescendants_SimpleTree(t *testing.T) {
+	client, _ := setupTestClient(t)
+	ctx := context.Background()
+
+	// Build tree:
+	//   root
+	//   ├── child1
+	//   └── child2
+	root := &Artefact{
+		ID:              "root-id",
+		LogicalID:       "root-logical",
+		Version:         1,
+		StructuralType:  StructuralTypeStandard,
+		Type:            "Root",
+		Payload:         "root",
+		SourceArtefacts: []string{},
+		ProducedByRole:  "test",
+		Metadata:        "{}",
+	}
+
+	child1 := &Artefact{
+		ID:              "child1-id",
+		LogicalID:       "child1-logical",
+		Version:         1,
+		StructuralType:  StructuralTypeStandard,
+		Type:            "Child",
+		Payload:         "child1",
+		SourceArtefacts: []string{"root-id"},
+		ProducedByRole:  "test",
+		Metadata:        "{}",
+	}
+
+	child2 := &Artefact{
+		ID:              "child2-id",
+		LogicalID:       "child2-logical",
+		Version:         1,
+		StructuralType:  StructuralTypeStandard,
+		Type:            "Child",
+		Payload:         "child2",
+		SourceArtefacts: []string{"root-id"},
+		ProducedByRole:  "test",
+		Metadata:        "{}",
+	}
+
+	// Create artefacts (Lua script creates reverse index)
+	require.NoError(t, client.CreateArtefact(ctx, root))
+	require.NoError(t, client.CreateArtefact(ctx, child1))
+	require.NoError(t, client.CreateArtefact(ctx, child2))
+
+	// Get descendants of root
+	descendants, err := client.GetDescendants(ctx, "root-id", 0)
+	require.NoError(t, err)
+	assert.Len(t, descendants, 2)
+
+	// Check both children are present (order not guaranteed)
+	ids := []string{descendants[0].ID, descendants[1].ID}
+	assert.Contains(t, ids, "child1-id")
+	assert.Contains(t, ids, "child2-id")
+}
+
+// M5.1: Test GetDescendants with deep tree (grandchildren)
+func TestGetDescendants_DeepTree(t *testing.T) {
+	client, _ := setupTestClient(t)
+	ctx := context.Background()
+
+	// Build tree:
+	//   root
+	//   └── child
+	//       └── grandchild
+	root := &Artefact{
+		ID:              "root-id",
+		LogicalID:       "root-logical",
+		Version:         1,
+		StructuralType:  StructuralTypeStandard,
+		Type:            "Root",
+		Payload:         "root",
+		SourceArtefacts: []string{},
+		ProducedByRole:  "test",
+		Metadata:        "{}",
+	}
+
+	child := &Artefact{
+		ID:              "child-id",
+		LogicalID:       "child-logical",
+		Version:         1,
+		StructuralType:  StructuralTypeStandard,
+		Type:            "Child",
+		Payload:         "child",
+		SourceArtefacts: []string{"root-id"},
+		ProducedByRole:  "test",
+		Metadata:        "{}",
+	}
+
+	grandchild := &Artefact{
+		ID:              "grandchild-id",
+		LogicalID:       "grandchild-logical",
+		Version:         1,
+		StructuralType:  StructuralTypeStandard,
+		Type:            "Grandchild",
+		Payload:         "grandchild",
+		SourceArtefacts: []string{"child-id"},
+		ProducedByRole:  "test",
+		Metadata:        "{}",
+	}
+
+	require.NoError(t, client.CreateArtefact(ctx, root))
+	require.NoError(t, client.CreateArtefact(ctx, child))
+	require.NoError(t, client.CreateArtefact(ctx, grandchild))
+
+	// Get all descendants (unlimited depth)
+	descendants, err := client.GetDescendants(ctx, "root-id", 0)
+	require.NoError(t, err)
+	assert.Len(t, descendants, 2) // child + grandchild
+
+	ids := []string{descendants[0].ID, descendants[1].ID}
+	assert.Contains(t, ids, "child-id")
+	assert.Contains(t, ids, "grandchild-id")
+}
+
+// M5.1: Test GetDescendants with max_depth limit
+func TestGetDescendants_MaxDepthLimit(t *testing.T) {
+	client, _ := setupTestClient(t)
+	ctx := context.Background()
+
+	// Same tree as above
+	root := &Artefact{
+		ID:              "root-id",
+		LogicalID:       "root-logical",
+		Version:         1,
+		StructuralType:  StructuralTypeStandard,
+		Type:            "Root",
+		Payload:         "root",
+		SourceArtefacts: []string{},
+		ProducedByRole:  "test",
+		Metadata:        "{}",
+	}
+
+	child := &Artefact{
+		ID:              "child-id",
+		LogicalID:       "child-logical",
+		Version:         1,
+		StructuralType:  StructuralTypeStandard,
+		Type:            "Child",
+		Payload:         "child",
+		SourceArtefacts: []string{"root-id"},
+		ProducedByRole:  "test",
+		Metadata:        "{}",
+	}
+
+	grandchild := &Artefact{
+		ID:              "grandchild-id",
+		LogicalID:       "grandchild-logical",
+		Version:         1,
+		StructuralType:  StructuralTypeStandard,
+		Type:            "Grandchild",
+		Payload:         "grandchild",
+		SourceArtefacts: []string{"child-id"},
+		ProducedByRole:  "test",
+		Metadata:        "{}",
+	}
+
+	require.NoError(t, client.CreateArtefact(ctx, root))
+	require.NoError(t, client.CreateArtefact(ctx, child))
+	require.NoError(t, client.CreateArtefact(ctx, grandchild))
+
+	// Get descendants with max_depth=1 (only direct children)
+	descendants, err := client.GetDescendants(ctx, "root-id", 1)
+	require.NoError(t, err)
+	assert.Len(t, descendants, 1) // Only child, not grandchild
+	assert.Equal(t, "child-id", descendants[0].ID)
+}
+
+// M5.1: Test GetDescendants with cycle detection
+func TestGetDescendants_CycleDetection(t *testing.T) {
+	client, mr := setupTestClient(t)
+	ctx := context.Background()
+
+	// Manually create a cycle in the reverse index (shouldn't happen in practice)
+	// root -> child -> root (cycle)
+	mr.SAdd(ChildrenIndexKey("test-instance", "root-id"), "child-id")
+	mr.SAdd(ChildrenIndexKey("test-instance", "child-id"), "root-id") // Cycle!
+
+	// Create artefacts manually
+	root := &Artefact{
+		ID:              "root-id",
+		LogicalID:       "root-logical",
+		Version:         1,
+		StructuralType:  StructuralTypeStandard,
+		Type:            "Root",
+		Payload:         "root",
+		SourceArtefacts: []string{},
+		ProducedByRole:  "test",
+		Metadata:        "{}",
+	}
+
+	child := &Artefact{
+		ID:              "child-id",
+		LogicalID:       "child-logical",
+		Version:         1,
+		StructuralType:  StructuralTypeStandard,
+		Type:            "Child",
+		Payload:         "child",
+		SourceArtefacts: []string{"root-id"},
+		ProducedByRole:  "test",
+		Metadata:        "{}",
+	}
+
+	// Store artefacts in Redis manually (bypassing CreateArtefact to avoid Lua)
+	rootHash, _ := ArtefactToHash(root)
+	childHash, _ := ArtefactToHash(child)
+
+	// Store hashes in miniredis (need to use real Redis client for proper HSET)
+	for k, v := range rootHash {
+		mr.HSet(ArtefactKey("test-instance", "root-id"), k, fmt.Sprintf("%v", v))
+	}
+	for k, v := range childHash {
+		mr.HSet(ArtefactKey("test-instance", "child-id"), k, fmt.Sprintf("%v", v))
+	}
+
+	// Get descendants should not infinite loop
+	descendants, err := client.GetDescendants(ctx, "root-id", 0)
+	require.NoError(t, err)
+
+	// Should visit each node only once
+	assert.Len(t, descendants, 1)
+	assert.Equal(t, "child-id", descendants[0].ID)
+}
+
+// M5.1: Test GetDescendants with empty result
+func TestGetDescendants_NoChildren(t *testing.T) {
+	client, _ := setupTestClient(t)
+	ctx := context.Background()
+
+	// Create artefact with no children
+	root := &Artefact{
+		ID:              "root-id",
+		LogicalID:       "root-logical",
+		Version:         1,
+		StructuralType:  StructuralTypeStandard,
+		Type:            "Root",
+		Payload:         "root",
+		SourceArtefacts: []string{},
+		ProducedByRole:  "test",
+		Metadata:        "{}",
+	}
+
+	require.NoError(t, client.CreateArtefact(ctx, root))
+
+	// Get descendants
+	descendants, err := client.GetDescendants(ctx, "root-id", 0)
+	require.NoError(t, err)
+	assert.Empty(t, descendants)
+}
+
+// M5.1: Test AcquireSyncLock success
+func TestAcquireSyncLock_Success(t *testing.T) {
+	client, _ := setupTestClient(t)
+	ctx := context.Background()
+
+	// First acquisition should succeed
+	acquired, err := client.AcquireSyncLock(ctx, "ancestor-123", "Deployer")
+	require.NoError(t, err)
+	assert.True(t, acquired)
+}
+
+// M5.1: Test AcquireSyncLock failure (already held)
+func TestAcquireSyncLock_AlreadyHeld(t *testing.T) {
+	client, _ := setupTestClient(t)
+	ctx := context.Background()
+
+	// First acquisition succeeds
+	acquired1, err := client.AcquireSyncLock(ctx, "ancestor-123", "Deployer")
+	require.NoError(t, err)
+	assert.True(t, acquired1)
+
+	// Second acquisition fails (lock already held)
+	acquired2, err := client.AcquireSyncLock(ctx, "ancestor-123", "Deployer")
+	require.NoError(t, err)
+	assert.False(t, acquired2)
+}
+
+// M5.1: Test AcquireSyncLock with different agent roles
+func TestAcquireSyncLock_DifferentRoles(t *testing.T) {
+	client, _ := setupTestClient(t)
+	ctx := context.Background()
+
+	// Different roles get different locks
+	acquired1, err := client.AcquireSyncLock(ctx, "ancestor-123", "Deployer")
+	require.NoError(t, err)
+	assert.True(t, acquired1)
+
+	// Different role CAN acquire lock on same ancestor (different hash)
+	acquired2, err := client.AcquireSyncLock(ctx, "ancestor-123", "OtherAgent")
+	require.NoError(t, err)
+	assert.True(t, acquired2) // Different role hash
+}
+
+// M5.1: Test AcquireSyncLock with different ancestors
+func TestAcquireSyncLock_DifferentAncestors(t *testing.T) {
+	client, _ := setupTestClient(t)
+	ctx := context.Background()
+
+	// Same role, different ancestors
+	acquired1, err := client.AcquireSyncLock(ctx, "ancestor-123", "Deployer")
+	require.NoError(t, err)
+	assert.True(t, acquired1)
+
+	acquired2, err := client.AcquireSyncLock(ctx, "ancestor-456", "Deployer")
+	require.NoError(t, err)
+	assert.True(t, acquired2) // Different ancestor
 }

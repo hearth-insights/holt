@@ -21,6 +21,7 @@ func TestArtefactRoundTrip(t *testing.T) {
 		Payload:         "abc123def",
 		SourceArtefacts: []string{uuid.New().String(), uuid.New().String()},
 		ContextForRoles: []string{}, // M4.3: Explicitly set to empty slice
+		Metadata:        "{}",       // M5.1: Explicitly set to empty object
 	}
 
 	// Convert to hash
@@ -59,6 +60,7 @@ func TestArtefactRoundTrip_EmptySourceArtefacts(t *testing.T) {
 		Payload:         "Create a REST API",
 		SourceArtefacts: []string{},     // Empty array
 		ContextForRoles: []string{},     // M4.3: Explicitly set to empty slice
+		Metadata:        "{}",           // M5.1: Explicitly set to empty object
 	}
 
 	hash, err := ArtefactToHash(original)
@@ -475,6 +477,115 @@ func TestHashToClaim_M3_5_MalformedGrantQueue(t *testing.T) {
 	_, err := HashToClaim(hash)
 	if err == nil {
 		t.Error("expected error for malformed grant_queue JSON, got nil")
+	}
+}
+
+// M5.1: Test metadata round-trip with valid JSON
+func TestArtefactRoundTrip_WithMetadata(t *testing.T) {
+	original := &Artefact{
+		ID:              uuid.New().String(),
+		LogicalID:       uuid.New().String(),
+		Version:         1,
+		StructuralType:  StructuralTypeStandard,
+		Type:            "TestResult",
+		ProducedByRole:  "test-agent",
+		Payload:         "test-data",
+		SourceArtefacts: []string{uuid.New().String()},
+		ContextForRoles: []string{},
+		Metadata:        `{"batch_size":"5","status":"complete"}`, // M5.1: Valid JSON metadata
+	}
+
+	hash, err := ArtefactToHash(original)
+	if err != nil {
+		t.Fatalf("ArtefactToHash failed: %v", err)
+	}
+
+	// Verify metadata is present in hash
+	if hash["metadata"] != `{"batch_size":"5","status":"complete"}` {
+		t.Errorf("metadata not preserved in hash: got %q", hash["metadata"])
+	}
+
+	stringHash := make(map[string]string)
+	for k, v := range hash {
+		stringHash[k] = toString(v)
+	}
+
+	result, err := HashToArtefact(stringHash)
+	if err != nil {
+		t.Fatalf("HashToArtefact failed: %v", err)
+	}
+
+	if result.Metadata != original.Metadata {
+		t.Errorf("metadata mismatch:\noriginal: %s\nresult:   %s", original.Metadata, result.Metadata)
+	}
+}
+
+// M5.1: Test metadata defaults to empty object when omitted
+func TestArtefactRoundTrip_EmptyMetadata(t *testing.T) {
+	original := &Artefact{
+		ID:              uuid.New().String(),
+		LogicalID:       uuid.New().String(),
+		Version:         1,
+		StructuralType:  StructuralTypeStandard,
+		Type:            "TestResult",
+		ProducedByRole:  "test-agent",
+		Payload:         "test-data",
+		SourceArtefacts: []string{},
+		ContextForRoles: []string{},
+		Metadata:        "", // M5.1: Empty metadata
+	}
+
+	hash, err := ArtefactToHash(original)
+	if err != nil {
+		t.Fatalf("ArtefactToHash failed: %v", err)
+	}
+
+	// Verify metadata defaults to "{}"
+	if hash["metadata"] != "{}" {
+		t.Errorf("expected metadata to default to '{}', got %q", hash["metadata"])
+	}
+
+	stringHash := make(map[string]string)
+	for k, v := range hash {
+		stringHash[k] = toString(v)
+	}
+
+	result, err := HashToArtefact(stringHash)
+	if err != nil {
+		t.Fatalf("HashToArtefact failed: %v", err)
+	}
+
+	// Result should have "{}" for empty metadata
+	if result.Metadata != "{}" {
+		t.Errorf("expected metadata to be '{}', got %q", result.Metadata)
+	}
+}
+
+// M5.1: Test metadata defaults to empty object when missing from hash
+func TestHashToArtefact_MissingMetadata(t *testing.T) {
+	hash := map[string]string{
+		"id":                uuid.New().String(),
+		"logical_id":        uuid.New().String(),
+		"version":           "1",
+		"structural_type":   "Standard",
+		"type":              "TestResult",
+		"payload":           "test-data",
+		"source_artefacts":  "[]",
+		"produced_by_role":  "test-agent",
+		"created_at_ms":     "1234567890",
+		"context_for_roles": "[]",
+		"claim_id":          "",
+		// metadata field is missing (simulating old data)
+	}
+
+	result, err := HashToArtefact(hash)
+	if err != nil {
+		t.Fatalf("HashToArtefact failed: %v", err)
+	}
+
+	// Should default to "{}"
+	if result.Metadata != "{}" {
+		t.Errorf("expected metadata to default to '{}' for missing field, got %q", result.Metadata)
 	}
 }
 

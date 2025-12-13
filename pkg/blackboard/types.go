@@ -34,6 +34,11 @@ type Artefact struct {
 	// M4.6 Security Addendum: Grant Linkage & Topology Validation
 	// ClaimID cryptographically binds this artefact to the authorization that permitted its creation
 	ClaimID string `json:"claim_id,omitempty"`
+
+	// M5.1: Metadata for synchronization
+	// Stored as JSON-encoded map[string]string
+	// Used by Producer-Declared pattern (e.g., {"batch_size": "10"})
+	Metadata string `json:"metadata,omitempty"` // JSON-encoded map[string]string
 }
 
 // StructuralType defines the role an artefact plays in the orchestration flow.
