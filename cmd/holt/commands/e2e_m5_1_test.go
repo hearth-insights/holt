@@ -1,0 +1,567 @@
+//go:build integration
+// +build integration
+
+package commands
+
+import (
+	"context"
+	"encoding/json"
+	"os/exec"
+	"testing"
+	"time"
+
+	"github.com/hearth-insights/holt/internal/testutil"
+	"github.com/hearth-insights/holt/pkg/blackboard"
+	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/require"
+)
+
+// TestE2E_M5_1_NamedPattern validates the Named Pattern synchronization:
+// 1. Create CodeCommit ancestor
+// 2. Create 3 distinct prerequisite types (TestResult, LintResult, SecurityScan)
+// 3. Synchronizer should wait for all 3
+// 4. When all present, synchronizer bids and wins
+// 5. Synchronizer receives ancestor + all descendants in context
+func TestE2E_M5_1_NamedPattern(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping E2E test in short mode")
+	}
+
+	t.Log("=== M5.1 E2E: Named Pattern Fan-In Synchronization ===")
+
+	projectRoot := testutil.GetProjectRoot()
+
+	// Build test agents
+	t.Log("Building test agent Docker images...")
+
+	// Build producer agent (creates TestResult, LintResult, SecurityScan)
+	buildCmd := exec.Command("docker", "build",
+		"-t", "m5-1-producer:latest",
+		"-f", "-",
+		".")
+	buildCmd.Dir = projectRoot
+	buildCmd.Stdin = getProducerAgentDockerfile()
+	output, err := buildCmd.CombinedOutput()
+	if err != nil {
+		t.Logf("Producer build output:\n%s", string(output))
+	}
+	require.NoError(t, err, "Failed to build producer agent")
+	t.Log("✓ Producer agent built")
+
+	// Build synchronizer agent (waits for all 3 types)
+	buildCmd = exec.Command("docker", "build",
+		"-t", "m5-1-synchronizer:latest",
+		"-f", "-",
+		".")
+	buildCmd.Dir = projectRoot
+	buildCmd.Stdin = getSynchronizerAgentDockerfile()
+	output, err = buildCmd.CombinedOutput()
+	if err != nil {
+		t.Logf("Synchronizer build output:\n%s", string(output))
+	}
+	require.NoError(t, err, "Failed to build synchronizer agent")
+	t.Log("✓ Synchronizer agent built")
+
+	// Setup environment with synchronizer configuration
+	holtYML := `version: "1.0"
+orchestrator:
+  max_review_iterations: 3
+  timestamp_drift_tolerance_ms: 600000
+agents:
+  Producer:
+    image: "m5-1-producer:latest"
+    command: ["/app/produce.sh"]
+    bidding_strategy:
+      type: "exclusive"
+  Synchronizer:
+    image: "m5-1-synchronizer:latest"
+    command: ["/app/synchronize.sh"]
+    synchronize:
+      ancestor_type: "CodeCommit"
+      wait_for:
+        - type: "TestResult"
+        - type: "LintResult"
+        - type: "SecurityScan"
+services:
+  redis:
+    image: redis:7-alpine
+`
+
+	env := testutil.SetupE2EEnvironment(t, holtYML)
+	defer func() {
+		downCmd := &cobra.Command{}
+		downInstanceName = env.InstanceName
+		_ = runDown(downCmd, []string{})
+		t.Log("✓ Cleanup complete")
+	}()
+
+	t.Logf("✓ Environment setup: %s", env.InstanceName)
+
+	// Start instance
+	t.Log("Starting Holt instance...")
+	upCmd := &cobra.Command{}
+	upInstanceName = env.InstanceName
+	upForce = false
+	err = runUp(upCmd, []string{})
+	require.NoError(t, err)
+	t.Log("✓ Instance started")
+
+	time.Sleep(2 * time.Second)
+
+	// Connect to blackboard
+	ctx := context.Background()
+	env.InitializeBlackboardClient()
+	bbClient := env.BBClient
+	t.Log("✓ Connected to blackboard")
+
+	// Step 1: Create CodeCommit ancestor
+	t.Log("Step 1: Creating CodeCommit ancestor...")
+	codeCommit := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
+		ParentHashes:    []string{},
+		LogicalThreadID: blackboard.NewID(),
+		Version:         1,
+		Type:            "CodeCommit",
+	}, "commit-abc123")
+	t.Logf("✓ CodeCommit created: %s", codeCommit.ID)
+
+	// Wait for Producer to claim (should bid on CodeCommit)
+	time.Sleep(1 * time.Second)
+
+	// Step 2: Create first 2 prerequisites (TestResult, LintResult)
+	t.Log("Step 2: Creating partial prerequisites...")
+
+	testResult := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
+		ParentHashes:    []string{codeCommit.ID},
+		LogicalThreadID: blackboard.NewID(),
+		Version:         1,
+		Type:            "TestResult",
+	}, "tests-passed")
+	t.Logf("✓ TestResult created: %s", testResult.ID)
+
+	lintResult := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
+		ParentHashes:    []string{codeCommit.ID},
+		LogicalThreadID: blackboard.NewID(),
+		Version:         1,
+		Type:            "LintResult",
+	}, "lint-clean")
+	t.Logf("✓ LintResult created: %s", lintResult.ID)
+
+	// Wait and verify Synchronizer does NOT bid yet
+	time.Sleep(2 * time.Second)
+
+	// Check no DeployResult exists yet (Synchronizer hasn't run)
+	t.Log("Verifying Synchronizer has NOT bid yet (SecurityScan missing)...")
+	exists := artefactTypeExists(ctx, bbClient, "DeployResult")
+	require.False(t, exists, "Synchronizer should not have run yet (SecurityScan missing)")
+	t.Log("✓ Synchronizer correctly waiting")
+
+	// Step 3: Create final prerequisite (SecurityScan)
+	t.Log("Step 3: Creating final prerequisite (SecurityScan)...")
+
+	securityScan := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
+		ParentHashes:    []string{codeCommit.ID},
+		LogicalThreadID: blackboard.NewID(),
+		Version:         1,
+		Type:            "SecurityScan",
+	}, "no-vulnerabilities")
+	t.Logf("✓ SecurityScan created: %s", securityScan.ID)
+
+	// Step 4: Wait for Synchronizer to bid and execute
+	t.Log("Step 4: Waiting for Synchronizer to bid and execute...")
+	time.Sleep(3 * time.Second)
+
+	// Verify DeployResult was created
+	deployResult := waitForArtefactType(ctx, t, bbClient, "DeployResult", 10*time.Second)
+	require.NotNil(t, deployResult, "DeployResult should exist (Synchronizer succeeded)")
+	t.Logf("✓ Synchronizer executed successfully: DeployResult %s", deployResult.ID)
+
+	// Verify DeployResult payload contains confirmation
+	require.Contains(t, deployResult.Payload, "synchronized", "DeployResult should confirm synchronization")
+
+	t.Log("=== Named Pattern E2E Test PASSED ===")
+}
+
+// TestE2E_M5_1_ProducerDeclared validates the Producer-Declared Pattern:
+// 1. Create DataBatch ancestor
+// 2. Producer creates N ProcessedRecord artefacts with batch_size=N metadata
+// 3. Synchronizer reads metadata and waits for N records
+// 4. When all N present, synchronizer aggregates them
+func TestE2E_M5_1_ProducerDeclared(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping E2E test in short mode")
+	}
+
+	t.Log("=== M5.1 E2E: Producer-Declared Pattern (Dynamic Count) ===")
+
+	projectRoot := testutil.GetProjectRoot()
+
+	// Build multi-artefact producer (outputs 5 ProcessedRecords)
+	t.Log("Building multi-output producer...")
+	buildCmd := exec.Command("docker", "build",
+		"-t", "m5-1-multi-producer:latest",
+		"-f", "-",
+		".")
+	buildCmd.Dir = projectRoot
+	buildCmd.Stdin = getMultiProducerDockerfile()
+	output, err := buildCmd.CombinedOutput()
+	if err != nil {
+		t.Logf("Multi-producer build output:\n%s", string(output))
+	}
+	require.NoError(t, err)
+	t.Log("✓ Multi-producer built")
+
+	// Build aggregator (synchronizes on batch_size)
+	buildCmd = exec.Command("docker", "build",
+		"-t", "m5-1-aggregator:latest",
+		"-f", "-",
+		".")
+	buildCmd.Dir = projectRoot
+	buildCmd.Stdin = getAggregatorDockerfile()
+	output, err = buildCmd.CombinedOutput()
+	if err != nil {
+		t.Logf("Aggregator build output:\n%s", string(output))
+	}
+	require.NoError(t, err)
+	t.Log("✓ Aggregator built")
+
+	holtYML := `version: "1.0"
+orchestrator:
+  max_review_iterations: 3
+  timestamp_drift_tolerance_ms: 600000
+agents:
+  MultiProducer:
+    image: "m5-1-multi-producer:latest"
+    command: ["/app/produce-multi.sh"]
+    bidding_strategy:
+      type: "exclusive"
+  Aggregator:
+    image: "m5-1-aggregator:latest"
+    command: ["/app/aggregate.sh"]
+    synchronize:
+      ancestor_type: "DataBatch"
+      wait_for:
+        - type: "ProcessedRecord"
+          count_from_metadata: "batch_size"
+services:
+  redis:
+    image: redis:7-alpine
+`
+
+	env := testutil.SetupE2EEnvironment(t, holtYML)
+	defer func() {
+		downCmd := &cobra.Command{}
+		downInstanceName = env.InstanceName
+		_ = runDown(downCmd, []string{})
+		t.Log("✓ Cleanup complete")
+	}()
+
+	upCmd := &cobra.Command{}
+	upInstanceName = env.InstanceName
+	upForce = false
+	err = runUp(upCmd, []string{})
+	require.NoError(t, err)
+	time.Sleep(2 * time.Second)
+
+	ctx := context.Background()
+	env.InitializeBlackboardClient()
+	bbClient := env.BBClient
+	t.Log("✓ Instance ready")
+
+	// Create DataBatch
+	t.Log("Creating DataBatch...")
+	dataBatch := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
+		ParentHashes:    []string{},
+		LogicalThreadID: blackboard.NewID(),
+		Version:         1,
+		Type:            "DataBatch",
+	}, "batch-123")
+	t.Logf("✓ DataBatch created: %s", dataBatch.ID)
+
+	// Wait for MultiProducer to create 5 ProcessedRecords with metadata
+	t.Log("Waiting for producer to create 5 ProcessedRecords...")
+	time.Sleep(5 * time.Second)
+
+	// Verify 5 ProcessedRecords exist with batch_size=5 metadata
+	records := getArtefactsByType(ctx, bbClient, "ProcessedRecord")
+	require.Len(t, records, 5, "Should have 5 ProcessedRecords")
+
+	// Verify metadata injection
+	for i, record := range records {
+		var metadata map[string]string
+		err := json.Unmarshal([]byte(record.Metadata), &metadata)
+		require.NoError(t, err, "Record %d metadata should be valid JSON", i)
+		require.Equal(t, "5", metadata["batch_size"], "Record %d should have batch_size=5", i)
+	}
+	t.Log("✓ All 5 ProcessedRecords created with correct metadata")
+
+	// Wait for Aggregator to synchronize
+	t.Log("Waiting for Aggregator to synchronize...")
+	time.Sleep(3 * time.Second)
+
+	// Verify AggregatedReport was created
+	report := waitForArtefactType(ctx, t, bbClient, "AggregatedReport", 10*time.Second)
+	require.NotNil(t, report, "AggregatedReport should exist")
+	t.Logf("✓ Aggregator synchronized: %s", report.ID)
+
+	require.Contains(t, report.Payload, "5 records", "Report should mention 5 records")
+
+	t.Log("=== Producer-Declared E2E Test PASSED ===")
+}
+
+// TestE2E_M5_1_DeduplicationLock validates the deduplication lock prevents double-bidding:
+// 1. Create ancestor
+// 2. Create final two prerequisites simultaneously (simulates race condition)
+// 3. Both trigger synchronizer evaluation
+// 4. Only ONE synchronizer bid should be submitted (deduplication lock)
+// 5. Only ONE DeployResult should be created
+func TestE2E_M5_1_DeduplicationLock(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping E2E test in short mode")
+	}
+
+	t.Log("=== M5.1 E2E: Deduplication Lock (Safety Check) ===")
+
+	projectRoot := testutil.GetProjectRoot()
+
+	// Build synchronizer with controller/worker (2 max_concurrent workers)
+	t.Log("Building concurrent synchronizer...")
+	buildCmd := exec.Command("docker", "build",
+		"-t", "m5-1-concurrent-sync:latest",
+		"-f", "-",
+		".")
+	buildCmd.Dir = projectRoot
+	buildCmd.Stdin = getConcurrentSynchronizerDockerfile()
+	output, err := buildCmd.CombinedOutput()
+	if err != nil {
+		t.Logf("Concurrent sync build output:\n%s", string(output))
+	}
+	require.NoError(t, err)
+	t.Log("✓ Concurrent synchronizer built")
+
+	holtYML := `version: "1.0"
+orchestrator:
+  max_review_iterations: 3
+  timestamp_drift_tolerance_ms: 600000
+agents:
+  ConcurrentSync:
+    image: "m5-1-concurrent-sync:latest"
+    command: ["/app/sync-concurrent.sh"]
+    mode: "controller"
+    worker:
+      max_concurrent: 2  # Multiple workers for race condition
+    synchronize:
+      ancestor_type: "CodeCommit"
+      wait_for:
+        - type: "TestResult"
+        - type: "LintResult"
+services:
+  redis:
+    image: redis:7-alpine
+`
+
+	env := testutil.SetupE2EEnvironment(t, holtYML)
+	defer func() {
+		downCmd := &cobra.Command{}
+		downInstanceName = env.InstanceName
+		_ = runDown(downCmd, []string{})
+		t.Log("✓ Cleanup complete")
+	}()
+
+	upCmd := &cobra.Command{}
+	upInstanceName = env.InstanceName
+	upForce = false
+	err = runUp(upCmd, []string{})
+	require.NoError(t, err)
+	time.Sleep(3 * time.Second) // Wait for both workers to start
+
+	ctx := context.Background()
+	env.InitializeBlackboardClient()
+	bbClient := env.BBClient
+	t.Log("✓ Instance ready with 2 concurrent workers")
+
+	// Create ancestor
+	t.Log("Creating CodeCommit...")
+	codeCommit := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
+		ParentHashes:    []string{},
+		LogicalThreadID: blackboard.NewID(),
+		Version:         1,
+		Type:            "CodeCommit",
+	}, "commit-xyz")
+	t.Logf("✓ CodeCommit created: %s", codeCommit.ID)
+
+	// Create both final prerequisites nearly simultaneously (race condition)
+	t.Log("Creating TestResult and LintResult simultaneously...")
+
+	testResult := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
+		ParentHashes:    []string{codeCommit.ID},
+		LogicalThreadID: blackboard.NewID(),
+		Version:         1,
+		Type:            "TestResult",
+	}, "passed")
+
+	// Create second artefact immediately (race condition)
+	lintResult := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
+		ParentHashes:    []string{codeCommit.ID},
+		LogicalThreadID: blackboard.NewID(),
+		Version:         1,
+		Type:            "LintResult",
+	}, "clean")
+
+	t.Logf("✓ Both prerequisites created (race): TestResult=%s, LintResult=%s", testResult.ID, lintResult.ID)
+
+	// Wait for synchronizer to execute
+	time.Sleep(4 * time.Second)
+
+	// Verify ONLY ONE DeployResult was created (deduplication worked)
+	deploys := getArtefactsByType(ctx, bbClient, "DeployResult")
+	require.Len(t, deploys, 1, "Deduplication lock should prevent double execution (only 1 DeployResult)")
+	t.Logf("✓ Deduplication successful: Only 1 DeployResult created")
+
+	t.Log("=== Deduplication Lock E2E Test PASSED ===")
+}
+
+// Helper functions
+
+func artefactTypeExists(ctx context.Context, bbClient *blackboard.Client, artefactType string) bool {
+	artefacts := getArtefactsByType(ctx, bbClient, artefactType)
+	return len(artefacts) > 0
+}
+
+func waitForArtefactType(ctx context.Context, t *testing.T, bbClient *blackboard.Client, artefactType string, timeout time.Duration) *blackboard.Artefact {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		artefacts := getArtefactsByType(ctx, bbClient, artefactType)
+		if len(artefacts) > 0 {
+			return artefacts[0]
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	return nil
+}
+
+func getArtefactsByType(ctx context.Context, bbClient *blackboard.Client, artefactType string) []*blackboard.Artefact {
+	// Scan all artefacts and filter by type
+	var results []*blackboard.Artefact
+
+	// Use ScanArtefacts to find all artefact IDs
+	artefactIDs, err := bbClient.ScanArtefacts(ctx, "")
+	if err != nil {
+		return results
+	}
+
+	for _, artefactID := range artefactIDs {
+		artefact, err := bbClient.GetArtefact(ctx, artefactID)
+		if err == nil && artefact != nil && artefact.Type == artefactType {
+			results = append(results, artefact)
+		}
+	}
+
+	return results
+}
+
+// Dockerfile generators (inline for simplicity)
+
+func getProducerAgentDockerfile() *testutil.StringReader {
+	dockerfile := `FROM alpine:3.18
+RUN apk add --no-cache bash
+COPY <<'EOF' /app/produce.sh
+#!/bin/bash
+set -e
+
+# Read input from stdin (not used for this simple producer)
+cat > /dev/null
+
+# Produce a single artefact (CodeCommit trigger will create prerequisites)
+cat <<RESULT >&3
+{"artefact_type":"TriggerComplete","artefact_payload":"triggered","summary":"Producer triggered"}
+RESULT
+EOF
+RUN chmod +x /app/produce.sh
+WORKDIR /app
+`
+	return testutil.NewStringReader(dockerfile)
+}
+
+func getSynchronizerAgentDockerfile() *testutil.StringReader {
+	dockerfile := `FROM alpine:3.18
+RUN apk add --no-cache bash jq
+COPY <<'EOF' /app/synchronize.sh
+#!/bin/bash
+set -e
+
+# Read synchronizer context from stdin
+INPUT=$(cat)
+
+# Extract ancestor and descendants
+ANCESTOR=$(echo "$INPUT" | jq -r '.ancestor_artefact.payload // ""')
+DESCENDANTS=$(echo "$INPUT" | jq -r '.descendant_artefacts | length')
+
+# Create synchronized result
+cat <<RESULT >&3
+{"artefact_type":"DeployResult","artefact_payload":"synchronized from $ANCESTOR with $DESCENDANTS descendants","summary":"Deployment synchronized"}
+RESULT
+EOF
+RUN chmod +x /app/synchronize.sh
+WORKDIR /app
+`
+	return testutil.NewStringReader(dockerfile)
+}
+
+func getMultiProducerDockerfile() *testutil.StringReader {
+	dockerfile := `FROM alpine:3.18
+RUN apk add --no-cache bash
+COPY <<'EOF' /app/produce-multi.sh
+#!/bin/bash
+set -e
+cat > /dev/null
+
+# Produce 5 ProcessedRecord artefacts (Pup will inject batch_size=5 metadata)
+for i in {1..5}; do
+  cat <<RECORD >&3
+{"artefact_type":"ProcessedRecord","artefact_payload":"record-$i","summary":"Processed record $i"}
+RECORD
+done
+EOF
+RUN chmod +x /app/produce-multi.sh
+WORKDIR /app
+`
+	return testutil.NewStringReader(dockerfile)
+}
+
+func getAggregatorDockerfile() *testutil.StringReader {
+	dockerfile := `FROM alpine:3.18
+RUN apk add --no-cache bash jq
+COPY <<'EOF' /app/aggregate.sh
+#!/bin/bash
+set -e
+INPUT=$(cat)
+COUNT=$(echo "$INPUT" | jq -r '.descendant_artefacts | length')
+
+cat <<RESULT >&3
+{"artefact_type":"AggregatedReport","artefact_payload":"Aggregated $COUNT records","summary":"Aggregation complete"}
+RESULT
+EOF
+RUN chmod +x /app/aggregate.sh
+WORKDIR /app
+`
+	return testutil.NewStringReader(dockerfile)
+}
+
+func getConcurrentSynchronizerDockerfile() *testutil.StringReader {
+	dockerfile := `FROM alpine:3.18
+RUN apk add --no-cache bash
+COPY <<'EOF' /app/sync-concurrent.sh
+#!/bin/bash
+set -e
+cat > /dev/null
+
+# Simple output (deduplication lock prevents multiple executions)
+cat <<RESULT >&3
+{"artefact_type":"DeployResult","artefact_payload":"deployed","summary":"Deployment complete"}
+RESULT
+EOF
+RUN chmod +x /app/sync-concurrent.sh
+WORKDIR /app
+`
+	return testutil.NewStringReader(dockerfile)
+}

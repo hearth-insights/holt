@@ -869,3 +869,25 @@ func (env *E2EEnvironment) DumpInstanceLogs() {
 
 	env.T.Log("=== End container logs ===")
 }
+
+// StringReader wraps a string to implement io.Reader for Docker build contexts
+// M5.1: Helper for inline Dockerfiles in E2E tests
+type StringReader struct {
+	content string
+	pos     int
+}
+
+// NewStringReader creates a new StringReader
+func NewStringReader(s string) *StringReader {
+	return &StringReader{content: s, pos: 0}
+}
+
+// Read implements io.Reader
+func (sr *StringReader) Read(p []byte) (n int, err error) {
+	if sr.pos >= len(sr.content) {
+		return 0, io.EOF
+	}
+	n = copy(p, sr.content[sr.pos:])
+	sr.pos += n
+	return n, nil
+}

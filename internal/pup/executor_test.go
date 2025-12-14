@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -437,4 +438,206 @@ func TestLimitedReader_M4_10(t *testing.T) {
 			t.Fatalf("Expected 'read limit exceeded' error, got: %v", err)
 		}
 	})
+}
+
+// M5.1: Unit Tests for Multi-Artefact Output (Producer Side)
+
+// TestParseToolOutputs_SingleOutput verifies parsing single JSON object (batch_size=1)
+func TestParseToolOutputs_SingleOutput(t *testing.T) {
+	engine := &Engine{}
+
+	fd3Result := `{"artefact_type":"TestResult","artefact_payload":"test-123","summary":"Single test passed"}`
+
+	outputs, err := engine.parseToolOutputs(fd3Result)
+	if err != nil {
+		t.Fatalf("parseToolOutputs failed: %v", err)
+	}
+
+	if len(outputs) != 1 {
+		t.Fatalf("Expected 1 output, got %d", len(outputs))
+	}
+
+	if outputs[0].ArtefactType != "TestResult" {
+		t.Errorf("Expected ArtefactType='TestResult', got %q", outputs[0].ArtefactType)
+	}
+
+	if outputs[0].ArtefactPayload != "test-123" {
+		t.Errorf("Expected ArtefactPayload='test-123', got %q", outputs[0].ArtefactPayload)
+	}
+
+	if outputs[0].Summary != "Single test passed" {
+		t.Errorf("Expected Summary='Single test passed', got %q", outputs[0].Summary)
+	}
+}
+
+// TestParseToolOutputs_MultipleOutputs verifies parsing multiple JSON objects (batch_size=5)
+func TestParseToolOutputs_MultipleOutputs(t *testing.T) {
+	engine := &Engine{}
+
+	// Multiple JSON objects separated by newlines
+	fd3Result := `{"artefact_type":"TestResult","artefact_payload":"test-1","summary":"Test 1"}
+{"artefact_type":"TestResult","artefact_payload":"test-2","summary":"Test 2"}
+{"artefact_type":"TestResult","artefact_payload":"test-3","summary":"Test 3"}
+{"artefact_type":"TestResult","artefact_payload":"test-4","summary":"Test 4"}
+{"artefact_type":"TestResult","artefact_payload":"test-5","summary":"Test 5"}`
+
+	outputs, err := engine.parseToolOutputs(fd3Result)
+	if err != nil {
+		t.Fatalf("parseToolOutputs failed: %v", err)
+	}
+
+	if len(outputs) != 5 {
+		t.Fatalf("Expected 5 outputs, got %d", len(outputs))
+	}
+
+	// Verify all outputs parsed correctly
+	for i, output := range outputs {
+		expectedPayload := fmt.Sprintf("test-%d", i+1)
+		if output.ArtefactPayload != expectedPayload {
+			t.Errorf("Output %d: expected payload %q, got %q", i, expectedPayload, output.ArtefactPayload)
+		}
+
+		if output.ArtefactType != "TestResult" {
+			t.Errorf("Output %d: expected type 'TestResult', got %q", i, output.ArtefactType)
+		}
+	}
+}
+
+// TestParseToolOutputs_MultipleOutputs_NoNewlines verifies parsing without newline separators
+func TestParseToolOutputs_MultipleOutputs_NoNewlines(t *testing.T) {
+	engine := &Engine{}
+
+	// JSON objects concatenated without newlines (still valid with json.Decoder)
+	fd3Result := `{"artefact_type":"A","artefact_payload":"1","summary":"ok"}{"artefact_type":"B","artefact_payload":"2","summary":"ok"}{"artefact_type":"C","artefact_payload":"3","summary":"ok"}`
+
+	outputs, err := engine.parseToolOutputs(fd3Result)
+	if err != nil {
+		t.Fatalf("parseToolOutputs failed: %v", err)
+	}
+
+	if len(outputs) != 3 {
+		t.Fatalf("Expected 3 outputs, got %d", len(outputs))
+	}
+
+	expectedTypes := []string{"A", "B", "C"}
+	for i, output := range outputs {
+		if output.ArtefactType != expectedTypes[i] {
+			t.Errorf("Output %d: expected type %q, got %q", i, expectedTypes[i], output.ArtefactType)
+		}
+	}
+}
+
+// TestParseToolOutputs_EmptyOutput verifies error handling for empty FD 3
+func TestParseToolOutputs_EmptyOutput(t *testing.T) {
+	engine := &Engine{}
+
+	fd3Result := ""
+
+	_, err := engine.parseToolOutputs(fd3Result)
+	if err == nil {
+		t.Fatal("Expected error for empty FD 3 output, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "no output on FD 3") {
+		t.Errorf("Expected error message about 'no output on FD 3', got: %v", err)
+	}
+}
+
+// TestParseToolOutputs_MalformedJSON verifies error handling for invalid JSON
+func TestParseToolOutputs_MalformedJSON(t *testing.T) {
+	engine := &Engine{}
+
+	tests := []struct {
+		name      string
+		fd3Result string
+		errSubstr string
+	}{
+		{
+			name:      "non-JSON text",
+			fd3Result: "This is not JSON at all",
+			errSubstr: "does not start with JSON",
+		},
+		{
+			name:      "incomplete JSON",
+			fd3Result: `{"artefact_type":"Test","artefact_payload":"incomplete`,
+			errSubstr: "invalid JSON on FD 3",
+		},
+		{
+			name:      "first object valid, second invalid",
+			fd3Result: `{"artefact_type":"Test","artefact_payload":"ok","summary":"ok"}{"artefact_type":"Bad"`,
+			errSubstr: "invalid JSON on FD 3",
+		},
+		{
+			name:      "missing required field",
+			fd3Result: `{"artefact_type":"Test"}`,
+			errSubstr: "validation failed",
+		},
+		{
+			name:      "empty artefact_type",
+			fd3Result: `{"artefact_type":"","artefact_payload":"test","summary":"ok"}`,
+			errSubstr: "validation failed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := engine.parseToolOutputs(tt.fd3Result)
+			if err == nil {
+				t.Fatalf("Expected error for %s, got nil", tt.name)
+			}
+
+			if !strings.Contains(err.Error(), tt.errSubstr) {
+				t.Errorf("Expected error containing %q, got: %v", tt.errSubstr, err)
+			}
+		})
+	}
+}
+
+// TestParseToolOutputs_WhitespaceHandling verifies trimming and whitespace handling
+func TestParseToolOutputs_WhitespaceHandling(t *testing.T) {
+	engine := &Engine{}
+
+	// Leading/trailing whitespace should be handled
+	fd3Result := `
+
+	{"artefact_type":"Test","artefact_payload":"data","summary":"ok"}
+
+	`
+
+	outputs, err := engine.parseToolOutputs(fd3Result)
+	if err != nil {
+		t.Fatalf("parseToolOutputs failed with whitespace: %v", err)
+	}
+
+	if len(outputs) != 1 {
+		t.Fatalf("Expected 1 output, got %d", len(outputs))
+	}
+}
+
+// TestParseToolOutputs_MixedStructuralTypes verifies handling different structural types
+func TestParseToolOutputs_MixedStructuralTypes(t *testing.T) {
+	engine := &Engine{}
+
+	// Question artefact has structural_type set
+	fd3Result := `{"structural_type":"Question","artefact_type":"QuestionAsked","artefact_payload":"q1","summary":"ok"}
+{"artefact_type":"StandardResult","artefact_payload":"r1","summary":"ok"}`
+
+	outputs, err := engine.parseToolOutputs(fd3Result)
+	if err != nil {
+		t.Fatalf("parseToolOutputs failed: %v", err)
+	}
+
+	if len(outputs) != 2 {
+		t.Fatalf("Expected 2 outputs, got %d", len(outputs))
+	}
+
+	// First output should have explicit structural type
+	if outputs[0].StructuralType != string(blackboard.StructuralTypeQuestion) {
+		t.Errorf("Expected StructuralType='Question', got %q", outputs[0].StructuralType)
+	}
+
+	// Second output should default to Standard
+	if outputs[1].GetStructuralType() != blackboard.StructuralTypeStandard {
+		t.Errorf("Expected default StructuralType='Standard', got %q", outputs[1].GetStructuralType())
+	}
 }
