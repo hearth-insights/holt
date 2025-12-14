@@ -420,6 +420,251 @@ services:
 	t.Log("=== Deduplication Lock E2E Test PASSED ===")
 }
 
+// TestE2E_M5_1_RecursiveTraversal validates recursive descendant traversal:
+// 1. Create CodeCommit ancestor
+// 2. Create BuildResult (child of CodeCommit)
+// 3. Create TestResult (grandchild - child of BuildResult)
+// 4. Create LintResult (direct child of CodeCommit)
+// 5. Synchronizer should find TestResult at depth=2 (recursive traversal)
+func TestE2E_M5_1_RecursiveTraversal(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping E2E test in short mode")
+	}
+
+	t.Log("=== M5.1 E2E: Recursive Descendant Traversal (Depth=2) ===")
+
+	projectRoot := testutil.GetProjectRoot()
+
+	// Build synchronizer that waits for TestResult + LintResult (no max_depth limit)
+	t.Log("Building recursive synchronizer...")
+	buildCmd := exec.Command("docker", "build",
+		"-t", "m5-1-recursive-sync:latest",
+		"-f", "-",
+		".")
+	buildCmd.Dir = projectRoot
+	buildCmd.Stdin = getSynchronizerAgentDockerfile()
+	output, err := buildCmd.CombinedOutput()
+	if err != nil {
+		t.Logf("Build output:\n%s", string(output))
+	}
+	require.NoError(t, err)
+	t.Log("✓ Recursive synchronizer built")
+
+	holtYML := `version: "1.0"
+orchestrator:
+  max_review_iterations: 3
+  timestamp_drift_tolerance_ms: 600000
+agents:
+  RecursiveSync:
+    image: "m5-1-recursive-sync:latest"
+    command: ["/app/synchronize.sh"]
+    synchronize:
+      ancestor_type: "CodeCommit"
+      wait_for:
+        - type: "TestResult"   # At depth=2 (grandchild)
+        - type: "LintResult"   # At depth=1 (direct child)
+      max_depth: 0  # Unlimited - should find all depths
+services:
+  redis:
+    image: redis:7-alpine
+`
+
+	env := testutil.SetupE2EEnvironment(t, holtYML)
+	defer func() {
+		downCmd := &cobra.Command{}
+		downInstanceName = env.InstanceName
+		_ = runDown(downCmd, []string{})
+		t.Log("✓ Cleanup complete")
+	}()
+
+	upCmd := &cobra.Command{}
+	upInstanceName = env.InstanceName
+	upForce = false
+	err = runUp(upCmd, []string{})
+	require.NoError(t, err)
+	time.Sleep(2 * time.Second)
+
+	ctx := context.Background()
+	env.InitializeBlackboardClient()
+	bbClient := env.BBClient
+	t.Log("✓ Instance ready")
+
+	// Create tree structure:
+	//   CodeCommit
+	//   ├── BuildResult
+	//   │   └── TestResult (depth=2)
+	//   └── LintResult (depth=1)
+
+	t.Log("Creating CodeCommit ancestor...")
+	codeCommit := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
+		ParentHashes:    []string{},
+		LogicalThreadID: blackboard.NewID(),
+		Version:         1,
+		Type:            "CodeCommit",
+	}, "commit-recursive")
+	t.Logf("✓ CodeCommit: %s", codeCommit.ID)
+
+	t.Log("Creating BuildResult (depth=1)...")
+	buildResult := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
+		ParentHashes:    []string{codeCommit.ID},
+		LogicalThreadID: blackboard.NewID(),
+		Version:         1,
+		Type:            "BuildResult",
+	}, "build-ok")
+	t.Logf("✓ BuildResult: %s", buildResult.ID)
+
+	t.Log("Creating TestResult (depth=2 - grandchild)...")
+	testResult := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
+		ParentHashes:    []string{buildResult.ID}, // Child of BuildResult, not CodeCommit!
+		LogicalThreadID: blackboard.NewID(),
+		Version:         1,
+		Type:            "TestResult",
+	}, "tests-passed")
+	t.Logf("✓ TestResult (grandchild): %s", testResult.ID)
+
+	// Verify synchronizer does NOT bid yet (LintResult missing)
+	time.Sleep(2 * time.Second)
+	exists := artefactTypeExists(ctx, bbClient, "DeployResult")
+	require.False(t, exists, "Synchronizer should wait for LintResult")
+	t.Log("✓ Synchronizer waiting (LintResult missing)")
+
+	t.Log("Creating LintResult (depth=1)...")
+	lintResult := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
+		ParentHashes:    []string{codeCommit.ID},
+		LogicalThreadID: blackboard.NewID(),
+		Version:         1,
+		Type:            "LintResult",
+	}, "lint-clean")
+	t.Logf("✓ LintResult: %s", lintResult.ID)
+
+	// Now both dependencies met (TestResult at depth=2, LintResult at depth=1)
+	t.Log("Waiting for synchronizer (should find TestResult at depth=2)...")
+	time.Sleep(3 * time.Second)
+
+	deployResult := waitForArtefactType(ctx, t, bbClient, "DeployResult", 10*time.Second)
+	require.NotNil(t, deployResult, "Synchronizer should find TestResult at depth=2")
+	t.Logf("✓ Synchronizer found grandchild: %s", deployResult.ID)
+
+	t.Log("=== Recursive Traversal E2E Test PASSED ===")
+}
+
+// TestE2E_M5_1_MaxDepthLimiting validates max_depth limiting:
+// 1. Create same tree as RecursiveTraversal test
+// 2. Synchronizer has max_depth=1 (only direct children)
+// 3. TestResult is at depth=2 (grandchild) - should NOT be found
+// 4. Synchronizer should NOT bid (TestResult is too deep)
+func TestE2E_M5_1_MaxDepthLimiting(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping E2E test in short mode")
+	}
+
+	t.Log("=== M5.1 E2E: Max Depth Limiting (max_depth=1) ===")
+
+	projectRoot := testutil.GetProjectRoot()
+
+	// Build synchronizer with max_depth=1
+	t.Log("Building depth-limited synchronizer...")
+	buildCmd := exec.Command("docker", "build",
+		"-t", "m5-1-depth-limited:latest",
+		"-f", "-",
+		".")
+	buildCmd.Dir = projectRoot
+	buildCmd.Stdin = getSynchronizerAgentDockerfile()
+	output, err := buildCmd.CombinedOutput()
+	if err != nil {
+		t.Logf("Build output:\n%s", string(output))
+	}
+	require.NoError(t, err)
+	t.Log("✓ Depth-limited synchronizer built")
+
+	holtYML := `version: "1.0"
+orchestrator:
+  max_review_iterations: 3
+  timestamp_drift_tolerance_ms: 600000
+agents:
+  DepthLimitedSync:
+    image: "m5-1-depth-limited:latest"
+    command: ["/app/synchronize.sh"]
+    synchronize:
+      ancestor_type: "CodeCommit"
+      wait_for:
+        - type: "TestResult"   # At depth=2 (too deep!)
+        - type: "LintResult"   # At depth=1 (OK)
+      max_depth: 1  # Only direct children
+services:
+  redis:
+    image: redis:7-alpine
+`
+
+	env := testutil.SetupE2EEnvironment(t, holtYML)
+	defer func() {
+		downCmd := &cobra.Command{}
+		downInstanceName = env.InstanceName
+		_ = runDown(downCmd, []string{})
+		t.Log("✓ Cleanup complete")
+	}()
+
+	upCmd := &cobra.Command{}
+	upInstanceName = env.InstanceName
+	upForce = false
+	err = runUp(upCmd, []string{})
+	require.NoError(t, err)
+	time.Sleep(2 * time.Second)
+
+	ctx := context.Background()
+	env.InitializeBlackboardClient()
+	bbClient := env.BBClient
+	t.Log("✓ Instance ready")
+
+	// Create same tree structure as RecursiveTraversal
+	t.Log("Creating CodeCommit ancestor...")
+	codeCommit := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
+		ParentHashes:    []string{},
+		LogicalThreadID: blackboard.NewID(),
+		Version:         1,
+		Type:            "CodeCommit",
+	}, "commit-depth-test")
+	t.Logf("✓ CodeCommit: %s", codeCommit.ID)
+
+	t.Log("Creating BuildResult (depth=1)...")
+	buildResult := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
+		ParentHashes:    []string{codeCommit.ID},
+		LogicalThreadID: blackboard.NewID(),
+		Version:         1,
+		Type:            "BuildResult",
+	}, "build-ok")
+	t.Logf("✓ BuildResult: %s", buildResult.ID)
+
+	t.Log("Creating TestResult (depth=2 - TOO DEEP)...")
+	testResult := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
+		ParentHashes:    []string{buildResult.ID},
+		LogicalThreadID: blackboard.NewID(),
+		Version:         1,
+		Type:            "TestResult",
+	}, "tests-passed")
+	t.Logf("✓ TestResult (grandchild): %s", testResult.ID)
+
+	t.Log("Creating LintResult (depth=1 - OK)...")
+	lintResult := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
+		ParentHashes:    []string{codeCommit.ID},
+		LogicalThreadID: blackboard.NewID(),
+		Version:         1,
+		Type:            "LintResult",
+	}, "lint-clean")
+	t.Logf("✓ LintResult: %s", lintResult.ID)
+
+	// Wait and verify synchronizer does NOT bid
+	// TestResult is at depth=2, but max_depth=1, so it won't be found
+	t.Log("Waiting to verify synchronizer does NOT bid (TestResult too deep)...")
+	time.Sleep(5 * time.Second)
+
+	exists := artefactTypeExists(ctx, bbClient, "DeployResult")
+	require.False(t, exists, "Synchronizer should NOT bid (TestResult at depth=2, max_depth=1)")
+	t.Log("✓ Max depth limiting working correctly (TestResult not found)")
+
+	t.Log("=== Max Depth Limiting E2E Test PASSED ===")
+}
+
 // Helper functions
 
 func artefactTypeExists(ctx context.Context, bbClient *blackboard.Client, artefactType string) bool {
