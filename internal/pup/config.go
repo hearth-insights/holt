@@ -9,12 +9,24 @@ import (
 	"github.com/hearth-insights/holt/pkg/blackboard"
 )
 
-// Config holds the agent pup's runtime configuration loaded from environment variables.
-// All fields are required and validated at startup to ensure fail-fast behavior.
 // BiddingStrategy defines the agent's bidding behavior (M4.8)
 type BiddingStrategy struct {
 	Type        blackboard.BidType `json:"type"`
 	TargetTypes []string           `json:"target_types,omitempty"`
+}
+
+// SynchronizeConfig defines fan-in synchronization configuration (M5.1)
+// Same structure as config.SynchronizeConfig but duplicated here to avoid import cycle
+type SynchronizeConfig struct {
+	AncestorType string          `json:"ancestor_type"`
+	WaitFor      []WaitCondition `json:"wait_for"`
+	MaxDepth     int             `json:"max_depth,omitempty"`
+}
+
+// WaitCondition specifies a prerequisite artefact to wait for (M5.1)
+type WaitCondition struct {
+	Type              string `json:"type"`
+	CountFromMetadata string `json:"count_from_metadata,omitempty"`
 }
 
 // Config holds the agent pup's runtime configuration loaded from environment variables.
@@ -44,6 +56,10 @@ type Config struct {
 	// MaxContextDepth is the maximum depth for context assembly BFS (from HOLT_MAX_CONTEXT_DEPTH)
 	// Defaults to 10 if not set.
 	MaxContextDepth int
+
+	// M5.1: Synchronization configuration (from HOLT_SYNCHRONIZE_CONFIG)
+	// Loaded from JSON-serialized config.SynchronizeConfig
+	SynchronizeConfig *SynchronizeConfig
 }
 
 // LoadConfig reads and validates configuration from environment variables.
@@ -95,6 +111,14 @@ func LoadConfig() (*Config, error) {
 		cfg.MaxContextDepth = depth
 	}
 
+	// M5.1: Parse synchronize config
+	synchronizeJSON := os.Getenv("HOLT_SYNCHRONIZE_CONFIG")
+	if synchronizeJSON != "" {
+		if err := json.Unmarshal([]byte(synchronizeJSON), &cfg.SynchronizeConfig); err != nil {
+			return nil, fmt.Errorf("failed to parse HOLT_SYNCHRONIZE_CONFIG as JSON: %w", err)
+		}
+	}
+
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
@@ -123,12 +147,13 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("HOLT_AGENT_COMMAND environment variable is required (must be a non-empty JSON array)")
 	}
 
-	// M3.6: Bidding strategy validation - either bid_script or bidding_strategy required
+	// M3.6/M5.1: Bidding strategy validation - either bid_script, bidding_strategy, or synchronize required
 	hasBidScript := len(c.BidScript) > 0
 	hasStaticStrategy := c.BiddingStrategy.Type != ""
+	hasSynchronize := c.SynchronizeConfig != nil
 
-	if !hasBidScript && !hasStaticStrategy {
-		return fmt.Errorf("either HOLT_BIDDING_STRATEGY or HOLT_AGENT_BID_SCRIPT must be provided")
+	if !hasBidScript && !hasStaticStrategy && !hasSynchronize {
+		return fmt.Errorf("either HOLT_BIDDING_STRATEGY, HOLT_AGENT_BID_SCRIPT, or HOLT_SYNCHRONIZE_CONFIG must be provided")
 	}
 
 	// Validate bidding strategy is a valid enum if provided
@@ -136,8 +161,8 @@ func (c *Config) Validate() error {
 		if err := c.BiddingStrategy.Type.Validate(); err != nil {
 			return fmt.Errorf("invalid HOLT_BIDDING_STRATEGY type: %w", err)
 		}
-	} else {
-		log.Printf("[WARN] No static bidding_strategy configured for agent %s, relying entirely on bid_script", c.AgentName)
+	} else if !hasSynchronize {
+		log.Printf("[WARN] No static bidding_strategy or synchronize configured for agent %s, relying entirely on bid_script", c.AgentName)
 	}
 
 	if c.MaxContextDepth <= 0 {
