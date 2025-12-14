@@ -80,14 +80,17 @@ redis.call('ZADD', thread_key, version, artefact_id)
 -- Parse source_artefacts JSON array
 local source_artefacts = cjson.decode(source_artefacts_json)
 
--- Extract instance name from artefact_key
--- Pattern: holt:{instance}:artefact:{uuid}
-local instance_name = string.match(artefact_key, 'holt:([^:]+):')
+-- Only update index if there are parent artefacts
+if source_artefacts and next(source_artefacts) ~= nil then
+    -- Extract instance name from artefact_key
+    -- Pattern: holt:{instance}:artefact:{uuid}
+    local instance_name = string.match(artefact_key, 'holt:([^:]+):')
 
-for _, parent_id in ipairs(source_artefacts) do
-    -- Build reverse index key for this parent
-    local children_key = 'holt:' .. instance_name .. ':index:children:' .. parent_id
-    redis.call('SADD', children_key, artefact_id)
+    for _, parent_id in ipairs(source_artefacts) do
+        -- Build reverse index key for this parent
+        local children_key = 'holt:' .. instance_name .. ':index:children:' .. parent_id
+        redis.call('SADD', children_key, artefact_id)
+    end
 end
 
 -- Step 4: Publish artefact event
