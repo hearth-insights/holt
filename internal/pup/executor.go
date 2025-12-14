@@ -75,8 +75,8 @@ func (e *Engine) executeWork(ctx context.Context, claim *blackboard.Claim) {
 	log.Printf("[INFO] Tool execution completed: claim_id=%s exit_code=%d duration=%s",
 		claim.ID, exitCode, duration)
 
-	// Parse tool output from FD 3 (M4.10)
-	output, err := e.parseFD3Output(stdout)
+	// M5.1: Parse all tool outputs from FD 3 (supports multi-artefact)
+	outputs, err := e.parseToolOutputs(stdout)
 	if err != nil {
 		log.Printf("[ERROR] Failed to parse FD 3 output: claim_id=%s error=%v fd3_result=%s",
 			claim.ID, err, truncate(stdout, 200))
@@ -85,18 +85,21 @@ func (e *Engine) executeWork(ctx context.Context, claim *blackboard.Claim) {
 		return
 	}
 
-	// Create result artefact (V2 Verifiable)
-	artefact, err := e.createVerifiableResultArtefact(ctx, claim, output, targetArtefact)
+	// M5.1: Create all result artefacts with batch metadata
+	artefacts, err := e.createVerifiableResultArtefacts(ctx, claim, outputs, targetArtefact)
 	if err != nil {
-		log.Printf("[ERROR] Failed to create artefact: claim_id=%s error=%v", claim.ID, err)
+		log.Printf("[ERROR] Failed to create artefacts: claim_id=%s error=%v", claim.ID, err)
 		// Try to create a Failure artefact describing the artefact creation failure
 		e.createFailureArtefact(ctx, claim, 0, stdout, stderr,
 			fmt.Sprintf("Tool succeeded but artefact creation failed: %v", err))
 		return
 	}
 
-	log.Printf("[INFO] Created artefact: artefact_id=%s type=%s logical_id=%s version=%d",
-		artefact.ID, artefact.Header.Type, artefact.Header.LogicalThreadID, artefact.Header.Version)
+	// Log all created artefacts
+	for i, artefact := range artefacts {
+		log.Printf("[INFO] Created artefact %d/%d: artefact_id=%s type=%s logical_id=%s version=%d",
+			i+1, len(artefacts), artefact.ID, artefact.Header.Type, artefact.Header.LogicalThreadID, artefact.Header.Version)
+	}
 }
 
 // fetchTargetArtefact retrieves the artefact that the claim is for.
@@ -295,14 +298,33 @@ func (e *Engine) executeToolSubprocess(ctx context.Context, inputJSON string) (i
 
 // parseFD3Output unmarshals and validates the result JSON from FD 3.
 // M4.10: Renamed from parseToolOutput to clarify it reads from FD 3, not stdout.
+// M5.1: Delegates to parseToolOutputs() for multi-artefact support, returns first artefact for backward compatibility.
 // Returns the parsed ToolOutput or an error if the JSON is invalid or missing required fields.
 func (e *Engine) parseFD3Output(fd3Result string) (*ToolOutput, error) {
+	outputs, err := e.parseToolOutputs(fd3Result)
+	if err != nil {
+		return nil, err
+	}
+
+	// Return first output for backward compatibility
+	return &outputs[0], nil
+}
+
+// parseToolOutputs unmarshals and validates multiple result JSONs from FD 3.
+// M5.1: Supports multi-artefact output for buffer-and-flush pattern.
+//
+// Expects one or more newline-separated JSON objects:
+//
+//	{"artefact_type":"TestResult","artefact_payload":"test1.json","summary":"Test 1"}
+//	{"artefact_type":"TestResult","artefact_payload":"test2.json","summary":"Test 2"}
+//
+// Returns array of parsed ToolOutput objects or an error.
+func (e *Engine) parseToolOutputs(fd3Result string) ([]ToolOutput, error) {
 	if len(fd3Result) == 0 {
 		return nil, fmt.Errorf("agent produced no output on FD 3. " +
 			"HINT: Write JSON result using 'cat <<EOF >&3'. See docs/AGENT_LOGGING_GUIDE.md")
 	}
 
-	// M4.10: Validate it's JSON (could be multiline, that's OK now)
 	trimmed := strings.TrimSpace(fd3Result)
 	if !strings.HasPrefix(trimmed, "{") && !strings.HasPrefix(trimmed, "[") {
 		return nil, fmt.Errorf("FD 3 output does not start with JSON. "+
@@ -310,17 +332,31 @@ func (e *Engine) parseFD3Output(fd3Result string) (*ToolOutput, error) {
 			truncate(trimmed, 50))
 	}
 
-	var output ToolOutput
-	if err := json.Unmarshal([]byte(trimmed), &output); err != nil {
-		return nil, fmt.Errorf("invalid JSON on FD 3: %w. "+
-			"HINT: Verify JSON syntax. See docs/AGENT_LOGGING_GUIDE.md", err)
+	// M5.1: Parse multiple JSON objects using json.Decoder
+	var outputs []ToolOutput
+	decoder := json.NewDecoder(strings.NewReader(trimmed))
+
+	for {
+		var output ToolOutput
+		if err := decoder.Decode(&output); err == io.EOF {
+			break
+		} else if err != nil {
+			return nil, fmt.Errorf("invalid JSON on FD 3: %w. "+
+				"HINT: Verify JSON syntax. See docs/AGENT_LOGGING_GUIDE.md", err)
+		}
+
+		if err := output.Validate(); err != nil {
+			return nil, fmt.Errorf("validation failed for artefact %d: %w", len(outputs)+1, err)
+		}
+
+		outputs = append(outputs, output)
 	}
 
-	if err := output.Validate(); err != nil {
-		return nil, fmt.Errorf("validation failed: %w", err)
+	if len(outputs) == 0 {
+		return nil, fmt.Errorf("no valid JSON objects found on FD 3")
 	}
 
-	return &output, nil
+	return outputs, nil
 }
 
 // createResultArtefact builds a new artefact from the tool output and writes it to the blackboard.
@@ -527,6 +563,166 @@ func (e *Engine) createVerifiableResultArtefact(ctx context.Context, claim *blac
 	if len(output.Checkpoints) > 0 {
 		if err := e.processCheckpoints(ctx, output.Checkpoints, artefact.Header.LogicalThreadID); err != nil {
 			// Log but don't fail - main artefact was created successfully
+			log.Printf("[WARN] Failed to process checkpoints: %v", err)
+		}
+	}
+
+	return artefact, nil
+}
+
+// createVerifiableResultArtefacts creates multiple V2 VerifiableArtefacts with batch metadata.
+// M5.1: Supports multi-artefact output pattern with automatic batch_size injection.
+//
+// All artefacts in the batch:
+//  - Share the same parent (claim.ArtefactID)
+//  - Get metadata: {"batch_size": "N"} where N = len(outputs)
+//  - Are created atomically via Lua script
+//
+// Returns all created artefacts or error on first failure.
+func (e *Engine) createVerifiableResultArtefacts(ctx context.Context, claim *blackboard.Claim, outputs []ToolOutput, targetArtefact *blackboard.Artefact) ([]*blackboard.VerifiableArtefact, error) {
+	batchSize := len(outputs)
+
+	log.Printf("[INFO] Creating batch of %d artefacts with metadata injection", batchSize)
+
+	var artefacts []*blackboard.VerifiableArtefact
+
+	for i, output := range outputs {
+		// M5.1: Inject batch_size metadata
+		metadata := map[string]string{
+			"batch_size": fmt.Sprintf("%d", batchSize),
+		}
+		metadataJSON, err := json.Marshal(metadata)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal metadata for artefact %d: %w", i+1, err)
+		}
+
+		// Create artefact with metadata (reuse existing logic)
+		artefact, err := e.createVerifiableResultArtefactWithMetadata(ctx, claim, &output, targetArtefact, string(metadataJSON))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create artefact %d/%d: %w", i+1, batchSize, err)
+		}
+
+		artefacts = append(artefacts, artefact)
+	}
+
+	return artefacts, nil
+}
+
+// createVerifiableResultArtefactWithMetadata creates a V2 VerifiableArtefact with custom metadata.
+// M5.1: Helper function that wraps createVerifiableResultArtefact with metadata injection.
+//
+// This is a temporary bridge until we refactor the artefact creation to support metadata natively.
+// For now, we delegate to the existing function and manually inject metadata.
+func (e *Engine) createVerifiableResultArtefactWithMetadata(ctx context.Context, claim *blackboard.Claim, output *ToolOutput, targetArtefact *blackboard.Artefact, metadata string) (*blackboard.VerifiableArtefact, error) {
+	// M2.4: Validate git commit for CodeCommit artefacts
+	if output.ArtefactType == "CodeCommit" {
+		log.Printf("[INFO] Validating git commit: hash=%s", output.ArtefactPayload)
+		if err := validateCommitExists(output.ArtefactPayload); err != nil {
+			return nil, fmt.Errorf("git commit validation failed for hash %s: %w",
+				output.ArtefactPayload, err)
+		}
+		log.Printf("[DEBUG] Git commit validation passed: hash=%s", output.ArtefactPayload)
+	}
+
+	// Determine relationship (Derivative vs Rework)
+	var logicalThreadID string
+	var version int
+	var parentHashes []string
+
+	// M3.3: Check if this is a feedback claim (rework scenario)
+	if claim.Status == blackboard.ClaimStatusPendingAssignment {
+		// Rework: Continue existing thread
+		logicalThreadID = targetArtefact.LogicalID
+		version = targetArtefact.Version + 1
+
+		// Parent hashes = Target + Reviews
+		parentHashes = []string{targetArtefact.ID}
+		parentHashes = append(parentHashes, claim.AdditionalContextIDs...)
+
+		log.Printf("[INFO] Creating V2 rework artefact: logical_id=%s version=%d→%d",
+			logicalThreadID, targetArtefact.Version, version)
+	} else {
+		// New Work: Start new thread
+		logicalThreadID = blackboard.NewID()
+		version = 1
+		parentHashes = []string{targetArtefact.ID}
+	}
+
+	// Assemble payload
+	payload := blackboard.ArtefactPayload{
+		Content: output.ArtefactPayload,
+	}
+
+	// M4.6: Validate payload size BEFORE hashing (1MB hard limit)
+	if err := payload.Validate(); err != nil {
+		return nil, fmt.Errorf("payload validation failed: %w", err)
+	}
+
+	// M4.6 Security Addendum: Inject HOLT_CLAIM_ID into header for topology validation
+	claimID := claim.ID
+
+	// Assemble header
+	header := blackboard.ArtefactHeader{
+		ParentHashes:    parentHashes,
+		LogicalThreadID: logicalThreadID,
+		Version:         version,
+		CreatedAtMs:     time.Now().UnixMilli(),
+		ProducedByRole:  e.config.AgentName,
+		StructuralType:  output.GetStructuralType(),
+		Type:            output.ArtefactType,
+		ContextForRoles: nil,
+		ClaimID:         claimID,
+	}
+
+	// Create verifiable artefact
+	artefact := &blackboard.VerifiableArtefact{
+		Header:  header,
+		Payload: payload,
+	}
+
+	// M4.6: Compute SHA-256 hash
+	hash, err := blackboard.ComputeArtefactHash(artefact)
+	if err != nil {
+		return nil, fmt.Errorf("failed to compute artefact hash: %w", err)
+	}
+
+	artefact.ID = hash
+
+	// M5.1: Create V1 wrapper with metadata for Lua script
+	v1Wrapper := &blackboard.Artefact{
+		ID:              artefact.ID,
+		LogicalID:       artefact.Header.LogicalThreadID,
+		Version:         artefact.Header.Version,
+		StructuralType:  artefact.Header.StructuralType,
+		Type:            artefact.Header.Type,
+		Payload:         artefact.Payload.Content,
+		SourceArtefacts: artefact.Header.ParentHashes,
+		ProducedByRole:  artefact.Header.ProducedByRole,
+		CreatedAtMs:     artefact.Header.CreatedAtMs,
+		ClaimID:         artefact.Header.ClaimID,
+		Metadata:        metadata, // M5.1: Inject metadata
+	}
+
+	// Write V1 wrapper (uses Lua script from Phase 1)
+	if err := e.bbClient.CreateArtefact(ctx, v1Wrapper); err != nil {
+		return nil, fmt.Errorf("failed to create artefact with metadata: %w", err)
+	}
+
+	// Also write V2 verifiable artefact (for verification)
+	if err := e.bbClient.WriteVerifiableArtefact(ctx, artefact); err != nil {
+		return nil, fmt.Errorf("failed to write verifiable artefact: %w", err)
+	}
+
+	// If rework, publish artefact_reworked event
+	if claim.Status == blackboard.ClaimStatusPendingAssignment {
+		if err := e.publishArtefactReworkedEvent(ctx, v1Wrapper, targetArtefact.ID); err != nil {
+			log.Printf("[WARN] Failed to publish artefact_reworked event: %v", err)
+		}
+	}
+
+	// M4.3: Process checkpoints if present
+	if len(output.Checkpoints) > 0 {
+		if err := e.processCheckpoints(ctx, output.Checkpoints, artefact.Header.LogicalThreadID); err != nil {
 			log.Printf("[WARN] Failed to process checkpoints: %v", err)
 		}
 	}
