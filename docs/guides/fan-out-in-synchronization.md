@@ -1,4 +1,4 @@
-# Fan-In Synchronization Guide
+# Fan-In and Fan-Out Synchronization Guide
 
 **Target Audience:** Developers building agents that merge multiple parallel workflow branches
 
@@ -37,10 +37,11 @@ agents:
 
 1. [What is Fan-In Synchronization?](#what-is-fan-in-synchronization)
 2. [When to Use Synchronizers](#when-to-use-synchronizers)
-3. [Synchronization Patterns](#synchronization-patterns)
-4. [Configuration Reference](#configuration-reference)
-5. [How It Works: Under the Hood](#how-it-works-under-the-hood)
-6. [Building Your First Synchronizer](#building-your-first-synchronizer)
+3. [Fan-Out Patterns](#fan-out-patterns)
+4. [Synchronization Patterns](#synchronization-patterns)
+5. [Configuration Reference](#configuration-reference)
+6. [How It Works: Under the Hood](#how-it-works-under-the-hood)
+7. [Building Your First Synchronizer](#building-your-first-synchronizer)
 7. [Named Pattern Examples](#named-pattern-examples)
 8. [Producer-Declared Pattern Examples](#producer-declared-pattern-examples)
 9. [Multi-Artefact Output](#multi-artefact-output)
@@ -95,6 +96,45 @@ CodeCommit (ancestor)
 ❌ **Single-branch workflows** - Use standard bidding
 ❌ **Optional dependencies** - Synchronizers require ALL conditions met
 ❌ **Timeout-based coordination** - V1 waits indefinitely (no timeouts)
+
+---
+
+## Fan-Out Patterns
+
+**Fan-out** is the creation of multiple parallel units of work from a single agent. This is the counterpart to fan-in synchronization.
+
+### How to Fan-Out
+
+To create multiple artefacts (fan-out), an agent simply outputs multiple JSON objects to **FD 3**, separated by newlines (NDJSON format).
+
+**Example: Splitter Agent**
+
+```bash
+#!/bin/sh
+# Generate 3 parallel sub-tasks
+
+# Output 1
+cat <<EOF >&3
+{"artefact_type": "SubTask", "artefact_payload": "task-1", "summary": "Subtask 1"}
+EOF
+
+# Output 2
+cat <<EOF >&3
+{"artefact_type": "SubTask", "artefact_payload": "task-2", "summary": "Subtask 2"}
+EOF
+
+# Output 3
+cat <<EOF >&3
+{"artefact_type": "SubTask", "artefact_payload": "task-3", "summary": "Subtask 3"}
+EOF
+
+# Pup automatically:
+# 1. Counts the artefacts (3)
+# 2. Injects metadata {"batch_size": "3"} into ALL of them
+# 3. Publishes them atomically
+```
+
+This automatic metadata injection is what enables the **Producer-Declared** fan-in pattern downstream.
 
 ---
 
@@ -1177,7 +1217,7 @@ synchronize:
 
 ## Next Steps
 
-1. **Read the design document:** `design/features/phase-5-complex-coordination/M5.1-fan-in.md`
+1. **Read the design document:** `../reference/architecture.md`
 2. **Study examples:** `agents/example-deployer-agent/` and `agents/example-batch-aggregator-agent/`
 3. **Build your first synchronizer:** Start with Named pattern (simpler)
 4. **Test with `holt watch`:** Observe synchronization in real-time
@@ -1189,5 +1229,5 @@ synchronize:
 
 - **Agent Development Guide:** [agent-development.md](./agent-development.md)
 - **Troubleshooting:** [troubleshooting.md](./troubleshooting.md)
-- **M5.1 Design Document:** `design/features/phase-5-complex-coordination/M5.1-fan-in.md`
+- **M5.1 Design Document:** `../reference/architecture.md`
 - **Example Agents:** `agents/example-deployer-agent/`, `agents/example-batch-aggregator-agent/`

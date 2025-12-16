@@ -39,7 +39,7 @@ To supplement the core context, select from the lists below based on your specif
 - **`docs/guides/debugging.md`** - Strategies for debugging agents and workflows.
 
 ### **Topic: Advanced Coordination**
-- **`docs/guides/fan-in-synchronization.md`** - (M5.1) Guide to fan-in workflows and synchronizer agents.
+- **`docs/guides/fan-out-in-synchronization.md`** - (M5.1) Guide to fan-in/fan-out workflows and synchronizer agents.
 
 ### **Topic: Enterprise & Compliance Features**
 - **`docs/compliance/ENTERPRISE.md`** (~1,000 tokens) - Explains built-in security, data sovereignty, and air-gap capabilities.

@@ -4,7 +4,6 @@
 package commands
 
 import (
-	"os/exec"
 	"testing"
 	"time"
 
@@ -27,49 +26,24 @@ func TestE2E_M3_3_SingleIterationFeedbackLoop(t *testing.T) {
 	t.Log("=== M3.3 E2E: Single Iteration Feedback Loop ===")
 
 	// Step 0: Build required Docker images
-	projectRoot := testutil.GetProjectRoot()
+	// Step 0: Ensure consolidated test agent image is built
+	testutil.EnsureTestAgentImage(t)
 
-	t.Log("Building conditional-reviewer-agent Docker image...")
-	buildReviewerCmd := exec.Command("docker", "build",
-		"-t", "conditional-reviewer-agent:latest",
-		"-f", "agents/conditional-reviewer-agent/Dockerfile",
-		".")
-	buildReviewerCmd.Dir = projectRoot
-	output, err := buildReviewerCmd.CombinedOutput()
-	if err != nil {
-		t.Logf("Build output:\n%s", string(output))
-	}
-	require.NoError(t, err, "Failed to build conditional-reviewer-agent image")
-	t.Log("✓ conditional-reviewer-agent image built")
-
-	t.Log("Building example-git-agent Docker image...")
-	buildGitCmd := exec.Command("docker", "build",
-		"-t", "example-git-agent:latest",
-		"-f", "agents/example-git-agent/Dockerfile",
-		".")
-	buildGitCmd.Dir = projectRoot
-	output, err = buildGitCmd.CombinedOutput()
-	if err != nil {
-		t.Logf("Build output:\n%s", string(output))
-	}
-	require.NoError(t, err, "Failed to build example-git-agent image")
-	t.Log("✓ example-git-agent image built")
-
-	// Step 1: Setup environment with conditional reviewer
 	holtYML := `version: "1.0"
 orchestrator:
   max_review_iterations: 3
 agents:
   Reviewer:
-    image: "conditional-reviewer-agent:latest"
-    command: ["/app/run.sh"]
+    image: "holt-test-agent:latest"
+    command: ["/app/run_conditional_reviewer.sh"]
     bidding_strategy:
       type: "review"
     workspace:
       mode: ro
   Coder:
-    image: "example-git-agent:latest"
-    command: ["/app/run.sh"]
+    image: "holt-test-agent:latest"
+    command: ["/app/run_git.sh"]
+    bid_script: ["/app/bid_git.sh"]
     bidding_strategy:
       type: "exclusive"
     workspace:
@@ -95,7 +69,7 @@ services:
 	upCmd := &cobra.Command{}
 	upInstanceName = env.InstanceName
 	upForce = false
-	err = runUp(upCmd, []string{})
+	err := runUp(upCmd, []string{})
 	require.NoError(t, err, "Failed to start instance")
 	t.Logf("✓ Instance started: %s", env.InstanceName)
 
@@ -164,34 +138,8 @@ func TestE2E_M3_3_MaxIterationsReached(t *testing.T) {
 
 	t.Log("=== M3.3 E2E: Max Iterations Termination ===")
 
-	// Step 0: Build always-reject reviewer image
-	projectRoot := testutil.GetProjectRoot()
-
-	t.Log("Building always-reject-reviewer-agent Docker image...")
-	buildReviewerCmd := exec.Command("docker", "build",
-		"-t", "always-reject-reviewer-agent:latest",
-		"-f", "agents/always-reject-reviewer-agent/Dockerfile",
-		".")
-	buildReviewerCmd.Dir = projectRoot
-	output, err := buildReviewerCmd.CombinedOutput()
-	if err != nil {
-		t.Logf("Build output:\n%s", string(output))
-	}
-	require.NoError(t, err, "Failed to build always-reject-reviewer-agent image")
-	t.Log("✓ always-reject-reviewer-agent image built")
-
-	t.Log("Building example-git-agent Docker image...")
-	buildGitCmd := exec.Command("docker", "build",
-		"-t", "example-git-agent:latest",
-		"-f", "agents/example-git-agent/Dockerfile",
-		".")
-	buildGitCmd.Dir = projectRoot
-	output, err = buildGitCmd.CombinedOutput()
-	if err != nil {
-		t.Logf("Build output:\n%s", string(output))
-	}
-	require.NoError(t, err, "Failed to build example-git-agent image")
-	t.Log("✓ example-git-agent image built")
+	// Step 0: Ensure consolidated test agent image is built
+	testutil.EnsureTestAgentImage(t)
 
 	// Step 1: Setup environment with always-reject reviewer and max_iterations=2
 	holtYML := `version: "1.0"
@@ -199,15 +147,17 @@ orchestrator:
   max_review_iterations: 2
 agents:
   Reviewer:
-    image: "always-reject-reviewer-agent:latest"
-    command: ["/app/run.sh"]
+    image: "holt-test-agent:latest"
+    command: ["/app/run_reject_reviewer.sh"]
     bidding_strategy:
       type: "review"
     workspace:
       mode: ro
   Coder:
-    image: "example-git-agent:latest"
-    command: ["/app/run.sh"]
+    image: "holt-test-agent:latest"
+    command: ["/app/run_git.sh"]
+    bid_script: ["/app/bid_git.sh"]
+
     bidding_strategy:
       type: "exclusive"
     workspace:
@@ -233,7 +183,7 @@ services:
 	upCmd := &cobra.Command{}
 	upInstanceName = env.InstanceName
 	upForce = false
-	err = runUp(upCmd, []string{})
+	err := runUp(upCmd, []string{})
 	require.NoError(t, err, "Failed to start instance")
 	t.Logf("✓ Instance started")
 
@@ -251,8 +201,8 @@ services:
 	forageCmd := &cobra.Command{}
 	forageInstanceName = env.InstanceName
 	forageGoal = "test-max-iterations.txt"
-	err = runForage(forageCmd, []string{})
-	require.NoError(t, err)
+	runForageErr := runForage(forageCmd, []string{})
+	require.NoError(t, runForageErr)
 	t.Log("✓ Goal submitted")
 
 	// Step 5: Wait for GoalDefined

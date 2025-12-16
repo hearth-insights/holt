@@ -50,6 +50,9 @@ chmod +x holt holt-pup
 ```
 
 ### Option C: Build from Source
+> [!NOTE]
+> This option requires the full `holt` source code repository. If you are working from a standalone documentation copy, please use Option A or B.
+
 Run the following command in the root of the `holt` repository to build the CLI, Orchestrator, and Pup binaries.
 
 ```bash

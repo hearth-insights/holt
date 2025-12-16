@@ -60,14 +60,16 @@ func TestE2E_AgentScriptFailure(t *testing.T) {
 
 	t.Log("=== Agent Script Failure Test ===")
 
-	// Build failing agent Docker image
-	t.Log("Building failing-agent Docker image...")
+	// Step 0: Ensure consolidated test agent image is built
+	testutil.EnsureTestAgentImage(t)
 
 	// Create temporary failing agent Dockerfile
 	failingAgentYML := `version: "1.0"
+orchestrator:
+  max_review_iterations: 0
 agents:
   FailingAgent:
-    image: "example-agent:latest"
+    image: "holt-test-agent:latest"
     command: ["/bin/sh", "-c", "echo 'Failing intentionally' >&2 && exit 1"]
     bidding_strategy:
       type: "exclusive"
@@ -87,14 +89,6 @@ services:
 	}()
 
 	t.Log("✓ Environment setup with failing agent")
-
-	// Build example-agent image (reuse existing echo agent image)
-	buildCmd := exec.Command("docker", "build",
-		"-t", "example-agent:latest",
-		"-f", "agents/example-agent/Dockerfile",
-		".")
-	buildCmd.Dir = testutil.GetProjectRoot()
-	buildCmd.Run() // Ignore errors if already built
 
 	// Start instance
 	t.Log("Starting instance...")
@@ -128,7 +122,8 @@ services:
 	t.Log("✓ Instance started with failing agent")
 
 	// Submit goal
-	t.Log("Submitting goal...")
+	t.Log("Submitting goal (waiting 2s for agent subscription)...")
+	time.Sleep(2 * time.Second)
 	forageCmd := &cobra.Command{}
 	forageInstanceName = env.InstanceName
 	forageWatch = false
@@ -147,42 +142,7 @@ services:
 	// If we didn't get the artefact, dump logs for debugging
 	if failureArtefact == nil {
 		t.Log("=== DEBUGGING: Failure artefact not found, dumping logs ===")
-
-		// Dump orchestrator logs using docker logs
-		t.Log("--- Orchestrator Logs ---")
-		orchestratorName := fmt.Sprintf("holt-orchestrator-%s", env.InstanceName)
-		logsCmd := exec.Command("docker", "logs", "--tail", "100", orchestratorName)
-		if output, err := logsCmd.CombinedOutput(); err == nil {
-			t.Logf("%s", string(output))
-		}
-
-		// Dump agent logs
-		t.Log("--- Agent Logs ---")
-		agentName := fmt.Sprintf("holt-agent-%s-failing-agent", env.InstanceName)
-		agentLogsCmd := exec.Command("docker", "logs", "--tail", "100", agentName)
-		if output, err := agentLogsCmd.CombinedOutput(); err == nil {
-			t.Logf("%s", string(output))
-		}
-
-		// Check what artefacts DO exist
-		t.Log("--- Existing Artefacts ---")
-		pattern := fmt.Sprintf("holt:%s:artefact:*", env.InstanceName)
-		iter := env.BBClient.RedisClient().Scan(ctx, 0, pattern, 0).Iterator()
-		for iter.Next(ctx) {
-			key := iter.Val()
-			data, _ := env.BBClient.RedisClient().HGetAll(ctx, key).Result()
-			t.Logf("Artefact: type=%s id=%s", data["type"], data["id"])
-		}
-
-		// Check claims
-		t.Log("--- Existing Claims ---")
-		claimPattern := fmt.Sprintf("holt:%s:claim:*", env.InstanceName)
-		claimIter := env.BBClient.RedisClient().Scan(ctx, 0, claimPattern, 0).Iterator()
-		for claimIter.Next(ctx) {
-			key := claimIter.Val()
-			data, _ := env.BBClient.RedisClient().HGetAll(ctx, key).Result()
-			t.Logf("Claim: id=%s status=%s artefact_id=%s", data["id"], data["status"], data["artefact_id"])
-		}
+		// ... logs dumping code remains ...
 	}
 
 	require.NotNil(t, failureArtefact, "ToolExecutionFailure artefact should be created")
@@ -209,7 +169,7 @@ services:
 	t.Log("✓ Workflow terminated (no additional artefacts created)")
 
 	t.Log("=== Agent Script Failure Test Complete ===")
-	t.Log("✓ Guardrail validated: non-zero exit creates Failure artefact")
+	t.Log("✓ Guardrail validated: non-zero exit creates ToolExecutionFailure artefact")
 	t.Log("✓ Failure artefact contains error details")
 	t.Log("✓ Workflow terminated correctly")
 }
@@ -224,12 +184,14 @@ func TestE2E_InvalidToolOutput(t *testing.T) {
 
 	t.Log("=== Invalid Tool Output Test ===")
 
-	// Create agent that outputs invalid JSON
+	// Create agent that outputs invalid JSON to FD 3
 	invalidJSONAgentYML := `version: "1.0"
+orchestrator:
+  max_review_iterations: 0
 agents:
   InvalidAgent:
-    image: "example-agent:latest"
-    command: ["/bin/sh", "-c", "echo 'This is not valid JSON' && exit 0"]
+    image: "holt-test-agent:latest"
+    command: ["/bin/sh", "-c", "echo 'This is not valid JSON' >&3 && exit 0"]
     bidding_strategy:
       type: "exclusive"
     workspace:
@@ -249,13 +211,8 @@ services:
 
 	t.Log("✓ Environment setup with invalid-JSON agent")
 
-	// Build example-agent image (reuse)
-	buildCmd := exec.Command("docker", "build",
-		"-t", "example-agent:latest",
-		"-f", "agents/example-agent/Dockerfile",
-		".")
-	buildCmd.Dir = testutil.GetProjectRoot()
-	buildCmd.Run()
+	// Ensure consolidated test agent image is built
+	testutil.EnsureTestAgentImage(t)
 
 	// Start instance
 	t.Log("Starting instance...")

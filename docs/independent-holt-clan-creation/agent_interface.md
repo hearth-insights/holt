@@ -191,7 +191,7 @@ EOF
 - ❌ Don't write result to stdout (pup won't see it)
 - ❌ Don't write logs to FD 3 (corrupts result)
 
-**See Also**: [Agent Logging Guide](../AGENT_LOGGING_GUIDE.md) for detailed examples in all languages.
+**See Also**: [Agent Logging Guide](../guides/logging.md) (Note: This guide is in the parent `docs/guides/` directory. If you are working with an independent copy of these docs, refer to the "FD 3 Return" section above).
 
 ## Summary
 1.  **Bid**: `Input JSON` -> `Strategy String`

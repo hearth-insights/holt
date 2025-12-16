@@ -17,6 +17,14 @@ COPY agents/example-git-agent/run.sh /app/run_git.sh
 COPY agents/example-git-agent/bid.sh /app/bid_git.sh
 RUN chmod +x /app/run_git.sh /app/bid_git.sh
 
+# Copy scripts from conditional-reviewer-agent
+COPY agents/conditional-reviewer-agent/run.sh /app/run_conditional_reviewer.sh
+RUN chmod +x /app/run_conditional_reviewer.sh
+
+# Copy scripts from always-reject-reviewer-agent
+COPY agents/always-reject-reviewer-agent/run.sh /app/run_reject_reviewer.sh
+RUN chmod +x /app/run_reject_reviewer.sh
+
 # Switch back to agent user for runtime
 USER agent
 

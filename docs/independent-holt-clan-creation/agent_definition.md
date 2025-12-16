@@ -254,7 +254,7 @@ EOF
 For comprehensive documentation on fan-in synchronization:
 - **Full Guide**: See the main Holt repository's `docs/guides/fan-in-synchronization.md`
 - **Example Agents**: `agents/example-deployer-agent/` and `agents/example-batch-aggregator-agent/`
-- **Design Document**: `design/features/phase-5-complex-coordination/M5.1-fan-in.md`
+- **Design Document**: `design/features/phase-5-complex-coordination/M5.1-fan-in.md` (Note: internal reference, may not be available in independent deployments)
 
 ---
 
