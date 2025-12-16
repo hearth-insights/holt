@@ -591,6 +591,9 @@ func streamWithSubscriptions(ctx context.Context, client *blackboard.Client, for
 	}
 	defer workflowSub.Close()
 
+	securitySub := client.SubscribeSecurityAlerts(ctx)
+	defer securitySub.Close()
+
 	// Stream events from all channels
 	for {
 		select {
@@ -633,6 +636,21 @@ func streamWithSubscriptions(ctx context.Context, client *blackboard.Client, for
 			// For live workflow events, use current time (0 will trigger time.Now() in formatter)
 			if err := formatter.FormatWorkflow(workflow, 0); err != nil {
 				log.Printf("⚠️  Failed to format workflow event: %v", err)
+			}
+
+		case alertMessage, ok := <-securitySub.Channel():
+			if !ok {
+				return fmt.Errorf("security alerts channel closed")
+			}
+
+			var alert blackboard.SecurityAlert
+			if err := json.Unmarshal([]byte(alertMessage.Payload), &alert); err != nil {
+				log.Printf("⚠️  Failed to parse security alert: %v", err)
+				continue
+			}
+
+			if err := formatter.FormatSecurityAlert(&alert); err != nil {
+				log.Printf("⚠️  Failed to format security alert: %v", err)
 			}
 
 		case err := <-artefactSub.Errors():
@@ -679,6 +697,7 @@ type eventFormatter interface {
 	FormatArtefact(artefact *blackboard.Artefact) error
 	FormatClaim(claim *blackboard.Claim, timestampMs int64) error
 	FormatWorkflow(event *blackboard.WorkflowEvent, timestampMs int64) error
+	FormatSecurityAlert(alert *blackboard.SecurityAlert) error
 }
 
 // defaultFormatter produces human-readable output with emojis
@@ -859,6 +878,42 @@ func (f *defaultFormatter) FormatWorkflow(event *blackboard.WorkflowEvent, times
 	}
 }
 
+func (f *defaultFormatter) FormatSecurityAlert(alert *blackboard.SecurityAlert) error {
+	timestamp := formatTimestampMs(alert.TimestampMs)
+
+	// Make it REALLY OBVIOUS with spacing and big headers
+	fmt.Fprintf(f.writer, "\n")
+	fmt.Fprintf(f.writer, "🚨🚨🚨 SECURITY ALERT: %s 🚨🚨🚨\n", alert.Type)
+	fmt.Fprintf(f.writer, "[%s] ACTION: %s\n", timestamp, alert.OrchestratorAction)
+
+	// Add specific details based on alert type
+	switch alert.Type {
+	case "hash_mismatch":
+		fmt.Fprintf(f.writer, "❌  HASH MISMATCH DETECTED (M5.1 Tamper Protection)\n")
+		fmt.Fprintf(f.writer, "    Artefact Claimed: %s\n", alert.ArtefactIDClaimed)
+		fmt.Fprintf(f.writer, "    Claimed Hash:     %s\n", alert.HashActual)
+		fmt.Fprintf(f.writer, "    Computed Hash:    %s\n", alert.HashExpected)
+		fmt.Fprintf(f.writer, "    Agent Role:       %s\n", alert.AgentRole)
+		if alert.ClaimID != "" {
+			fmt.Fprintf(f.writer, "    Claim ID:         %s\n", alert.ClaimID)
+		}
+
+	case "orphan_block":
+		fmt.Fprintf(f.writer, "❌  ORPHAN BLOCK DETECTED (Missing Parent)\n")
+		fmt.Fprintf(f.writer, "    Artefact ID:      %s\n", alert.ArtefactID)
+		fmt.Fprintf(f.writer, "    Missing Parent:   %s\n", alert.MissingParentHash)
+		fmt.Fprintf(f.writer, "    Agent Role:       %s\n", alert.AgentRole)
+
+	default:
+		// Generic dump for other types
+		details, _ := json.MarshalIndent(alert, "    ", "  ")
+		fmt.Fprintf(f.writer, "    Details:\n%s\n", string(details))
+	}
+
+	fmt.Fprintf(f.writer, "\n")
+	return nil
+}
+
 // jsonlFormatter produces line-delimited JSON output (JSONL format)
 type jsonlFormatter struct {
 	writer  io.Writer
@@ -944,6 +999,15 @@ func (f *jsonlFormatter) FormatWorkflow(event *blackboard.WorkflowEvent, timesta
 		"timestamp": time.UnixMilli(timestampMs).UTC().Format(time.RFC3339),
 		"event":     event.Event,
 		"data":      event.Data,
+	}
+	return f.writeJSON(output)
+}
+
+func (f *jsonlFormatter) FormatSecurityAlert(alert *blackboard.SecurityAlert) error {
+	output := map[string]interface{}{
+		"timestamp": time.UnixMilli(alert.TimestampMs).UTC().Format(time.RFC3339),
+		"event":     "security_alert",
+		"data":      alert,
 	}
 	return f.writeJSON(output)
 }

@@ -345,6 +345,43 @@ func (env *E2EEnvironment) InitializeBlackboardClient() {
 	require.Fail(env.T, "Redis did not become ready within 10 seconds")
 }
 
+// WaitForLogMessage waits for a specific log message in a container
+func (env *E2EEnvironment) WaitForLogMessage(containerNameSuffix, message string, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+
+	// Determine full container name
+	var fullName string
+	if containerNameSuffix == "orchestrator" || containerNameSuffix == "redis" {
+		fullName = fmt.Sprintf("holt-%s-%s", containerNameSuffix, env.InstanceName)
+	} else {
+		// Agent pattern: containerNameSuffix is "agent-{agent-name}"
+		agentName := containerNameSuffix[6:] // Remove "agent-" prefix
+		fullName = fmt.Sprintf("holt-%s-%s", env.InstanceName, agentName)
+	}
+
+	env.T.Logf("Waiting for log message '%s' in container %s...", message, fullName)
+
+	for time.Now().Before(deadline) {
+		logs, err := env.DockerClient.ContainerLogs(env.Ctx, fullName, container.LogsOptions{
+			ShowStdout: true,
+			ShowStderr: true,
+		})
+		if err == nil {
+			logBytes, _ := io.ReadAll(logs)
+			logOutput := string(logBytes)
+			logs.Close()
+
+			if strings.Contains(logOutput, message) {
+				env.T.Logf("✓ Found log message: %s", message)
+				return
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	require.Fail(env.T, fmt.Sprintf("Log message '%s' not found in container %s within %v", message, fullName, timeout))
+}
+
 // WaitForContainer waits for a container to be running (up to 30 seconds)
 // containerNameSuffix: "orchestrator", "redis", or "agent-{agent-name}"
 func (env *E2EEnvironment) WaitForContainer(containerNameSuffix string) {
@@ -418,6 +455,12 @@ func (env *E2EEnvironment) WaitForArtefactByType(artefactType string) *blackboar
 	for i := 0; i < 60; i++ {
 		// Scan for artefacts using Redis SCAN
 		pattern := fmt.Sprintf("holt:%s:artefact:*", env.InstanceName)
+
+		// M5.1: Fail fast if global lockdown is detected
+		if err := checkLockdown(env.Ctx, env.BBClient); err != nil {
+			require.FailNow(env.T, "Global Lockdown Detected", err.Error())
+		}
+
 		iter := env.BBClient.RedisClient().Scan(env.Ctx, 0, pattern, 0).Iterator()
 
 		allArtefacts = allArtefacts[:0] // Reset for this iteration
@@ -675,6 +718,11 @@ func WaitForArtefactOfType(ctx context.Context, client *blackboard.Client, artef
 	deadline := time.Now().Add(timeout)
 
 	for time.Now().Before(deadline) {
+		// Fail fast if global lockdown
+		if err := checkLockdown(ctx, client); err != nil {
+			return nil, err
+		}
+
 		// Scan for artefacts
 		pattern := fmt.Sprintf("holt:*:artefact:*")
 		iter := client.GetRedisClient().Scan(ctx, 0, pattern, 0).Iterator()
@@ -728,6 +776,11 @@ func WaitForArtefactVersion(ctx context.Context, client *blackboard.Client, logi
 	deadline := time.Now().Add(timeout)
 
 	for time.Now().Before(deadline) {
+		// Fail fast if global lockdown
+		if err := checkLockdown(ctx, client); err != nil {
+			return nil, err
+		}
+
 		// Scan for artefacts
 		pattern := fmt.Sprintf("holt:*:artefact:*")
 		iter := client.GetRedisClient().Scan(ctx, 0, pattern, 0).Iterator()
@@ -854,6 +907,11 @@ func WaitForArtefactWithContext(ctx context.Context, client *blackboard.Client, 
 	deadline := time.Now().Add(timeout)
 
 	for time.Now().Before(deadline) {
+		// Fail fast if global lockdown
+		if err := checkLockdown(ctx, client); err != nil {
+			return nil, err
+		}
+
 		// Get all artefacts of the specified type
 		artefacts, err := FindAllArtefactsOfType(ctx, client, artefactType)
 		if err != nil {
@@ -892,6 +950,46 @@ func (env *E2EEnvironment) DumpInstanceLogs() {
 	if err != nil {
 		env.T.Logf("Failed to list containers: %v", err)
 		return
+	}
+
+	// Dump Redis State (Claims and Artefacts)
+	if env.BBClient != nil {
+		env.T.Log("--- Redis State Dump ---")
+
+		// Dump Claims
+		claimPattern := fmt.Sprintf("holt:%s:claim:*", env.InstanceName)
+		claimIter := env.BBClient.RedisClient().Scan(env.Ctx, 0, claimPattern, 0).Iterator()
+		foundClaims := false
+		for claimIter.Next(env.Ctx) {
+			foundClaims = true
+			key := claimIter.Val()
+			data, _ := env.BBClient.RedisClient().HGetAll(env.Ctx, key).Result()
+			env.T.Logf("Claim: id=%s key=%s status=%s artefact_id=%s exclusive=%s",
+				data["id"], key, data["status"], data["artefact_id"], data["granted_exclusive_agent"])
+		}
+		if !foundClaims {
+			env.T.Log("(no claims found)")
+		}
+
+		// Dump Artefacts
+		artefactPattern := fmt.Sprintf("holt:%s:artefact:*", env.InstanceName)
+		artefactIter := env.BBClient.RedisClient().Scan(env.Ctx, 0, artefactPattern, 0).Iterator()
+		foundArtefacts := false
+		for artefactIter.Next(env.Ctx) {
+			foundArtefacts = true
+			key := artefactIter.Val()
+			data, _ := env.BBClient.RedisClient().HGetAll(env.Ctx, key).Result()
+			// Truncate payload for legibility
+			payload := data["payload"]
+			if len(payload) > 50 {
+				payload = payload[:50] + "..."
+			}
+			env.T.Logf("Artefact: type=%s id=%s payload=%s", data["type"], data["id"], payload)
+		}
+		if !foundArtefacts {
+			env.T.Log("(no artefacts found)")
+		}
+		env.T.Log("--- End Redis State Dump ---")
 	}
 
 	for _, c := range containers {
@@ -949,4 +1047,26 @@ func (sr *StringReader) Read(p []byte) (n int, err error) {
 	n = copy(p, sr.content[sr.pos:])
 	sr.pos += n
 	return n, nil
+}
+
+// checkLockdown checks if the instance is in global lockdown and returns a descriptive error if so.
+func checkLockdown(ctx context.Context, client *blackboard.Client) error {
+	if client == nil {
+		return nil
+	}
+	key := blackboard.SecurityLockdownKey(client.GetInstanceName())
+	val, err := client.GetRedisClient().Get(ctx, key).Result()
+	if err == redis.Nil {
+		return nil // No lockdown
+	}
+	if err != nil {
+		return nil // Ignore connection errors, continue polling
+	}
+
+	// Lockdown detected!
+	var alert blackboard.SecurityAlert
+	_ = json.Unmarshal([]byte(val), &alert) // Ignore unmarshal errors, just show raw val if needed
+
+	return fmt.Errorf("🚨 GLOBAL LOCKDOWN DETECTED 🚨\nType: %s\nAction: %s\nExpected: %s\nActual:   %s\nDetails: %s",
+		alert.Type, alert.OrchestratorAction, alert.HashExpected, alert.HashActual, val)
 }
