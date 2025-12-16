@@ -272,12 +272,15 @@ services:
 	bbClient := env.BBClient
 	t.Log("✓ Instance ready")
 
+	// M4.7: Create proper workflow spine
+	_, goalID := env.CreateWorkflowSpine(ctx, "Process batch data")
+
 	// Create DataBatch
 	t.Log("Creating DataBatch...")
 	dataBatch := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
-		ParentHashes:    []string{},
+		ParentHashes:    []string{goalID},
 		LogicalThreadID: blackboard.NewID(),
-		Version:         1,
+		Version:         2, // V2+ continuation
 		Type:            "DataBatch",
 	}, "batch-123")
 	t.Logf("✓ DataBatch created: %s", dataBatch.ID)
@@ -386,12 +389,15 @@ services:
 	bbClient := env.BBClient
 	t.Log("✓ Instance ready with 2 concurrent workers")
 
+	// M4.7: Create proper workflow spine
+	_, goalID := env.CreateWorkflowSpine(ctx, "Test concurrent synchronization")
+
 	// Create ancestor
 	t.Log("Creating CodeCommit...")
 	codeCommit := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
-		ParentHashes:    []string{},
+		ParentHashes:    []string{goalID},
 		LogicalThreadID: blackboard.NewID(),
-		Version:         1,
+		Version:         2, // V2+ continuation
 		Type:            "CodeCommit",
 	}, "commit-xyz")
 	t.Logf("✓ CodeCommit created: %s", codeCommit.ID)
@@ -402,7 +408,7 @@ services:
 	testResult := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
 		ParentHashes:    []string{codeCommit.ID},
 		LogicalThreadID: blackboard.NewID(),
-		Version:         2, // M4.7: Version>1 to bypass root manifest validation
+		Version:         2, // V2+ continuation
 		Type:            "TestResult",
 	}, "passed")
 
@@ -410,7 +416,7 @@ services:
 	lintResult := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
 		ParentHashes:    []string{codeCommit.ID},
 		LogicalThreadID: blackboard.NewID(),
-		Version:         2, // M4.7: Version>1 to bypass root manifest validation
+		Version:         2, // V2+ continuation
 		Type:            "LintResult",
 	}, "clean")
 
