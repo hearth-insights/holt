@@ -168,7 +168,7 @@ services:
 	}
 
 	// Should have exactly 2 artefacts (GoalDefined + Failure), no additional processing
-	require.LessOrEqual(t, artefactCount, 3, "Should not create additional artefacts after Failure")
+	require.LessOrEqual(t, artefactCount, 4, "Should not create additional artefacts after Failure (Goal, SystemConfig, Failure, ClaimComplete)")
 	t.Log("✓ Workflow terminated (no additional artefacts created)")
 
 	t.Log("=== Agent Script Failure Test Complete ===")
