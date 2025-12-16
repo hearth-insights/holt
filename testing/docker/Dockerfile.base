@@ -1,0 +1,51 @@
+# Base Image for E2E Tests
+# This image contains the pre-compiled pup binary and all common dependencies.
+# Test agents should inherit from this image and simply copy their scripts.
+
+# Build stage - compile the pup binary ONCE
+FROM golang:1.24-alpine AS builder
+
+WORKDIR /build
+
+# Copy Go module files
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy pup source code
+COPY cmd/pup ./cmd/pup
+COPY internal/pup ./internal/pup
+COPY internal/config ./internal/config
+COPY pkg/blackboard ./pkg/blackboard
+COPY pkg/version ./pkg/version
+
+# Build the pup binary
+RUN CGO_ENABLED=0 GOOS=linux go build -o pup ./cmd/pup
+
+# Runtime stage - Alpine with common tools
+FROM alpine:latest
+
+# Install common dependencies needed by most test agents
+# git: for git-agent and general repo operations
+# jq: for JSON parsing in bash scripts
+# bash: for advanced scripting
+# ca-certificates: for HTTPS
+RUN apk --no-cache add git jq bash ca-certificates
+
+WORKDIR /app
+
+# Copy pup binary from builder
+COPY --from=builder /build/pup /app/pup
+
+# Create non-root agent user (security best practice & standard across agents)
+RUN adduser -D -u 1000 agent
+
+# Configure git global settings for the agent user
+# This prevents "git config" errors in tests that use git
+USER agent
+RUN git config --global user.email "agent@holt.local" && \
+    git config --global user.name "Holt Test Agent" && \
+    git config --global --add safe.directory /workspace
+
+# Switch back to root for any final setup (child images might need root to chmod)
+# Child images should switch back to USER agent
+USER root

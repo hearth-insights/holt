@@ -6,7 +6,6 @@ package commands
 import (
 	"context"
 	"encoding/json"
-	"os/exec"
 	"testing"
 	"time"
 
@@ -30,19 +29,11 @@ func TestE2E_M4_1_AgentToHumanQA(t *testing.T) {
 	t.Log("=== M4.1 E2E: Agent-to-Human Question/Answer ===")
 
 	// Step 0: Build question-agent Docker image
-	projectRoot := testutil.GetProjectRoot()
-
+	// Step 0: Build question-agent Docker image (fast build)
 	t.Log("Building question-agent Docker image...")
-	buildCmd := exec.Command("docker", "build",
-		"-t", "question-agent:latest",
-		"-f", "agents/question-agent/Dockerfile",
-		".") // Build from project root (needs access to go.mod, cmd/pup, etc.)
-	buildCmd.Dir = projectRoot
-	output, err := buildCmd.CombinedOutput()
-	if err != nil {
-		t.Logf("Build output:\n%s", string(output))
-	}
-	require.NoError(t, err, "Failed to build question-agent image")
+	testutil.BuildFastTestImage(t, "question-agent:latest", map[string]string{
+		"agents/question-agent/run.sh": "/app/run.sh",
+	})
 	t.Log("✓ question-agent image built")
 
 	// Step 1: Setup environment with question agent
@@ -79,7 +70,7 @@ services:
 	upCmd := &cobra.Command{}
 	upInstanceName = env.InstanceName
 	upForce = false
-	err = runUp(upCmd, []string{})
+	err := runUp(upCmd, []string{})
 	require.NoError(t, err, "Failed to start instance")
 	t.Logf("✓ Instance started: %s", env.InstanceName)
 

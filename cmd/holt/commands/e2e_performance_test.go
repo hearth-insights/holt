@@ -6,7 +6,6 @@ package commands
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"testing"
 	"time"
 
@@ -35,12 +34,8 @@ func TestPerformance_Startup(t *testing.T) {
 	}()
 
 	// Build echo agent image for config validation
-	buildCmd := exec.Command("docker", "build",
-		"-t", "example-agent:latest",
-		"-f", "agents/example-agent/Dockerfile",
-		".")
-	buildCmd.Dir = testutil.GetProjectRoot()
-	buildCmd.Run() // Ignore errors if already built
+	// Build consolidated test agent image (once per suite)
+	testutil.EnsureTestAgentImage(t)
 
 	// Measure holt up duration
 	t.Log("Measuring holt up duration...")
@@ -80,21 +75,17 @@ func TestPerformance_ClaimToExecution(t *testing.T) {
 	t.Log("=== Performance Test: Claim-to-Execution Latency ===")
 
 	// Build example-agent
-	buildCmd := exec.Command("docker", "build",
-		"-t", "example-agent:latest",
-		"-f", "agents/example-agent/Dockerfile",
-		".")
-	buildCmd.Dir = testutil.GetProjectRoot()
-	buildCmd.Run()
+	// Build consolidated test agent image (once per suite)
+	testutil.EnsureTestAgentImage(t)
 
-	// Setup environment with echo agent and drift tolerance
+	// Setup environment with echo agent (using consolidated image)
 	echoAgentYML := `version: "1.0"
 orchestrator:
   timestamp_drift_tolerance_ms: 600000 # 10 minutes
 agents:
   EchoAgent:
-    image: "example-agent:latest"
-    command: ["/app/run.sh"]
+    image: "holt-test-agent:latest"
+    command: ["/app/run_echo.sh"]
     bidding_strategy:
       type: "exclusive"
     workspace:
@@ -173,12 +164,8 @@ func TestPerformance_ContextAssembly(t *testing.T) {
 	}()
 
 	// Build echo agent image for config validation
-	buildCmd := exec.Command("docker", "build",
-		"-t", "example-agent:latest",
-		"-f", "agents/example-agent/Dockerfile",
-		".")
-	buildCmd.Dir = testutil.GetProjectRoot()
-	buildCmd.Run() // Ignore errors if already built
+	// Build consolidated test agent image (once per suite)
+	testutil.EnsureTestAgentImage(t)
 
 	// Start instance
 	upCmd := &cobra.Command{}
@@ -286,16 +273,8 @@ func TestPerformance_GitCommit(t *testing.T) {
 	t.Log("=== Performance Test: Git Commit ===")
 
 	// Build git agent
-	buildCmd := exec.Command("docker", "build",
-		"-t", "example-git-agent:latest",
-		"-f", "agents/example-git-agent/Dockerfile",
-		".")
-	buildCmd.Dir = testutil.GetProjectRoot()
-	output, err := buildCmd.CombinedOutput()
-	if err != nil {
-		t.Logf("Build output:\n%s", string(output))
-	}
-	require.NoError(t, err)
+	// Build consolidated test agent image (once per suite)
+	testutil.EnsureTestAgentImage(t)
 
 	// Setup environment with increased drift tolerance
 	gitAgentYML := `version: "1.0"
@@ -303,8 +282,9 @@ orchestrator:
   timestamp_drift_tolerance_ms: 600000 # 10 minutes
 agents:
   GitAgent:
-    image: "example-git-agent:latest"
-    command: ["/app/run.sh"]
+    image: "holt-test-agent:latest"
+    command: ["/app/run_git.sh"]
+    bid_script: ["/app/bid_git.sh"]
     bidding_strategy:
       type: "exclusive"
     workspace:
@@ -324,7 +304,7 @@ services:
 	upCmd := &cobra.Command{}
 	upInstanceName = env.InstanceName
 	upForce = false
-	err = runUp(upCmd, []string{})
+	err := runUp(upCmd, []string{})
 	require.NoError(t, err)
 
 	env.WaitForContainer("orchestrator")
@@ -377,13 +357,8 @@ func TestPerformance_FullWorkflowE2E(t *testing.T) {
 
 	t.Log("=== Performance Test: Full Workflow E2E ===")
 
-	// Build git agent
-	buildCmd := exec.Command("docker", "build",
-		"-t", "example-git-agent:latest",
-		"-f", "agents/example-git-agent/Dockerfile",
-		".")
-	buildCmd.Dir = testutil.GetProjectRoot()
-	buildCmd.Run()
+	// Build consolidated test agent image (once per suite)
+	testutil.EnsureTestAgentImage(t)
 
 	// Setup environment with increased drift tolerance
 	gitAgentYML := `version: "1.0"
@@ -391,8 +366,9 @@ orchestrator:
   timestamp_drift_tolerance_ms: 600000 # 10 minutes
 agents:
   GitAgent:
-    image: "example-git-agent:latest"
-    command: ["/app/run.sh"]
+    image: "holt-test-agent:latest"
+    command: ["/app/run_git.sh"]
+    bid_script: ["/app/bid_git.sh"]
     bidding_strategy:
       type: "exclusive"
     workspace:

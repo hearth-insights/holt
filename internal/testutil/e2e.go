@@ -651,29 +651,6 @@ func (env *E2EEnvironment) CreateTestAgent(agentName, runScript string) {
 	env.T.Logf("✓ Created test agent: %s", agentName)
 }
 
-// GetProjectRoot returns the project root directory for building Docker images
-func GetProjectRoot() string {
-	// When running tests, we need to go up from internal/testutil to project root
-	// This works because tests compile to a binary in the cmd/holt/commands directory
-	root, err := os.Getwd()
-	if err != nil {
-		return "."
-	}
-
-	// Walk up until we find go.mod
-	for {
-		if _, err := os.Stat(filepath.Join(root, "go.mod")); err == nil {
-			return root
-		}
-		parent := filepath.Dir(root)
-		if parent == root {
-			// Reached filesystem root, default to current dir
-			return "."
-		}
-		root = parent
-	}
-}
-
 // WaitForArtefactOfType waits for an artefact with the specified type to appear on the blackboard.
 //
 // WARNING: This function returns the FIRST artefact found with matching type, regardless of version.

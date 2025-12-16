@@ -1,0 +1,24 @@
+# Consolidated Test Agent Image
+# Inherits from holt-test-base-agent (which has pre-compiled pup)
+# Bundles scripts from multiple standard agents to avoid per-test builds.
+
+FROM holt-test-base-agent:latest
+
+# Switch to root to copy files and set permissions
+USER root
+
+# Copy scripts from example-agent
+# Renamed to avoid collisions and clarify purpose
+COPY agents/example-agent/run.sh /app/run_echo.sh
+RUN chmod +x /app/run_echo.sh
+
+# Copy scripts from example-git-agent
+COPY agents/example-git-agent/run.sh /app/run_git.sh
+COPY agents/example-git-agent/bid.sh /app/bid_git.sh
+RUN chmod +x /app/run_git.sh /app/bid_git.sh
+
+# Switch back to agent user for runtime
+USER agent
+
+# Default entrypoint is pup (inherited from base), arguments provided by holt.yml
+ENTRYPOINT ["/app/pup"]
