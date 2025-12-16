@@ -199,22 +199,30 @@ func TestPerformance_ContextAssembly(t *testing.T) {
 	for i := 0; i < 10; i++ {
 
 		artefact := &blackboard.Artefact{
-			ID:              uuid.NewString(),
-			LogicalID:       uuid.NewString(),
-			Version:         1,
-			StructuralType:  blackboard.StructuralTypeStandard,
-			Type:            fmt.Sprintf("Level%d", i),
-			Payload:         fmt.Sprintf("content-level-%d", i),
-			SourceArtefacts: []string{},
-			ProducedByRole:  "test-agent", // M3.7: Required field
+			Header: blackboard.ArtefactHeader{
+				LogicalThreadID: uuid.NewString(),
+				Version:         1,
+				StructuralType:  blackboard.StructuralTypeStandard,
+				Type:            fmt.Sprintf("Level%d", i),
+				ParentHashes:    []string{},
+				ProducedByRole:  "test-agent", // M3.7: Required field
+				CreatedAtMs:     time.Now().UnixMilli(),
+			},
+			Payload: blackboard.ArtefactPayload{
+				Content: fmt.Sprintf("content-level-%d", i),
+			},
 		}
 
 		if i > 0 {
 			artefact.Header.ParentHashes = []string{previousArtefactID}
 		}
 
+		hash, err := blackboard.ComputeArtefactHash(artefact)
+		require.NoError(t, err)
+		artefact.ID = hash
+
 		// Store artefact on blackboard
-		err := env.BBClient.CreateArtefact(ctx, artefact)
+		err = env.BBClient.CreateArtefact(ctx, artefact)
 		require.NoError(t, err)
 
 		artefactIDs[i] = artefact.ID

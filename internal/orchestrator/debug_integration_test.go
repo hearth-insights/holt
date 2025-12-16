@@ -341,16 +341,21 @@ func TestDebugProtocol_BasicPauseResume(t *testing.T) {
 
 	// Create an artefact that will trigger breakpoint // TODO migrate to V2 format
 	artefact := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "TestArtefact",
-		Payload:         "test-payload",
-		SourceArtefacts: []string{},
-		ProducedByRole:  "test-agent",
-		CreatedAtMs:     time.Now().UnixMilli(),
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: uuid.New().String(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "TestArtefact",
+			ParentHashes:    []string{},
+			ProducedByRole:  "test-agent",
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "test-payload",
+		},
 	}
+	hash, _ := blackboard.ComputeArtefactHash(artefact)
+	artefact.ID = hash
 
 	err = bbClient.CreateArtefact(ctx, artefact)
 	require.NoError(t, err)
@@ -440,16 +445,21 @@ func TestDebugProtocol_ReviewConsensusReached(t *testing.T) {
 
 	// Create artefact
 	artefact := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "WorkItem",
-		Payload:         "work-payload",
-		SourceArtefacts: []string{},
-		ProducedByRole:  "user",
-		CreatedAtMs:     time.Now().UnixMilli(),
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: uuid.New().String(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "WorkItem",
+			ParentHashes:    []string{},
+			ProducedByRole:  "user",
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "work-payload",
+		},
 	}
+	hash, _ := blackboard.ComputeArtefactHash(artefact)
+	artefact.ID = hash
 
 	err = bbClient.CreateArtefact(ctx, artefact)
 	require.NoError(t, err)
@@ -473,16 +483,21 @@ func TestDebugProtocol_ReviewConsensusReached(t *testing.T) {
 
 	// Create review artefact with approval (empty payload)
 	reviewArtefact := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeReview,
-		Type:            "Review",
-		Payload:         "{}",
-		SourceArtefacts: []string{artefact.ID},
-		ProducedByRole:  "reviewer",
-		CreatedAtMs:     time.Now().UnixMilli(),
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: uuid.New().String(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeReview,
+			Type:            "Review",
+			ParentHashes:    []string{artefact.ID},
+			ProducedByRole:  "reviewer",
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "{}",
+		},
 	}
+	reviewHash, _ := blackboard.ComputeArtefactHash(reviewArtefact)
+	reviewArtefact.ID = reviewHash
 
 	err = bbClient.CreateArtefact(ctx, reviewArtefact)
 	require.NoError(t, err)
@@ -530,7 +545,7 @@ func TestDebugProtocol_ManualReview(t *testing.T) {
 		Agents: map[string]config.Agent{
 			"reviewer": {
 				Image:           "reviewer:latest",
-				BiddingStrategy: "review",
+				BiddingStrategy: config.BiddingStrategyConfig{Type: "review"},
 			},
 		},
 	}
@@ -557,16 +572,21 @@ func TestDebugProtocol_ManualReview(t *testing.T) {
 
 	// Create artefact
 	artefact := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "CodeChange",
-		Payload:         "code-payload",
-		SourceArtefacts: []string{},
-		ProducedByRole:  "developer",
-		CreatedAtMs:     time.Now().UnixMilli(),
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: uuid.New().String(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "CodeChange",
+			ParentHashes:    []string{},
+			ProducedByRole:  "developer",
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "code-payload",
+		},
 	}
+	hash, _ := blackboard.ComputeArtefactHash(artefact)
+	artefact.ID = hash
 
 	err = bbClient.CreateArtefact(ctx, artefact)
 	require.NoError(t, err)
@@ -663,16 +683,21 @@ func TestDebugProtocol_SessionExpiration(t *testing.T) {
 
 	// Create artefact to trigger pause
 	artefact := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "TestItem",
-		Payload:         "payload",
-		SourceArtefacts: []string{},
-		ProducedByRole:  "agent",
-		CreatedAtMs:     time.Now().UnixMilli(),
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: uuid.New().String(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "TestItem",
+			ParentHashes:    []string{},
+			ProducedByRole:  "agent",
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "payload",
+		},
 	}
+	hash, _ := blackboard.ComputeArtefactHash(artefact)
+	artefact.ID = hash
 
 	err = bbClient.CreateArtefact(ctx, artefact)
 	require.NoError(t, err)
