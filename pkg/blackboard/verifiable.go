@@ -54,6 +54,11 @@ type ArtefactHeader struct {
 	// Empty for root artefacts (CLI-generated) and some orchestrator-generated artefacts
 	// Uses omitempty: empty string excluded from canonical JSON
 	ClaimID string `json:"claim_id,omitempty"`
+
+	// M5.1: Metadata for synchronization
+	// Value is JSON-encoded map[string]string (e.g. {"batch_size": "5"})
+	// Included in hash to prevent tampering with synchronization parameters
+	Metadata string `json:"metadata,omitempty"`
 }
 
 // ArtefactPayload is the actual content.

@@ -36,9 +36,6 @@ const (
 //
 // On any failure, creates a Failure artefact and continues (never crashes).
 func (e *Engine) executeWork(ctx context.Context, claim *blackboard.Claim) {
-	log.Printf("[INFO] Work Executor received claim from queue: claim_id=%s artefact_id=%s",
-		claim.ID, claim.ArtefactID)
-
 	// Fetch target artefact
 	targetArtefact, err := e.fetchTargetArtefact(ctx, claim)
 	if err != nil {
@@ -485,11 +482,11 @@ func (e *Engine) createVerifiableResultArtefact(ctx context.Context, claim *blac
 		// Rework: Continue existing thread
 		logicalThreadID = targetArtefact.LogicalID
 		version = targetArtefact.Version + 1
-		
+
 		// Parent hashes = Target + Reviews
 		parentHashes = []string{targetArtefact.ID}
 		parentHashes = append(parentHashes, claim.AdditionalContextIDs...)
-		
+
 		log.Printf("[INFO] Creating V2 rework artefact: logical_id=%s version=%d→%d",
 			logicalThreadID, targetArtefact.Version, version)
 	} else {
@@ -522,7 +519,7 @@ func (e *Engine) createVerifiableResultArtefact(ctx context.Context, claim *blac
 		ProducedByRole:  e.config.AgentName, // M3.7: AgentName IS the role
 		StructuralType:  output.GetStructuralType(),
 		Type:            output.ArtefactType,
-		ContextForRoles: nil, // Not used for standard work artefacts
+		ContextForRoles: nil,     // Not used for standard work artefacts
 		ClaimID:         claimID, // M4.6 Security Addendum: Grant Linkage
 	}
 
@@ -568,7 +565,7 @@ func (e *Engine) createVerifiableResultArtefact(ctx context.Context, claim *blac
 		CreatedAtMs:     artefact.Header.CreatedAtMs,
 		ClaimID:         artefact.Header.ClaimID,
 	}
-	
+
 	artefactJSON, err := json.Marshal(v1Wrapper)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal artefact for event: %w", err)
@@ -604,9 +601,9 @@ func (e *Engine) createVerifiableResultArtefact(ctx context.Context, claim *blac
 // M5.1: Supports multi-artefact output pattern with automatic batch_size injection.
 //
 // All artefacts in the batch:
-//  - Share the same parent (claim.ArtefactID)
-//  - Get metadata: {"batch_size": "N"} where N = len(outputs)
-//  - Are created atomically via Lua script
+//   - Share the same parent (claim.ArtefactID)
+//   - Get metadata: {"batch_size": "N"} where N = len(outputs)
+//   - Are created atomically via Lua script
 //
 // Returns all created artefacts or error on first failure.
 func (e *Engine) createVerifiableResultArtefacts(ctx context.Context, claim *blackboard.Claim, outputs []ToolOutput, targetArtefact *blackboard.Artefact) ([]*blackboard.VerifiableArtefact, error) {
@@ -702,6 +699,7 @@ func (e *Engine) createVerifiableResultArtefactWithMetadata(ctx context.Context,
 		Type:            output.ArtefactType,
 		ContextForRoles: nil,
 		ClaimID:         claimID,
+		Metadata:        metadata, // M5.1: Inject metadata (e.g. batch_size)
 	}
 
 	// Create verifiable artefact
@@ -824,7 +822,7 @@ func (e *Engine) createFailureArtefact(ctx context.Context, claim *blackboard.Cl
 
 	// M4.6: Use V2 VerifiableArtefact structure
 	logicalThreadID := blackboard.NewID()
-	
+
 	// M4.6 Security Addendum: Inject HOLT_CLAIM_ID into header
 	// For failures during claim processing, we know the claim ID
 	claimID := claim.ID
@@ -861,11 +859,11 @@ func (e *Engine) createFailureArtefact(ctx context.Context, claim *blackboard.Cl
 
 	// Publish event (manual until V2 integration complete)
 	// We need to convert to V1 struct for event publishing if subscribers expect V1
-	// But wait, WriteVerifiableArtefact might not publish event? 
+	// But wait, WriteVerifiableArtefact might not publish event?
 	// The client.WriteVerifiableArtefact does NOT publish event by default in current impl?
 	// Let's check client code... actually WriteVerifiableArtefact just writes hash.
 	// We need to publish.
-	
+
 	// Create V1 wrapper for event publishing/thread tracking
 	artefact := &blackboard.Artefact{
 		ID:              v2Artefact.ID,
@@ -989,7 +987,7 @@ func (e *Engine) createReworkArtefact(ctx context.Context, claim *blackboard.Cla
 		Type:            targetArtefact.Type, // Same type (rework)
 		Payload:         output.ArtefactPayload,
 		SourceArtefacts: sourceArtefacts,        // Target + Reviews
-		ProducedByRole:  e.config.AgentName,    // M3.7: AgentName IS the role
+		ProducedByRole:  e.config.AgentName,     // M3.7: AgentName IS the role
 		CreatedAtMs:     time.Now().UnixMilli(), // M3.9: Millisecond precision timestamp
 	}
 

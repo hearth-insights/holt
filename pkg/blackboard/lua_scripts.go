@@ -15,24 +15,26 @@ package blackboard
 // 4. Publish artefact event (PUBLISH)
 //
 // KEYS:
-//   [1] artefact_key       - holt:{inst}:artefact:{uuid}
-//   [2] thread_key         - holt:{inst}:thread:{logical_id}
-//   [3] events_channel     - holt:{inst}:artefact_events
+//
+//	[1] artefact_key       - holt:{inst}:artefact:{uuid}
+//	[2] thread_key         - holt:{inst}:thread:{logical_id}
+//	[3] events_channel     - holt:{inst}:artefact_events
 //
 // ARGV:
-//   [1]  artefact_id       - UUID
-//   [2]  logical_id        - UUID
-//   [3]  version           - integer
-//   [4]  structural_type   - string
-//   [5]  type              - string
-//   [6]  payload           - string
-//   [7]  source_artefacts  - JSON array string (e.g., ["uuid1","uuid2"])
-//   [8]  produced_by_role  - string
-//   [9]  created_at_ms     - int64 timestamp
-//   [10] context_for_roles - JSON array string
-//   [11] claim_id          - string
-//   [12] metadata          - JSON object string (e.g., {"batch_size":"5"})
-//   [13] artefact_json     - Full artefact JSON for Pub/Sub event
+//
+//	[1]  artefact_id       - UUID
+//	[2]  logical_id        - UUID
+//	[3]  version           - integer
+//	[4]  structural_type   - string
+//	[5]  type              - string
+//	[6]  payload           - string
+//	[7]  source_artefacts  - JSON array string (e.g., ["uuid1","uuid2"])
+//	[8]  produced_by_role  - string
+//	[9]  created_at_ms     - int64 timestamp
+//	[10] context_for_roles - JSON array string
+//	[11] claim_id          - string
+//	[12] metadata          - JSON object string (e.g., {"batch_size":"5"})
+//	[13] artefact_json     - Full artefact JSON for Pub/Sub event
 //
 // Returns: artefact_id on success
 //
@@ -56,6 +58,8 @@ local context_for_roles = ARGV[10]
 local claim_id = ARGV[11]
 local metadata = ARGV[12]
 local artefact_json = ARGV[13]
+
+redis.log(redis.LOG_NOTICE, "DEBUG_UNIQUE_ID_8888: Lua script running with metadata=" .. tostring(metadata))
 
 -- Step 1: Create artefact hash
 redis.call('HSET', artefact_key,

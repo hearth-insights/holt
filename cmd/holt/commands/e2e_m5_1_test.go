@@ -13,6 +13,7 @@ import (
 	"github.com/hearth-insights/holt/internal/testutil"
 	"github.com/hearth-insights/holt/pkg/blackboard"
 	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -198,19 +199,23 @@ func TestE2E_M5_1_ProducerDeclared(t *testing.T) {
 	t.Log("=== M5.1 E2E: Producer-Declared Pattern (Dynamic Count) ===")
 
 	projectRoot := testutil.GetProjectRoot()
+	t.Logf("DEBUG: Project Root: %s", projectRoot)
+	checkLs := exec.Command("ls", "-R", "internal/pup")
+	checkLs.Dir = projectRoot
+	out, _ := checkLs.CombinedOutput()
+	t.Logf("DEBUG: internal/pup content:\n%s", string(out))
 
 	// Build multi-artefact producer (outputs 5 ProcessedRecords)
 	t.Log("Building multi-output producer...")
 	buildCmd := exec.Command("docker", "build",
+		"--no-cache",
 		"-t", "m5-1-multi-producer:latest",
 		"-f", "-",
 		".")
 	buildCmd.Dir = projectRoot
 	buildCmd.Stdin = getMultiProducerDockerfile()
 	output, err := buildCmd.CombinedOutput()
-	if err != nil {
-		t.Logf("Multi-producer build output:\n%s", string(output))
-	}
+	t.Logf("Multi-producer build output:\n%s", string(output))
 	require.NoError(t, err)
 	t.Log("✓ Multi-producer built")
 
@@ -289,16 +294,28 @@ services:
 	t.Log("Waiting for producer to create 5 ProcessedRecords...")
 	time.Sleep(5 * time.Second)
 
-	// Verify 5 ProcessedRecords exist with batch_size=5 metadata
-	records := getArtefactsByType(ctx, bbClient, "ProcessedRecord")
-	require.Len(t, records, 5, "Should have 5 ProcessedRecords")
+	// Verify 5 ProcessedRecords exist	// Wait for producer to create 5 ProcessedRecords
+	records, _ := testutil.FindAllArtefactsOfType(ctx, bbClient, "ProcessedRecord")
+	if len(records) != 5 {
+		env.DumpInstanceLogs()
+		assert.Equal(t, 5, len(records), "Should have 5 ProcessedRecords")
+	}
 
 	// Verify metadata injection
 	for i, record := range records {
 		var metadata map[string]string
-		err := json.Unmarshal([]byte(record.Metadata), &metadata)
-		require.NoError(t, err, "Record %d metadata should be valid JSON", i)
-		require.Equal(t, "5", metadata["batch_size"], "Record %d should have batch_size=5", i)
+		if record.Metadata != "" {
+			_ = json.Unmarshal([]byte(record.Metadata), &metadata)
+		}
+
+		if metadata == nil {
+			metadata = make(map[string]string)
+		}
+
+		if metadata["batch_size"] != "5" {
+			env.DumpInstanceLogs()
+		}
+		assert.Equal(t, "5", metadata["batch_size"], "Record %d should have batch_size=5", i)
 	}
 	t.Log("✓ All 5 ProcessedRecords created with correct metadata")
 

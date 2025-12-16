@@ -462,6 +462,7 @@ func (env *E2EEnvironment) WaitForArtefactByType(artefactType string) *blackboar
 					Payload:         data["payload"],
 					ProducedByRole:  data["produced_by_role"],
 					ClaimID:         data["claim_id"], // M4.6: Capture ClaimID
+					Metadata:        data["metadata"], // M5.1: Capture Metadata
 					SourceArtefacts: []string{},       // Simplified for now
 				}
 
@@ -801,6 +802,9 @@ func FindAllArtefactsOfType(ctx context.Context, client *blackboard.Client, arte
 		}
 
 		if data["type"] == artefactType {
+			// Debug log
+			fmt.Printf("DEBUG: FindAllArtefactsOfType found %s with metadata raw: '%s'\n", data["id"], data["metadata"])
+
 			artefact := &blackboard.Artefact{
 				ID:             data["id"],
 				LogicalID:      data["logical_id"],
@@ -808,6 +812,7 @@ func FindAllArtefactsOfType(ctx context.Context, client *blackboard.Client, arte
 				Type:           data["type"],
 				Payload:        data["payload"],
 				ProducedByRole: data["produced_by_role"],
+				Metadata:       data["metadata"], // M5.1: Capture Metadata
 			}
 
 			if versionStr, ok := data["version"]; ok {

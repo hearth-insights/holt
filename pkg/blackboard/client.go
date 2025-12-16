@@ -82,6 +82,7 @@ func (c *Client) CreateArtefact(ctx context.Context, a *Artefact) error {
 	if a.Metadata == "" {
 		a.Metadata = "{}"
 	}
+	log.Printf("[DEBUG_UNIQUE_ID_8888] Client creating artefact %s with metadata: %s", a.ID, a.Metadata)
 
 	// Validate artefact
 	if err := a.Validate(); err != nil {
@@ -1394,6 +1395,7 @@ func (c *Client) WriteVerifiableArtefact(ctx context.Context, a *VerifiableArtef
 		CreatedAtMs:     a.Header.CreatedAtMs,
 		ClaimID:         a.Header.ClaimID,
 		ContextForRoles: a.Header.ContextForRoles,
+		Metadata:        a.Header.Metadata, // M5.1: Preserve metadata
 	}
 
 	// Convert to Redis hash
