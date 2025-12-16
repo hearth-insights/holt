@@ -25,6 +25,7 @@ var (
 	watchAgent            string
 	watchExitOnCompletion bool
 	watchDebugRedis       bool
+	watchVerbose          bool
 )
 
 var watchCmd = &cobra.Command{
@@ -81,6 +82,7 @@ func init() {
 
 	// Behavior flags
 	watchCmd.Flags().BoolVar(&watchExitOnCompletion, "exit-on-completion", false, "Exit with code 0 when Terminal artefact detected")
+	watchCmd.Flags().BoolVarP(&watchVerbose, "verbose", "v", false, "Show verbose events (bid_received, etc.)")
 	watchCmd.Flags().BoolVar(&watchDebugRedis, "debug-redis", false, "Enable verbose Redis debug logging")
 
 	rootCmd.AddCommand(watchCmd)
@@ -217,7 +219,7 @@ func runWatch(cmd *cobra.Command, args []string) error {
 	}
 
 	// Phase 7: Stream workflow activity
-	return watch.StreamActivity(ctx, bbClient, targetInstanceName, outputFormat, filterCriteria, watchExitOnCompletion, os.Stdout)
+	return watch.StreamActivity(ctx, bbClient, targetInstanceName, outputFormat, filterCriteria, watchExitOnCompletion, watchVerbose, os.Stdout)
 }
 
 // parseTimeFilters parses the --since and --until flags into millisecond timestamps.

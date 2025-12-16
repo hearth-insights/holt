@@ -212,7 +212,7 @@ func runForage(cmd *cobra.Command, args []string) error {
 		streamDone := make(chan error, 1)
 		go func() {
 			// No filters, no exit-on-completion for forage command
-			streamDone <- watch.StreamActivity(ctx, bbClient, targetInstanceName, watch.OutputFormatDefault, nil, false, os.Stdout)
+			streamDone <- watch.StreamActivity(ctx, bbClient, targetInstanceName, watch.OutputFormatDefault, nil, false, false, os.Stdout)
 		}()
 
 		// Give subscription time to set up before publishing artefact

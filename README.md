@@ -235,13 +235,15 @@ graph TD
 
 ## Project Status
 
-**Phase 4 In Progress** 🚧 - Human-in-the-loop and production hardening.
+**Phase 5 In Progress** 🚧 - Complex workflow coordination and DAG orchestration.
 
-### Key Completed Features (Phases 1-3)
+### Key Completed Features (Phases 1-4)
 
 *   **Core Orchestration**: Event-driven engine, Redis blackboard, Git-native workflows.
 *   **Advanced Coordination**: Multi-agent consensus bidding and phased execution (Review, Parallel, Exclusive).
 *   **Resilience & Scaling**: Controller-worker pattern for horizontal scaling, orchestrator restart resilience, and automated feedback loops for agent self-correction.
+*   **Human-in-the-Loop**: Question/Answer artefacts for guidance, interactive debugger with breakpoints, session management with auto-cleanup.
+*   **Complex Coordination (M5.1)**: Declarative fan-in synchronization for DAG workflows, multi-artefact output, atomic indexing with reverse traversal.
 *   **Security & Audit**: Immutable audit trail, workspace isolation (`ro`/`rw` modes), and multi-instance safety.
 
 ---
@@ -655,9 +657,10 @@ For a detailed look at long-term, enterprise-focused ideas like RBAC, Secrets Ma
   - **Enterprise Architecture**: Deep dive into air-gap capabilities, data sovereignty, and security boundaries
   - Reference architecture designed to support EU AI Act (Article 14) and NYDFS Part 504 compliance requirements
 - **[System Specification](./design/holt-system-specification.md)** - Complete technical architecture documenting the immutable ledger design and orchestration state machine
-- **[Agent Development Guide](./docs/agent-development.md)** - Build custom agents for your compliance workflows
+- **[Agent Development Guide](./docs/guides/agent-development.md)** - Build custom agents for your compliance workflows
+- **[Fan-In Synchronization Guide](./docs/guides/fan-in-synchronization.md)** - DAG coordination and multi-branch workflows (Phase 5)
 - **[Project Context](./docs/PROJECT_CONTEXT.md)** - Philosophy, principles, and vision for regulated AI
-- **[Troubleshooting Guide](./docs/troubleshooting.md)** - Common issues & solutions
+- **[Troubleshooting Guide](./docs/guides/troubleshooting.md)** - Common issues & solutions
 - **[Feature Design Template](./design/holt-feature-design-template.md)** - Development process
 
 ---

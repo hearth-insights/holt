@@ -106,16 +106,18 @@ func PollForClaim(ctx context.Context, client *blackboard.Client, artefactID str
 // Handles reconnection on transient failures with 2s retry interval and 60s timeout.
 //
 // If exitOnCompletion is true, exits with nil when a Terminal artefact is detected.
-func StreamActivity(ctx context.Context, client *blackboard.Client, instanceName string, format OutputFormat, filters *FilterCriteria, exitOnCompletion bool, writer io.Writer) error {
+// If verbose is true, shows all events including bid_received. Otherwise hides verbose events.
+func StreamActivity(ctx context.Context, client *blackboard.Client, instanceName string, format OutputFormat, filters *FilterCriteria, exitOnCompletion bool, verbose bool, writer io.Writer) error {
 	// Create formatter
 	var formatter eventFormatter
 	switch format {
 	case OutputFormatJSONL:
-		formatter = &jsonlFormatter{writer: writer}
+		formatter = &jsonlFormatter{writer: writer, verbose: verbose}
 	default:
 		formatter = &defaultFormatter{
-			writer: writer,
-			client: client,
+			writer:  writer,
+			client:  client,
+			verbose: verbose,
 		}
 	}
 
@@ -681,8 +683,9 @@ type eventFormatter interface {
 
 // defaultFormatter produces human-readable output with emojis
 type defaultFormatter struct {
-	writer io.Writer
-	client *blackboard.Client
+	writer  io.Writer
+	client  *blackboard.Client
+	verbose bool // Show verbose events (bid_received, etc.)
 }
 
 func (f *defaultFormatter) FormatArtefact(artefact *blackboard.Artefact) error {
@@ -754,10 +757,15 @@ func (f *defaultFormatter) FormatWorkflow(event *blackboard.WorkflowEvent, times
 		return err
 
 	case "bid_received":
+		// M5.1: Verbose event - only show if --verbose flag is set
+		if !f.verbose {
+			return nil // Silently skip
+		}
+
 		agentName, _ := event.Data["agent_name"].(string)
 		claimID, _ := event.Data["claim_id"].(string)
 		bidType, _ := event.Data["bid_type"].(string)
-		_, err := fmt.Fprintf(f.writer, "[%s] 📩 Bid received : agent=%s, claim=%s, type=%s\n",
+		_, err := fmt.Fprintf(f.writer, "[%s] 📩 Bid received: agent=%s, claim=%s, type=%s\n",
 			timestamp, agentName, shortID(claimID), bidType)
 		return err
 
@@ -842,6 +850,10 @@ func (f *defaultFormatter) FormatWorkflow(event *blackboard.WorkflowEvent, times
 		return err
 
 	default:
+		// Unknown events are only shown in verbose mode
+		if !f.verbose {
+			return nil // Silently skip unknown events
+		}
 		_, err := fmt.Fprintf(f.writer, "[%s] ❓ Unknown event: %s\n", timestamp, event.Event)
 		return err
 	}
@@ -849,7 +861,8 @@ func (f *defaultFormatter) FormatWorkflow(event *blackboard.WorkflowEvent, times
 
 // jsonlFormatter produces line-delimited JSON output (JSONL format)
 type jsonlFormatter struct {
-	writer io.Writer
+	writer  io.Writer
+	verbose bool // Show verbose events (bid_received, etc.)
 }
 
 func (f *jsonlFormatter) FormatArtefact(artefact *blackboard.Artefact) error {
@@ -899,6 +912,30 @@ func (f *jsonlFormatter) FormatClaim(claim *blackboard.Claim, timestampMs int64)
 }
 
 func (f *jsonlFormatter) FormatWorkflow(event *blackboard.WorkflowEvent, timestampMs int64) error {
+	// M5.1: Filter verbose events unless --verbose is set
+	if !f.verbose {
+		// Skip verbose events: bid_received and any unknown events
+		if event.Event == "bid_received" {
+			return nil // Silently skip
+		}
+		// For robustness, also skip other potentially verbose/unknown events
+		// List of known non-verbose events (allow these through)
+		knownEvents := map[string]bool{
+			"artefact_created":       true,
+			"claim_created":          true,
+			"bid_submitted":          true,
+			"claim_granted":          true,
+			"review_approved":        true,
+			"review_rejected":        true,
+			"feedback_claim_created": true,
+			"artefact_reworked":      true,
+			"human_input_required":   true,
+		}
+		if !knownEvents[event.Event] {
+			return nil // Silently skip unknown events
+		}
+	}
+
 	if timestampMs == 0 {
 		timestampMs = time.Now().UnixMilli()
 	}

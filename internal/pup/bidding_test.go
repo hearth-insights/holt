@@ -46,7 +46,8 @@ fi
 		}
 
 		// Determine the bid
-		bidType, err := pupEngine.determineBidType(ctx, goalArtefact)
+		claim := &blackboard.Claim{ID: "test-claim", ArtefactID: goalArtefact.ID}
+		bidType, err := pupEngine.determineBidType(ctx, claim, goalArtefact)
 
 		// Assert that the bid is "ignore"
 		require.NoError(t, err)
@@ -61,7 +62,8 @@ fi
 		}
 
 		// Determine the bid
-		bidType, err := pupEngine.determineBidType(ctx, recipeArtefact)
+		claim := &blackboard.Claim{ID: "test-claim", ArtefactID: recipeArtefact.ID}
+		bidType, err := pupEngine.determineBidType(ctx, claim, recipeArtefact)
 
 		// Assert that the bid is "review"
 		require.NoError(t, err)
@@ -77,7 +79,8 @@ fi
 		}
 
 		goalArtefact := &blackboard.Artefact{Type: "GoalDefined"}
-		bidType, err := staticEngine.determineBidType(ctx, goalArtefact)
+		claim := &blackboard.Claim{ID: "test-claim", ArtefactID: goalArtefact.ID}
+		bidType, err := staticEngine.determineBidType(ctx, claim, goalArtefact)
 
 		require.NoError(t, err)
 		require.Equal(t, blackboard.BidTypeExclusive, bidType, "Should use static bidding_strategy as fallback")
@@ -102,7 +105,8 @@ exit 1
 		}
 
 		artefact := &blackboard.Artefact{Type: "SomeType"}
-		bidType, err := engineWithFallback.determineBidType(ctx, artefact)
+		claim := &blackboard.Claim{ID: "test-claim", ArtefactID: artefact.ID}
+		bidType, err := engineWithFallback.determineBidType(ctx, claim, artefact)
 
 		require.NoError(t, err)
 		require.Equal(t, blackboard.BidTypeParallel, bidType, "Should fall back to static strategy on script failure")
@@ -127,7 +131,8 @@ exit 1
 		}
 
 		artefact := &blackboard.Artefact{Type: "SomeType"}
-		bidType, err := engineNoFallback.determineBidType(ctx, artefact)
+		claim := &blackboard.Claim{ID: "test-claim", ArtefactID: artefact.ID}
+		bidType, err := engineNoFallback.determineBidType(ctx, claim, artefact)
 
 		require.NoError(t, err)
 		require.Equal(t, blackboard.BidTypeIgnore, bidType, "Should return 'ignore' when no fallback available")
@@ -152,7 +157,8 @@ echo "invalid_bid_type"
 		}
 
 		artefact := &blackboard.Artefact{Type: "SomeType"}
-		bidType, err := engineWithFallback.determineBidType(ctx, artefact)
+		claim := &blackboard.Claim{ID: "test-claim", ArtefactID: artefact.ID}
+		bidType, err := engineWithFallback.determineBidType(ctx, claim, artefact)
 
 		require.NoError(t, err)
 		require.Equal(t, blackboard.BidTypeReview, bidType, "Should fall back when script returns invalid bid type")
@@ -174,7 +180,8 @@ echo "  claim  "
 		}
 
 		artefact := &blackboard.Artefact{Type: "SomeType"}
-		bidType, err := engineWhitespace.determineBidType(ctx, artefact)
+		claim := &blackboard.Claim{ID: "test-claim", ArtefactID: artefact.ID}
+		bidType, err := engineWhitespace.determineBidType(ctx, claim, artefact)
 
 		require.NoError(t, err)
 		require.Equal(t, blackboard.BidTypeParallel, bidType, "Should trim whitespace from script output")

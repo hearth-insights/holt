@@ -124,7 +124,10 @@ The `context_chain` can grow large. If you are using a local LLM with a small co
 - **FD 3 is for the result** - Clean JSON only, parsed by pup
 - **View logs with**: `holt logs <agent-role>`
 
-A JSON object representing the **Result Artefact** you produced:
+A JSON object (or multiple objects) representing the **Result Artefact(s)** you produced.
+
+#### Single Artefact
+Most agents produce a single result. Write one JSON object to FD 3:
 
 ```json
 {
@@ -132,6 +135,18 @@ A JSON object representing the **Result Artefact** you produced:
   "artefact_payload": "title: Toast\n...",
   "summary": "Created recipe for toast"
 }
+```
+
+#### Multiple Artefacts (Fan-Out)
+To produce multiple artefacts (e.g., breaking a goal into sub-goals), write multiple JSON objects separated by newlines (**NDJSON**). The system will automatically count them and inject metadata (e.g., `batch_size`) for downstream Synchronizer agents.
+
+```bash
+# Example: Creating 3 SubGoal artefacts
+cat <<EOF >&3
+{"artefact_type": "SubGoal", "artefact_payload": "Task 1", "summary": "Subtask 1"}
+{"artefact_type": "SubGoal", "artefact_payload": "Task 2", "summary": "Subtask 2"}
+{"artefact_type": "SubGoal", "artefact_payload": "Task 3", "summary": "Subtask 3"}
+EOF
 ```
 
 > [!IMPORTANT]

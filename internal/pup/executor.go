@@ -44,6 +44,7 @@ func (e *Engine) executeWork(ctx context.Context, claim *blackboard.Claim) {
 	if err != nil {
 		log.Printf("[ERROR] Failed to fetch target artefact: %v", err)
 		e.createFailureArtefact(ctx, claim, -1, "", "", fmt.Sprintf("Failed to fetch target artefact: %v", err))
+		e.createTerminalArtefact(ctx, claim, 0)
 		return
 	}
 
@@ -55,6 +56,7 @@ func (e *Engine) executeWork(ctx context.Context, claim *blackboard.Claim) {
 	if err != nil {
 		log.Printf("[ERROR] Failed to prepare tool input: %v", err)
 		e.createFailureArtefact(ctx, claim, -1, "", "", fmt.Sprintf("Failed to prepare tool input: %v", err))
+		e.createTerminalArtefact(ctx, claim, 0)
 		return
 	}
 
@@ -69,6 +71,7 @@ func (e *Engine) executeWork(ctx context.Context, claim *blackboard.Claim) {
 		log.Printf("[ERROR] Tool execution failed: claim_id=%s exit_code=%d duration=%s error=%v",
 			claim.ID, exitCode, duration, err)
 		e.createFailureArtefact(ctx, claim, exitCode, stdout, stderr, err.Error())
+		e.createTerminalArtefact(ctx, claim, 0)
 		return
 	}
 
@@ -82,6 +85,15 @@ func (e *Engine) executeWork(ctx context.Context, claim *blackboard.Claim) {
 			claim.ID, err, truncate(stdout, 200))
 		e.createFailureArtefact(ctx, claim, exitCode, stdout, stderr,
 			fmt.Sprintf("Failed to parse FD 3 output: %v", err))
+		e.createTerminalArtefact(ctx, claim, 0)
+		return
+	}
+
+	// Validate artefact outputs (type consistency rules)
+	if err := e.validateArtefactOutputs(outputs); err != nil {
+		log.Printf("[ERROR] Invalid artefact outputs: claim_id=%s error=%v", claim.ID, err)
+		e.createFailureArtefact(ctx, claim, 0, stdout, stderr, err.Error())
+		e.createTerminalArtefact(ctx, claim, 0)
 		return
 	}
 
@@ -92,6 +104,7 @@ func (e *Engine) executeWork(ctx context.Context, claim *blackboard.Claim) {
 		// Try to create a Failure artefact describing the artefact creation failure
 		e.createFailureArtefact(ctx, claim, 0, stdout, stderr,
 			fmt.Sprintf("Tool succeeded but artefact creation failed: %v", err))
+		e.createTerminalArtefact(ctx, claim, 0)
 		return
 	}
 
@@ -99,6 +112,23 @@ func (e *Engine) executeWork(ctx context.Context, claim *blackboard.Claim) {
 	for i, artefact := range artefacts {
 		log.Printf("[INFO] Created artefact %d/%d: artefact_id=%s type=%s logical_id=%s version=%d",
 			i+1, len(artefacts), artefact.ID, artefact.Header.Type, artefact.Header.LogicalThreadID, artefact.Header.Version)
+	}
+
+	// Confirm all artefacts are in Redis before creating Terminal artefact
+	// This prevents race conditions where Terminal is processed before Question/Failure
+	if err := e.confirmArtefactsInRedis(ctx, artefacts); err != nil {
+		log.Printf("[ERROR] Failed to confirm artefacts in Redis: %v", err)
+		// Continue anyway - Terminal will still be created
+	}
+
+	// Create Terminal artefact to signal claim completion
+	// BUT: Only for final phase or single-phase execution
+	// In multi-phase workflows (review → parallel → exclusive), only the exclusive phase should create Terminal
+	if e.shouldCreateTerminalForClaim(claim) {
+		e.createTerminalArtefact(ctx, claim, len(artefacts))
+	} else {
+		log.Printf("[INFO] Skipping Terminal artefact creation for claim %s (status=%s, not final phase)",
+			claim.ID, claim.Status)
 	}
 }
 
@@ -1014,4 +1044,176 @@ func (e *Engine) publishArtefactReworkedEvent(ctx context.Context, newArtefact *
 		newArtefact.ID, newArtefact.LogicalID, newArtefact.Version)
 
 	return nil
+}
+
+// shouldCreateTerminalForClaim determines if a Terminal artefact should be created for this claim.
+// Terminal artefacts signal claim completion, but in multi-phase workflows, only the final phase should create one.
+//
+// Returns true for:
+//   - Exclusive phase claims (pending_exclusive) - this is the final phase
+//   - Feedback claims (pending_assignment) - single-phase rework
+//
+// Returns false for:
+//   - Review phase claims (pending_review) - workflow continues to parallel phase
+//   - Parallel phase claims (pending_parallel) - workflow continues to exclusive phase
+func (e *Engine) shouldCreateTerminalForClaim(claim *blackboard.Claim) bool {
+	switch claim.Status {
+	case blackboard.ClaimStatusPendingExclusive:
+		// Final phase in multi-phase workflow - create Terminal
+		return true
+	case blackboard.ClaimStatusPendingAssignment:
+		// Feedback claim - single-phase rework - create Terminal
+		return true
+	case blackboard.ClaimStatusPendingReview, blackboard.ClaimStatusPendingParallel:
+		// Intermediate phases - don't create Terminal, let workflow continue
+		return false
+	default:
+		// Defensive: for unknown statuses, create Terminal
+		log.Printf("[WARN] Unknown claim status %s for claim %s - creating Terminal by default",
+			claim.Status, claim.ID)
+		return true
+	}
+}
+
+// confirmArtefactsInRedis verifies that all artefacts are written to Redis before proceeding.
+// This ensures the orchestrator will see Question/Failure artefacts before processing the Terminal artefact.
+// Prevents race conditions where Terminal is processed before siblings are available.
+func (e *Engine) confirmArtefactsInRedis(ctx context.Context, artefacts []*blackboard.VerifiableArtefact) error {
+	log.Printf("[INFO] Confirming %d artefacts are in Redis before creating Terminal", len(artefacts))
+
+	for i, artefact := range artefacts {
+		// Try to read back the artefact from Redis
+		_, err := e.bbClient.GetArtefact(ctx, artefact.ID)
+		if err != nil {
+			return fmt.Errorf("artefact %d/%d (id=%s) not found in Redis: %w", i+1, len(artefacts), artefact.ID[:16], err)
+		}
+		log.Printf("[DEBUG] Confirmed artefact %d/%d in Redis: %s (type=%s, structural=%s)",
+			i+1, len(artefacts), artefact.ID[:16], artefact.Header.Type, artefact.Header.StructuralType)
+	}
+
+	log.Printf("[INFO] All %d artefacts confirmed in Redis", len(artefacts))
+	return nil
+}
+
+// validateArtefactOutputs enforces artefact output consistency rules:
+// 1. Cannot mix different structural types (Standard vs Question vs Failure vs Terminal)
+// 2. Question, Failure, Terminal artefacts limited to max 1
+// 3. Must produce at least one artefact
+//
+// This prevents agents from creating confusing output combinations like
+// "1 CodeCommit + 1 Question" which would be semantically unclear.
+func (e *Engine) validateArtefactOutputs(outputs []ToolOutput) error {
+	if len(outputs) == 0 {
+		return fmt.Errorf("no artefacts produced (agent must produce at least one artefact)")
+	}
+
+	structuralTypes := make(map[blackboard.StructuralType]int)
+
+	for _, output := range outputs {
+		st := output.GetStructuralType()
+		structuralTypes[st]++
+	}
+
+	// Rule 1: Cannot mix structural types
+	if len(structuralTypes) > 1 {
+		types := make([]string, 0, len(structuralTypes))
+		for st := range structuralTypes {
+			types = append(types, string(st))
+		}
+		return fmt.Errorf("cannot produce mixed structural types in single execution: %v. Agent must produce artefacts of a single structural type per claim", types)
+	}
+
+	// Rule 2: Special types (Question, Failure, Terminal) limited to 1
+	for st, count := range structuralTypes {
+		switch st {
+		case blackboard.StructuralTypeQuestion,
+			blackboard.StructuralTypeFailure,
+			blackboard.StructuralTypeTerminal:
+			if count > 1 {
+				return fmt.Errorf("cannot produce multiple %s artefacts (got %d). Question, Failure, and Terminal artefacts are limited to 1 per claim", st, count)
+			}
+		}
+	}
+
+	return nil
+}
+
+// createTerminalArtefact creates a Terminal artefact to signal claim completion.
+// This allows the orchestrator to know when an agent has finished producing all artefacts,
+// preventing premature claim completion when agents produce multiple artefacts.
+// This is ALWAYS created, even after Failure artefacts, to signal the claim is done.
+func (e *Engine) createTerminalArtefact(ctx context.Context, claim *blackboard.Claim, artefactCount int) {
+	log.Printf("[INFO] Creating Terminal artefact: claim_id=%s artefact_count=%d", claim.ID, artefactCount)
+
+	// Create Terminal artefact payload
+	terminalData := map[string]interface{}{
+		"reason":         "Work execution complete",
+		"artefact_count": artefactCount,
+		"claim_id":       claim.ID,
+	}
+
+	payloadJSON, err := json.Marshal(terminalData)
+	if err != nil {
+		log.Printf("[ERROR] Failed to marshal Terminal payload: %v", err)
+		payloadJSON = []byte(`{"reason": "Work execution complete"}`)
+	}
+
+	// Create unique logical thread for Terminal artefact
+	logicalThreadID := blackboard.NewID()
+
+	v2Artefact := &blackboard.VerifiableArtefact{
+		Header: blackboard.ArtefactHeader{
+			ParentHashes:    []string{claim.ArtefactID},
+			LogicalThreadID: logicalThreadID,
+			Version:         1,
+			CreatedAtMs:     time.Now().UnixMilli(),
+			ProducedByRole:  e.config.AgentName,
+			StructuralType:  blackboard.StructuralTypeTerminal,
+			Type:            "ClaimComplete",
+			ClaimID:         claim.ID,
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: string(payloadJSON),
+		},
+	}
+
+	// Compute hash
+	hash, err := blackboard.ComputeArtefactHash(v2Artefact)
+	if err != nil {
+		log.Printf("[ERROR] Failed to compute hash for Terminal artefact: %v", err)
+		return
+	}
+	v2Artefact.ID = hash
+
+	// Write to blackboard
+	if err := e.bbClient.WriteVerifiableArtefact(ctx, v2Artefact); err != nil {
+		log.Printf("[ERROR] Failed to create Terminal artefact: %v", err)
+		return
+	}
+
+	// Create V1 wrapper for event publishing/thread tracking
+	artefact := &blackboard.Artefact{
+		ID:              v2Artefact.ID,
+		LogicalID:       v2Artefact.Header.LogicalThreadID,
+		Version:         v2Artefact.Header.Version,
+		StructuralType:  v2Artefact.Header.StructuralType,
+		Type:            v2Artefact.Header.Type,
+		Payload:         v2Artefact.Payload.Content,
+		SourceArtefacts: v2Artefact.Header.ParentHashes,
+		ProducedByRole:  v2Artefact.Header.ProducedByRole,
+		CreatedAtMs:     v2Artefact.Header.CreatedAtMs,
+		ClaimID:         v2Artefact.Header.ClaimID,
+	}
+
+	// Add to thread tracking
+	if err := e.bbClient.AddVersionToThread(ctx, logicalThreadID, v2Artefact.ID, 1); err != nil {
+		log.Printf("[WARN] Failed to add Terminal artefact to thread: %v", err)
+	}
+
+	// Publish event
+	artefactJSON, _ := json.Marshal(artefact)
+	channel := fmt.Sprintf("holt:%s:artefact_events", e.config.InstanceName)
+	e.bbClient.PublishRaw(ctx, channel, string(artefactJSON))
+
+	log.Printf("[INFO] Terminal artefact created: artefact_id=%s type=%s", artefact.ID, artefact.Type)
 }

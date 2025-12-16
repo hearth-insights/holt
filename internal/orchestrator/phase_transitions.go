@@ -46,20 +46,9 @@ func (e *Engine) TransitionToNextPhase(ctx context.Context, claim *blackboard.Cl
 			nextStatus = blackboard.ClaimStatusPendingExclusive
 			nextPhase = "exclusive"
 		} else {
-			// No more work - claim is complete
-			e.logEvent("claim_complete", map[string]interface{}{
-				"claim_id": claim.ID,
-				"reason":   "no_grants_remaining_after_review",
-			})
-			log.Printf("[Orchestrator] Claim %s has no remaining grants after review phase, marking as complete", claim.ID)
-			
-			currentClaim.Status = blackboard.ClaimStatusComplete
-			if err := e.client.UpdateClaim(ctx, currentClaim); err != nil {
-				e.logError("failed to update claim status to complete", err)
-				return fmt.Errorf("failed to update claim status: %w", err)
-			}
-			
-			delete(e.phaseStates, claim.ID)
+			// No more phases - wait for Terminal artefact
+			log.Printf("[Orchestrator] Review phase complete for claim %s, no further phases, waiting for Terminal artefact", claim.ID)
+			// Don't mark complete - wait for Terminal artefact
 			return nil
 		}
 
@@ -69,37 +58,20 @@ func (e *Engine) TransitionToNextPhase(ctx context.Context, claim *blackboard.Cl
 			nextStatus = blackboard.ClaimStatusPendingExclusive
 			nextPhase = "exclusive"
 		} else {
-			// No exclusive work - claim is complete
-			e.logEvent("claim_complete", map[string]interface{}{
-				"claim_id": claim.ID,
-				"reason":   "no_grants_remaining_after_parallel",
-			})
-			log.Printf("[Orchestrator] Claim %s has no remaining grants after parallel phase, marking as complete", claim.ID)
-			
-			currentClaim.Status = blackboard.ClaimStatusComplete
-			if err := e.client.UpdateClaim(ctx, currentClaim); err != nil {
-				e.logError("failed to update claim status to complete", err)
-				return fmt.Errorf("failed to update claim status: %w", err)
-			}
-			
-			delete(e.phaseStates, claim.ID)
+			// No exclusive work - wait for Terminal artefact
+			log.Printf("[Orchestrator] Parallel phase complete for claim %s, no further phases, waiting for Terminal artefact", claim.ID)
+			// Don't mark complete - wait for Terminal artefact
 			return nil
 		}
 
 	case blackboard.ClaimStatusPendingExclusive:
-		// Exclusive completes → claim complete
-		nextStatus = blackboard.ClaimStatusComplete
-		currentClaim.Status = nextStatus
-		if err := e.client.UpdateClaim(ctx, currentClaim); err != nil {
-			e.logError("failed to update claim status to complete", err)
-			return fmt.Errorf("failed to update claim status: %w", err)
-		}
-		delete(e.phaseStates, claim.ID)
+		// Exclusive phase complete - do NOT mark claim as complete yet
+		// Claim will complete when agent sends Terminal artefact
+		log.Printf("[Orchestrator] Exclusive phase complete for claim %s, waiting for Terminal artefact", claim.ID)
 
-		e.logEvent("claim_complete", map[string]interface{}{
-			"claim_id": claim.ID,
-		})
-		log.Printf("[Orchestrator] Claim %s marked as complete", claim.ID)
+		// Keep the claim in granted_exclusive status and phaseStates
+		// The Terminal artefact handler will mark it complete
+		// Don't delete from phaseStates - needed for Terminal artefact lookup
 		return nil
 
 	default:

@@ -230,6 +230,18 @@ test-failed:
 // CreateVerifiableArtefact helper creates a V2-compliant artefact (hashed ID) and writes it to the blackboard.
 // It handles the hashing, V1 conversion, and error checking to reduce boilerplate in E2E tests.
 func (env *E2EEnvironment) CreateVerifiableArtefact(ctx context.Context, header blackboard.ArtefactHeader, payload string) *blackboard.Artefact {
+	// Apply sensible defaults for test artefacts
+	if header.StructuralType == "" {
+		header.StructuralType = blackboard.StructuralTypeStandard
+	}
+	if header.ProducedByRole == "" {
+		header.ProducedByRole = "user"
+	}
+	if header.CreatedAtMs == 0 {
+		header.CreatedAtMs = time.Now().UnixMilli()
+	}
+	// ClaimID defaults to "" (correct for test artefacts created outside claims)
+
 	// Construct V2 artefact
 	v2Art := &blackboard.VerifiableArtefact{
 		Header: header,

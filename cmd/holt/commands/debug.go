@@ -596,7 +596,7 @@ func (d *Debugger) RunInteractivePrompt() {
 		defer d.wg.Done()
 		// Stream events with no filters (show all events)
 		// Use default format (human-readable with timestamps and emojis)
-		err := watch.StreamActivity(d.ctx, d.client, d.instanceName, watch.OutputFormatDefault, nil, false, os.Stdout)
+		err := watch.StreamActivity(d.ctx, d.client, d.instanceName, watch.OutputFormatDefault, nil, false, false, os.Stdout)
 		if err != nil && err != context.Canceled {
 			// Don't show error on clean shutdown
 			log.Printf("Event stream ended: %v", err)

@@ -75,21 +75,10 @@ func (e *Engine) handleQuestionArtefact(ctx context.Context, questionArtefact *b
 		return e.terminateQuestionIterationLimit(ctx, originalClaim, targetArtefact, questionArtefact, iterationCount)
 	}
 
-	// Terminate the original claim (agent asked a question)
-	originalClaim.Status = blackboard.ClaimStatusTerminated
-	originalClaim.TerminationReason = fmt.Sprintf("Agent asked a clarifying question (Question artefact: %s)", questionArtefact.ID)
-
-	if err := e.client.UpdateClaim(ctx, originalClaim); err != nil {
-		return fmt.Errorf("failed to terminate original claim: %w", err)
-	}
-
-	e.logEvent("claim_terminated_question", map[string]interface{}{
-		"claim_id":    originalClaim.ID,
-		"question_id": questionArtefact.ID,
-		"target_artefact_id": payload.TargetArtefactID,
-	})
-
-	log.Printf("[Orchestrator] Claim %s terminated: agent asked question %s", originalClaim.ID, questionArtefact.ID)
+	// Don't terminate the claim here - the Terminal artefact (ClaimComplete) will handle it
+	// The orchestrator's handleTerminalArtefact() will detect the Question sibling and terminate
+	log.Printf("[Orchestrator] Question artefact %s produced for claim %s (will be terminated via Terminal artefact)",
+		questionArtefact.ID, originalClaim.ID)
 
 	// M4.11: Production Gatekeeper - Direct to Human routing
 	// If the agent explicitly requests human routing, we bypass the producer feedback loop.

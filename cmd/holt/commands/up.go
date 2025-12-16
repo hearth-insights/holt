@@ -513,12 +513,20 @@ func verifyOrchestratorImage(ctx context.Context, cli *client.Client, imageName 
 		return fmt.Errorf("failed to list Docker images: %w", err)
 	}
 
-	// Look for the orchestrator image
+	// Build list of acceptable image names (support both local and GHCR tags)
+	acceptableNames := []string{imageName}
+	if imageName == "holt-orchestrator:latest" {
+		acceptableNames = append(acceptableNames, "ghcr.io/hearth-insights/holt/holt-orchestrator:latest")
+	}
+
+	// Look for the orchestrator image (check all acceptable names)
 	for _, image := range images {
 		for _, tag := range image.RepoTags {
-			if tag == imageName {
-				printer.Debug("Found orchestrator image: %s\n", imageName)
-				return nil
+			for _, acceptableName := range acceptableNames {
+				if tag == acceptableName {
+					printer.Debug("Found orchestrator image: %s\n", tag)
+					return nil
+				}
 			}
 		}
 	}
@@ -650,12 +658,6 @@ func launchAgentContainerWithRedisURL(ctx context.Context, cli *client.Client, i
 		workspaceMode = agent.Workspace.Mode
 	}
 
-	// Serialize BiddingStrategyConfig to JSON (M4.8)
-	biddingStrategyJSON, err := json.Marshal(agent.BiddingStrategy)
-	if err != nil {
-		return fmt.Errorf("failed to marshal bidding strategy: %w", err)
-	}
-
 	// Build environment variables
 	// M3.7: ONLY HOLT_AGENT_NAME is set (to the role), HOLT_AGENT_ROLE removed
 	// M4.4: Use provided redisURL (may be external or managed with password)
@@ -663,7 +665,16 @@ func launchAgentContainerWithRedisURL(ctx context.Context, cli *client.Client, i
 		fmt.Sprintf("HOLT_INSTANCE_NAME=%s", instanceName),
 		fmt.Sprintf("HOLT_AGENT_NAME=%s", agentRole),
 		fmt.Sprintf("REDIS_URL=%s", redisURL),
-		fmt.Sprintf("HOLT_BIDDING_STRATEGY=%s", string(biddingStrategyJSON)), // M4.8: Serialized JSON
+	}
+
+	// M4.8: Add HOLT_BIDDING_STRATEGY only if configured
+	// M5.1: Don't set empty bidding strategy when only synchronize is configured
+	if agent.BiddingStrategy.Type != "" {
+		biddingStrategyJSON, err := json.Marshal(agent.BiddingStrategy)
+		if err != nil {
+			return fmt.Errorf("failed to marshal bidding strategy: %w", err)
+		}
+		env = append(env, fmt.Sprintf("HOLT_BIDDING_STRATEGY=%s", string(biddingStrategyJSON)))
 	}
 
 	// M3.4: Set HOLT_MODE for controller agents
@@ -687,6 +698,15 @@ func launchAgentContainerWithRedisURL(ctx context.Context, cli *client.Client, i
 			return fmt.Errorf("failed to marshal agent bid script to JSON: %w", err)
 		}
 		env = append(env, fmt.Sprintf("HOLT_AGENT_BID_SCRIPT=%s", bidScriptJSON))
+	}
+
+	// M5.1: Add HOLT_SYNCHRONIZE_CONFIG if synchronization is configured
+	if agent.Synchronize != nil {
+		synchronizeJSON, err := json.Marshal(agent.Synchronize)
+		if err != nil {
+			return fmt.Errorf("failed to marshal synchronize config to JSON: %w", err)
+		}
+		env = append(env, fmt.Sprintf("HOLT_SYNCHRONIZE_CONFIG=%s", synchronizeJSON))
 	}
 
 	// Add custom environment variables from config (with expansion)

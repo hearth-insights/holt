@@ -707,8 +707,23 @@ func getArtefactsByType(ctx context.Context, bbClient *blackboard.Client, artefa
 // Dockerfile generators (inline for simplicity)
 
 func getProducerAgentDockerfile() *testutil.StringReader {
-	dockerfile := `FROM alpine:3.18
-RUN apk add --no-cache bash
+	dockerfile := `# Build stage - compile pup
+FROM golang:1.24-alpine AS builder
+WORKDIR /build
+COPY go.mod go.sum ./
+RUN go mod download
+COPY cmd/pup ./cmd/pup
+COPY internal/pup ./internal/pup
+COPY internal/config ./internal/config
+COPY pkg/blackboard ./pkg/blackboard
+COPY pkg/version ./pkg/version
+RUN CGO_ENABLED=0 GOOS=linux go build -o pup ./cmd/pup
+
+# Runtime stage
+FROM alpine:3.18
+RUN apk add --no-cache bash ca-certificates
+WORKDIR /app
+COPY --from=builder /build/pup /app/pup
 COPY <<'EOF' /app/produce.sh
 #!/bin/bash
 set -e
@@ -722,14 +737,31 @@ cat <<RESULT >&3
 RESULT
 EOF
 RUN chmod +x /app/produce.sh
-WORKDIR /app
+RUN adduser -D -u 1000 agent
+USER agent
+ENTRYPOINT ["/app/pup"]
 `
 	return testutil.NewStringReader(dockerfile)
 }
 
 func getSynchronizerAgentDockerfile() *testutil.StringReader {
-	dockerfile := `FROM alpine:3.18
-RUN apk add --no-cache bash jq
+	dockerfile := `# Build stage - compile pup
+FROM golang:1.24-alpine AS builder
+WORKDIR /build
+COPY go.mod go.sum ./
+RUN go mod download
+COPY cmd/pup ./cmd/pup
+COPY internal/pup ./internal/pup
+COPY internal/config ./internal/config
+COPY pkg/blackboard ./pkg/blackboard
+COPY pkg/version ./pkg/version
+RUN CGO_ENABLED=0 GOOS=linux go build -o pup ./cmd/pup
+
+# Runtime stage
+FROM alpine:3.18
+RUN apk add --no-cache bash jq ca-certificates
+WORKDIR /app
+COPY --from=builder /build/pup /app/pup
 COPY <<'EOF' /app/synchronize.sh
 #!/bin/bash
 set -e
@@ -747,14 +779,31 @@ cat <<RESULT >&3
 RESULT
 EOF
 RUN chmod +x /app/synchronize.sh
-WORKDIR /app
+RUN adduser -D -u 1000 agent
+USER agent
+ENTRYPOINT ["/app/pup"]
 `
 	return testutil.NewStringReader(dockerfile)
 }
 
 func getMultiProducerDockerfile() *testutil.StringReader {
-	dockerfile := `FROM alpine:3.18
-RUN apk add --no-cache bash
+	dockerfile := `# Build stage - compile pup
+FROM golang:1.24-alpine AS builder
+WORKDIR /build
+COPY go.mod go.sum ./
+RUN go mod download
+COPY cmd/pup ./cmd/pup
+COPY internal/pup ./internal/pup
+COPY internal/config ./internal/config
+COPY pkg/blackboard ./pkg/blackboard
+COPY pkg/version ./pkg/version
+RUN CGO_ENABLED=0 GOOS=linux go build -o pup ./cmd/pup
+
+# Runtime stage
+FROM alpine:3.18
+RUN apk add --no-cache bash ca-certificates
+WORKDIR /app
+COPY --from=builder /build/pup /app/pup
 COPY <<'EOF' /app/produce-multi.sh
 #!/bin/bash
 set -e
@@ -768,14 +817,31 @@ RECORD
 done
 EOF
 RUN chmod +x /app/produce-multi.sh
-WORKDIR /app
+RUN adduser -D -u 1000 agent
+USER agent
+ENTRYPOINT ["/app/pup"]
 `
 	return testutil.NewStringReader(dockerfile)
 }
 
 func getAggregatorDockerfile() *testutil.StringReader {
-	dockerfile := `FROM alpine:3.18
-RUN apk add --no-cache bash jq
+	dockerfile := `# Build stage - compile pup
+FROM golang:1.24-alpine AS builder
+WORKDIR /build
+COPY go.mod go.sum ./
+RUN go mod download
+COPY cmd/pup ./cmd/pup
+COPY internal/pup ./internal/pup
+COPY internal/config ./internal/config
+COPY pkg/blackboard ./pkg/blackboard
+COPY pkg/version ./pkg/version
+RUN CGO_ENABLED=0 GOOS=linux go build -o pup ./cmd/pup
+
+# Runtime stage
+FROM alpine:3.18
+RUN apk add --no-cache bash jq ca-certificates
+WORKDIR /app
+COPY --from=builder /build/pup /app/pup
 COPY <<'EOF' /app/aggregate.sh
 #!/bin/bash
 set -e
@@ -787,14 +853,31 @@ cat <<RESULT >&3
 RESULT
 EOF
 RUN chmod +x /app/aggregate.sh
-WORKDIR /app
+RUN adduser -D -u 1000 agent
+USER agent
+ENTRYPOINT ["/app/pup"]
 `
 	return testutil.NewStringReader(dockerfile)
 }
 
 func getConcurrentSynchronizerDockerfile() *testutil.StringReader {
-	dockerfile := `FROM alpine:3.18
-RUN apk add --no-cache bash
+	dockerfile := `# Build stage - compile pup
+FROM golang:1.24-alpine AS builder
+WORKDIR /build
+COPY go.mod go.sum ./
+RUN go mod download
+COPY cmd/pup ./cmd/pup
+COPY internal/pup ./internal/pup
+COPY internal/config ./internal/config
+COPY pkg/blackboard ./pkg/blackboard
+COPY pkg/version ./pkg/version
+RUN CGO_ENABLED=0 GOOS=linux go build -o pup ./cmd/pup
+
+# Runtime stage
+FROM alpine:3.18
+RUN apk add --no-cache bash ca-certificates
+WORKDIR /app
+COPY --from=builder /build/pup /app/pup
 COPY <<'EOF' /app/sync-concurrent.sh
 #!/bin/bash
 set -e
@@ -806,7 +889,9 @@ cat <<RESULT >&3
 RESULT
 EOF
 RUN chmod +x /app/sync-concurrent.sh
-WORKDIR /app
+RUN adduser -D -u 1000 agent
+USER agent
+ENTRYPOINT ["/app/pup"]
 `
 	return testutil.NewStringReader(dockerfile)
 }

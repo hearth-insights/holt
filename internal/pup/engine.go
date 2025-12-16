@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/hearth-insights/holt/pkg/blackboard"
 )
@@ -21,9 +22,10 @@ import (
 // The engine coordinates these goroutines via a work queue channel and
 // handles graceful shutdown through context cancellation.
 type Engine struct {
-	config   *Config
-	bbClient *blackboard.Client
-	wg       sync.WaitGroup
+	config       *Config
+	bbClient     *blackboard.Client
+	wg           sync.WaitGroup
+	synchronizer *Synchronizer // M5.1: Optional synchronizer for fan-in coordination
 }
 
 // New creates a new agent pup engine with the provided configuration and blackboard client.
@@ -35,10 +37,18 @@ type Engine struct {
 //
 // Returns a configured Engine ready to start.
 func New(config *Config, bbClient *blackboard.Client) *Engine {
-	return &Engine{
+	engine := &Engine{
 		config:   config,
 		bbClient: bbClient,
 	}
+
+	// M5.1: Initialize synchronizer if synchronize config is present
+	if config.SynchronizeConfig != nil {
+		engine.synchronizer = NewSynchronizer(config.SynchronizeConfig, bbClient, config.AgentName)
+		log.Printf("[INFO] Synchronizer initialized for agent '%s'", config.AgentName)
+	}
+
+	return engine
 }
 
 // Start launches the agent pup's concurrent goroutines and blocks until context cancellation.
@@ -191,10 +201,15 @@ func (e *Engine) handleClaimEvent(ctx context.Context, claim *blackboard.Claim, 
 	}
 
 	// Determine bid type dynamically or from static config
-	bidType, err := e.determineBidType(ctx, targetArtefact)
+	bidType, err := e.determineBidType(ctx, claim, targetArtefact)
 	if err != nil {
 		log.Printf("[ERROR] Failed to determine bid type for claim %s: %v", claim.ID, err)
-		// Submit an "ignore" bid as a safe default on error
+		// M5.1: For synchronizer errors, create failure artefact (fatal configuration error)
+		if e.synchronizer != nil && strings.Contains(err.Error(), "synchronizer") {
+			e.createBiddingFailureArtefact(ctx, claim, fmt.Sprintf("Synchronizer configuration error: %v", err))
+			return
+		}
+		// For other errors, submit an "ignore" bid as a safe default
 		bidType = blackboard.BidTypeIgnore
 	}
 
@@ -203,18 +218,43 @@ func (e *Engine) handleClaimEvent(ctx context.Context, claim *blackboard.Claim, 
 	err = e.bbClient.SetBid(ctx, claim.ID, e.config.AgentName, bidType)
 	if err != nil {
 		log.Printf("[ERROR] Failed to submit bid for claim_id=%s: %v", claim.ID, err)
+
+		// Check if this is a fatal configuration error (invalid bid type)
+		// These indicate misconfiguration and will never succeed
+		if strings.Contains(err.Error(), "invalid bid type") || strings.Contains(err.Error(), "unknown bid type") {
+			log.Printf("[ERROR] FATAL: Bid submission failed due to configuration error - creating Failure artefact")
+			e.createBiddingFailureArtefact(ctx, claim, fmt.Sprintf("Fatal bidding error (configuration issue): %v", err))
+		}
+		// For transient errors (Redis connection, etc.), just log and continue
+		// The agent will get another chance on the next claim
 		return
 	}
 
 	log.Printf("[INFO] Submitted %s bid for claim_id=%s", bidType, claim.ID)
 }
 
-// determineBidType determines the bid type for a claim. If the agent config includes a
-// `bid_script`, it executes the script with the target artefact as JSON on stdin.
-// The script's stdout is read as the bid type. If no script is provided, or if the
-// script fails, it falls back to the static `bidding_strategy` from the config.
-func (e *Engine) determineBidType(ctx context.Context, targetArtefact *blackboard.Artefact) (blackboard.BidType, error) {
-	// Fallback to static bidding strategy if no bid script is defined.
+// determineBidType determines the bid type for a claim using one of three methods (priority order):
+// 1. M5.1: If synchronizer is configured, evaluate synchronization conditions
+// 2. M3.6: If bid_script is configured, execute it with target artefact as JSON on stdin
+// 3. M2.2: Fall back to static bidding_strategy from config
+func (e *Engine) determineBidType(ctx context.Context, claim *blackboard.Claim, targetArtefact *blackboard.Artefact) (blackboard.BidType, error) {
+	// M5.1: Check synchronizer first (highest priority)
+	if e.synchronizer != nil {
+		shouldBid, err := e.synchronizer.shouldBidOnClaim(ctx, claim)
+		if err != nil {
+			log.Printf("[ERROR] Synchronizer evaluation failed for claim %s: %v", claim.ID, err)
+			// Don't fall through - synchronizer errors should not silently ignore
+			return "", fmt.Errorf("synchronizer evaluation failed: %w", err)
+		}
+		if shouldBid {
+			log.Printf("[Synchronizer] Conditions met, bidding 'exclusive' on claim %s", claim.ID)
+			return blackboard.BidTypeExclusive, nil
+		}
+		log.Printf("[Synchronizer] Conditions not met, ignoring claim %s", claim.ID)
+		return blackboard.BidTypeIgnore, nil
+	}
+
+	// M3.6: Check bid script second
 	if len(e.config.BidScript) == 0 {
 		// M4.8: Check target types filtering
 		if len(e.config.BiddingStrategy.TargetTypes) > 0 {
@@ -404,4 +444,93 @@ func (e *Engine) workExecutor(ctx context.Context, workQueue chan *blackboard.Cl
 			e.executeWork(ctx, claim)
 		}
 	}
+}
+
+// createBiddingFailureArtefact creates a Failure artefact for fatal bidding errors.
+// These are configuration errors (invalid bid type, synchronizer misconfiguration) that
+// prevent the agent from ever successfully bidding on claims.
+//
+// Unlike execution failures (which have stdout/stderr/exitCode), bidding failures only
+// have a reason/error message since no tool was executed.
+//
+// M5.1: This ensures workflow failures are visible and don't leave claims stuck in limbo.
+func (e *Engine) createBiddingFailureArtefact(ctx context.Context, claim *blackboard.Claim, reason string) {
+	log.Printf("[INFO] Creating Failure artefact for bidding error: claim_id=%s reason=%s", claim.ID, reason)
+
+	// Prepare failure data (no stdout/stderr/exitCode for bidding failures)
+	failureData := &FailureData{
+		Reason:   reason,
+		ExitCode: -1, // -1 indicates non-execution failure
+		Stdout:   "",
+		Stderr:   "",
+		Error:    reason,
+	}
+
+	payloadContent, err := MarshalFailurePayload(failureData)
+	if err != nil {
+		log.Printf("[ERROR] Failed to marshal failure payload: %v", err)
+		payloadContent = fmt.Sprintf(`{"reason": "Failed to marshal failure data: %v"}`, err)
+	}
+
+	// Create V2 VerifiableArtefact
+	logicalThreadID := blackboard.NewID()
+
+	v2Artefact := &blackboard.VerifiableArtefact{
+		Header: blackboard.ArtefactHeader{
+			ParentHashes:    []string{claim.ArtefactID},
+			LogicalThreadID: logicalThreadID,
+			Version:         1,
+			CreatedAtMs:     time.Now().UnixMilli(),
+			ProducedByRole:  e.config.AgentName,
+			StructuralType:  blackboard.StructuralTypeFailure,
+			Type:            "BiddingConfigurationFailure",
+			ClaimID:         claim.ID,
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: payloadContent,
+		},
+	}
+
+	// Compute hash
+	hash, err := blackboard.ComputeArtefactHash(v2Artefact)
+	if err != nil {
+		log.Printf("[ERROR] Failed to compute hash for bidding Failure artefact: %v", err)
+		return
+	}
+	v2Artefact.ID = hash
+
+	// Write to blackboard
+	if err := e.bbClient.WriteVerifiableArtefact(ctx, v2Artefact); err != nil {
+		log.Printf("[ERROR] Failed to create bidding Failure artefact: %v", err)
+		return
+	}
+
+	// Create V1 wrapper for event publishing/thread tracking
+	artefact := &blackboard.Artefact{
+		ID:              v2Artefact.ID,
+		LogicalID:       v2Artefact.Header.LogicalThreadID,
+		Version:         v2Artefact.Header.Version,
+		StructuralType:  v2Artefact.Header.StructuralType,
+		Type:            v2Artefact.Header.Type,
+		Payload:         v2Artefact.Payload.Content,
+		SourceArtefacts: v2Artefact.Header.ParentHashes,
+		ProducedByRole:  v2Artefact.Header.ProducedByRole,
+		CreatedAtMs:     v2Artefact.Header.CreatedAtMs,
+		ClaimID:         v2Artefact.Header.ClaimID,
+	}
+
+	// Add to thread tracking
+	if err := e.bbClient.AddVersionToThread(ctx, logicalThreadID, v2Artefact.ID, 1); err != nil {
+		log.Printf("[WARN] Failed to add bidding Failure artefact to thread: %v", err)
+	}
+
+	// Publish event
+	artefactJSON, _ := json.Marshal(artefact)
+	channel := fmt.Sprintf("holt:%s:artefact_events", e.config.InstanceName)
+	if err := e.bbClient.PublishRaw(ctx, channel, string(artefactJSON)); err != nil {
+		log.Printf("[ERROR] Failed to publish bidding failure artefact event: %v", err)
+		return
+	}
+
+	log.Printf("[INFO] Bidding Failure artefact created: artefact_id=%s type=%s", artefact.ID, artefact.Type)
 }

@@ -249,9 +249,14 @@ func (e *Engine) processArtefact(ctx context.Context, artefact *blackboard.Artef
 // M3.3: Also handles pending_assignment claims (feedback claims).
 // M4.1: Also handles Question artefacts (triggers feedback loop).
 func (e *Engine) processArtefactForPhases(ctx context.Context, artefact *blackboard.Artefact) {
-	// Skip non-phase-relevant artefacts
-	if artefact.StructuralType == blackboard.StructuralTypeTerminal ||
-		artefact.StructuralType == blackboard.StructuralTypeFailure {
+	// Handle Terminal artefacts specially - they signal claim completion
+	if artefact.StructuralType == blackboard.StructuralTypeTerminal {
+		e.handleTerminalArtefact(ctx, artefact)
+		return
+	}
+
+	// Skip Failure artefacts
+	if artefact.StructuralType == blackboard.StructuralTypeFailure {
 		return
 	}
 
@@ -536,4 +541,136 @@ func (e *Engine) initializeSystemSpine(ctx context.Context) error {
 	log.Printf("[Orchestrator] System Spine initialized - active manifest: %s", activeManifestID[:16]+"...")
 
 	return nil
+}
+
+// handleTerminalArtefact processes Terminal artefacts that signal claim completion.
+// Terminal artefacts are created by pups after all work artefacts have been produced,
+// ensuring multi-artefact claims complete correctly.
+func (e *Engine) handleTerminalArtefact(ctx context.Context, artefact *blackboard.Artefact) {
+	if artefact.ClaimID == "" {
+		log.Printf("[Orchestrator] Terminal artefact %s has no ClaimID, ignoring", artefact.ID)
+		return
+	}
+
+	claim, err := e.client.GetClaim(ctx, artefact.ClaimID)
+	if err != nil {
+		log.Printf("[Orchestrator] Error fetching claim %s for Terminal artefact: %v", artefact.ClaimID, err)
+		return
+	}
+
+	// Verify the Terminal artefact is from a granted agent
+	isGranted := false
+
+	// Check exclusive grant
+	if claim.GrantedExclusiveAgent == artefact.ProducedByRole {
+		isGranted = true
+	}
+
+	// Check review grants
+	for _, agent := range claim.GrantedReviewAgents {
+		if agent == artefact.ProducedByRole {
+			isGranted = true
+			break
+		}
+	}
+
+	// Check parallel grants
+	for _, agent := range claim.GrantedParallelAgents {
+		if agent == artefact.ProducedByRole {
+			isGranted = true
+			break
+		}
+	}
+
+	if !isGranted {
+		log.Printf("[Orchestrator] Terminal artefact from %s not from any granted agent for claim %s",
+			artefact.ProducedByRole, claim.ID)
+		return
+	}
+
+	log.Printf("[Orchestrator] Terminal artefact received from %s, processing claim %s", artefact.ProducedByRole, claim.ID)
+
+	// Check if any sibling artefacts (from this claim) are Question or Failure
+	// If so, terminate the claim instead of completing it
+	shouldTerminate, terminationReason := e.checkForTerminationSiblings(ctx, claim, artefact)
+
+	if shouldTerminate {
+		// Terminate claim (Question or Failure was produced)
+		claim.Status = blackboard.ClaimStatusTerminated
+		claim.TerminationReason = terminationReason
+
+		if err := e.client.UpdateClaim(ctx, claim); err != nil {
+			log.Printf("[Orchestrator] Error updating claim %s to terminated: %v", claim.ID, err)
+			return
+		}
+
+		e.logEvent("claim_terminated", map[string]interface{}{
+			"claim_id":              claim.ID,
+			"terminal_artefact_id":  artefact.ID,
+			"producer":              artefact.ProducedByRole,
+			"termination_reason":    terminationReason,
+		})
+
+		log.Printf("[Orchestrator] Claim %s terminated via Terminal artefact: %s", claim.ID, terminationReason)
+	} else {
+		// Complete claim (normal success)
+		claim.Status = blackboard.ClaimStatusComplete
+
+		if err := e.client.UpdateClaim(ctx, claim); err != nil {
+			log.Printf("[Orchestrator] Error updating claim %s to complete: %v", claim.ID, err)
+			return
+		}
+
+		e.logEvent("claim_complete", map[string]interface{}{
+			"claim_id":             claim.ID,
+			"terminal_artefact_id": artefact.ID,
+			"producer":             artefact.ProducedByRole,
+		})
+
+		log.Printf("[Orchestrator] Claim %s marked complete via Terminal artefact", claim.ID)
+	}
+
+	// Remove from phase tracking
+	delete(e.phaseStates, claim.ID)
+}
+
+// checkForTerminationSiblings checks if any artefacts produced for this claim are
+// Question or Failure types. If so, the claim should be terminated instead of completed.
+// Returns (shouldTerminate, terminationReason).
+func (e *Engine) checkForTerminationSiblings(ctx context.Context, claim *blackboard.Claim, terminalArtefact *blackboard.Artefact) (bool, string) {
+	// Scan all artefacts to find those with this claim ID
+	artefactIDs, err := e.client.ScanArtefacts(ctx, "")
+	if err != nil {
+		log.Printf("[Orchestrator] Error scanning artefacts for claim %s: %v", claim.ID, err)
+		// Default to completion if we can't scan
+		return false, ""
+	}
+
+	for _, artefactID := range artefactIDs {
+		// Skip the terminal artefact itself
+		if artefactID == terminalArtefact.ID {
+			continue
+		}
+
+		art, err := e.client.GetArtefact(ctx, artefactID)
+		if err != nil {
+			continue
+		}
+
+		// Check if this artefact belongs to this claim
+		if art.ClaimID != claim.ID {
+			continue
+		}
+
+		// Check if it's a Question or Failure
+		switch art.StructuralType {
+		case blackboard.StructuralTypeQuestion:
+			return true, fmt.Sprintf("Agent produced Question artefact: %s", art.ID)
+		case blackboard.StructuralTypeFailure:
+			return true, fmt.Sprintf("Agent produced Failure artefact: %s (type: %s)", art.ID, art.Type)
+		}
+	}
+
+	// No Question/Failure siblings found - normal completion
+	return false, ""
 }

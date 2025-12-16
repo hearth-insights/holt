@@ -23,7 +23,6 @@ This file resides in the root of your project (or the directory where you run `h
 version: "1.0"
 agents:
   git-agent:
-
     image: "example-git-agent:latest"
     command: ["/app/run.sh"]
     bidding_strategy:
@@ -31,6 +30,20 @@ agents:
       target_types: ["GoalDefined"]
     workspace:
       mode: rw
+
+  # M5.1: Synchronizer agent example (waits for multiple prerequisites)
+  deployer:
+    image: "example-deployer:latest"
+    command: ["/app/deploy.sh"]
+    synchronize:
+      ancestor_type: "CodeCommit"
+      wait_for:
+        - type: "TestResult"
+        - type: "LintResult"
+        - type: "SecurityScan"
+    workspace:
+      mode: ro
+
 services:
   redis:
     image: redis:7-alpine
@@ -41,6 +54,7 @@ services:
     *   **image**: The Docker image to use.
     *   **command**: The command to run inside the container.
     *   **workspace**: Configuration for the shared workspace. `mode: rw` means read-write access.
+    *   **synchronize** (M5.1+): Optional synchronizer configuration for fan-in coordination. Replaces `bidding_strategy` and `bid_script`. See [Synchronizer Agents](#4-synchronizer-agents-m51) below.
 *   **services**: A map of service names (like Redis) to their configuration.
 
 ### Health Checks
@@ -92,6 +106,157 @@ USER agent
 # Set pup as the entrypoint
 ENTRYPOINT ["pup"]
 ```
+
+## 4. Synchronizer Agents (M5.1+)
+
+**New in Phase 5:** Synchronizer agents use declarative fan-in coordination to wait for multiple parallel workflow branches before executing.
+
+### When to Use Synchronizers
+
+Use synchronizers when you need to:
+- **Merge parallel branches**: Deploy only after tests + linting + security scans complete
+- **Aggregate dynamic results**: Collect N sharded outputs (N unknown at design time)
+- **Coordinate without race conditions**: Atomic coordination with deduplication locks
+
+### Configuration
+
+⚠️ **CRITICAL: Mutual Exclusivity**
+
+The `synchronize` block is **MUTUALLY EXCLUSIVE** with `bidding_strategy` and `bid_script`.
+
+**You cannot use both.** Choose one:
+- **Standard agent**: Use `bidding_strategy` OR `bid_script`
+- **Synchronizer agent**: Use `synchronize` block
+
+**Example configuration:**
+
+```yaml
+agents:
+  deployer:
+    image: "deployer:latest"
+    command: ["/app/deploy.sh"]
+
+    # Synchronize block (replaces bidding_strategy)
+    synchronize:
+      # Required: Common ancestor artefact type
+      ancestor_type: "CodeCommit"
+
+      # Required: Conditions to wait for
+      wait_for:
+        - type: "TestResult"      # Named pattern: exactly 1 required
+        - type: "LintResult"      # Named pattern: exactly 1 required
+        - type: "SecurityScan"    # Named pattern: exactly 1 required
+
+      # Optional: Limit descendant search depth (0 = unlimited)
+      max_depth: 10
+
+    workspace:
+      mode: ro
+```
+
+### Synchronization Patterns
+
+**Named Pattern** - Wait for specific, known types:
+```yaml
+wait_for:
+  - type: "TestResult"
+  - type: "LintResult"
+  - type: "SecurityScan"
+```
+
+**Producer-Declared Pattern** - Wait for N artefacts (N from metadata):
+> **Tip**: See [Agent Interface](./agent_interface.md#multiple-artefacts-fan-out) for how to produce multiple artefacts (Fan-Out) from a single agent.
+
+```yaml
+wait_for:
+  - type: "ProcessedRecord"
+    count_from_metadata: "batch_size"
+```
+
+### Input Format
+
+Synchronizers receive additional fields in stdin:
+
+```json
+{
+  "claim_type": "exclusive",
+  "target_artefact": { /* the final trigger */ },
+  "context_chain": [ /* historical context */ ],
+
+  "ancestor_artefact": { /* the common ancestor */ },
+  "descendant_artefacts": [ /* ALL matched descendants */ ]
+}
+```
+
+### Example: CI/CD Deployer
+
+**holt.yaml:**
+```yaml
+agents:
+  deployer:
+    image: "deployer:latest"
+    command: ["/app/deploy.sh"]
+    synchronize:
+      ancestor_type: "CodeCommit"
+      wait_for:
+        - type: "TestResult"
+        - type: "LintResult"
+        - type: "SecurityScan"
+```
+
+**deploy.sh:**
+```bash
+#!/bin/sh
+set -e
+
+input=$(cat)
+
+# Extract ancestor (CodeCommit)
+commit_hash=$(echo "$input" | jq -r '.ancestor_artefact.payload')
+
+# Extract descendants (prerequisites)
+descendants=$(echo "$input" | jq -r '.descendant_artefacts')
+
+test_result=$(echo "$descendants" | jq -r '.[] | select(.type=="TestResult") | .payload')
+lint_result=$(echo "$descendants" | jq -r '.[] | select(.type=="LintResult") | .payload')
+scan_result=$(echo "$descendants" | jq -r '.[] | select(.type=="SecurityScan") | .payload')
+
+echo "Deploying commit: $commit_hash" >&2
+echo "  Tests: $test_result" >&2
+echo "  Lint: $lint_result" >&2
+echo "  Security: $scan_result" >&2
+
+# Verify all passed
+if echo "$test_result $lint_result $scan_result" | grep -q "failed"; then
+  cat <<EOF >&3
+{
+  "structural_type": "Failure",
+  "artefact_payload": "Prerequisites failed",
+  "summary": "Deployment aborted"
+}
+EOF
+  exit 0
+fi
+
+# Output success
+deployment_id="deploy-$(date +%s)"
+cat <<EOF >&3
+{
+  "artefact_type": "DeploymentComplete",
+  "artefact_payload": "$deployment_id",
+  "summary": "Deployed commit $commit_hash"
+}
+EOF
+```
+
+### Learn More
+
+For comprehensive documentation on fan-in synchronization:
+- **Full Guide**: See the main Holt repository's `docs/guides/fan-in-synchronization.md`
+- **Example Agents**: `agents/example-deployer-agent/` and `agents/example-batch-aggregator-agent/`
+- **Design Document**: `design/features/phase-5-complex-coordination/M5.1-fan-in.md`
+
+---
 
 ## Next Step
 *   **[Agent Interface](./agent_interface.md)**: Learn how to write the `bid.sh` and `run.sh` scripts.

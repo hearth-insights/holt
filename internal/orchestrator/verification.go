@@ -320,26 +320,28 @@ func (e *Engine) verifyArtefact(ctx context.Context, artefact *blackboard.Verifi
 	}
 
 	// Verify claim status (must be Active or Granted - specific status values depend on claim lifecycle)
-	// In Holt's current implementation, we check for terminal states
-	if claim.Status == blackboard.ClaimStatusComplete || claim.Status == blackboard.ClaimStatusTerminated {
-		// SECURITY EVENT: Claim is not active
-		alert := &blackboard.SecurityAlert{
-			Type:               "unauthorized_topology",
-			TimestampMs:        time.Now().UnixMilli(),
-			ArtefactID:         artefact.ID,
-			AgentRole:          artefact.Header.ProducedByRole,
-			ClaimIDProvided:    artefact.Header.ClaimID,
-			ClaimStatus:        string(claim.Status),
-			ViolationType:      "invalid_claim_reference",
-			OrchestratorAction: "global_lockdown",
-		}
+	// EXCEPTION: Terminal artefacts can reference any claim status (they signal completion)
+	if artefact.Header.StructuralType != blackboard.StructuralTypeTerminal {
+		if claim.Status == blackboard.ClaimStatusComplete || claim.Status == blackboard.ClaimStatusTerminated {
+			// SECURITY EVENT: Claim is not active
+			alert := &blackboard.SecurityAlert{
+				Type:               "unauthorized_topology",
+				TimestampMs:        time.Now().UnixMilli(),
+				ArtefactID:         artefact.ID,
+				AgentRole:          artefact.Header.ProducedByRole,
+				ClaimIDProvided:    artefact.Header.ClaimID,
+				ClaimStatus:        string(claim.Status),
+				ViolationType:      "invalid_claim_reference",
+				OrchestratorAction: "global_lockdown",
+			}
 
-		if lockdownErr := e.client.TriggerGlobalLockdown(ctx, alert); lockdownErr != nil {
-			log.Printf("[Orchestrator] CRITICAL: Failed to trigger lockdown for topology violation: %v", lockdownErr)
-		}
+			if lockdownErr := e.client.TriggerGlobalLockdown(ctx, alert); lockdownErr != nil {
+				log.Printf("[Orchestrator] CRITICAL: Failed to trigger lockdown for topology violation: %v", lockdownErr)
+			}
 
-		return fmt.Errorf("topology violation: ClaimID references non-active claim: %s (status: %s, artefact %s)",
-			artefact.Header.ClaimID, claim.Status, artefact.ID)
+			return fmt.Errorf("topology violation: ClaimID references non-active claim: %s (status: %s, artefact %s)",
+				artefact.Header.ClaimID, claim.Status, artefact.ID)
+		}
 	}
 
 	// Rule 4.5: Review Claim Enforcement (M3.3)

@@ -124,13 +124,13 @@ type HealthCheckConfig struct {
 // Enables declarative waiting for multiple prerequisite artefacts from parallel workflow branches.
 type SynchronizeConfig struct {
 	// AncestorType is the artefact type to find as the common ancestor (e.g., "CodeCommit")
-	AncestorType string `yaml:"ancestor_type"` // Required
+	AncestorType string `yaml:"ancestor_type" json:"ancestor_type"` // Required
 
 	// WaitFor specifies the prerequisite artefacts to wait for
-	WaitFor []WaitCondition `yaml:"wait_for"` // Required: at least one condition
+	WaitFor []WaitCondition `yaml:"wait_for" json:"wait_for"` // Required: at least one condition
 
 	// MaxDepth limits descendant traversal depth (0 = unlimited)
-	MaxDepth int `yaml:"max_depth,omitempty"` // Optional: default 0 (unlimited)
+	MaxDepth int `yaml:"max_depth,omitempty" json:"max_depth,omitempty"` // Optional: default 0 (unlimited)
 }
 
 // WaitCondition specifies a single prerequisite artefact to wait for (M5.1)
@@ -139,11 +139,11 @@ type SynchronizeConfig struct {
 //  2. Producer-Declared pattern: Wait for N artefacts where N is from metadata
 type WaitCondition struct {
 	// Type is the artefact type to wait for (e.g., "TestResult")
-	Type string `yaml:"type"` // Required
+	Type string `yaml:"type" json:"type"` // Required
 
 	// CountFromMetadata is the metadata key containing the expected count (Producer-Declared pattern)
 	// If empty, waits for exactly 1 artefact (Named pattern)
-	CountFromMetadata string `yaml:"count_from_metadata,omitempty"` // Optional
+	CountFromMetadata string `yaml:"count_from_metadata,omitempty" json:"count_from_metadata,omitempty"` // Optional
 }
 
 // ServicesConfig specifies service-level overrides
