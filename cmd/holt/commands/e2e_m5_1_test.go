@@ -73,6 +73,7 @@ agents:
     command: ["/app/produce.sh"]
     bidding_strategy:
       type: "exclusive"
+      target_types: ["CodeCommit"]
   Synchronizer:
     image: "m5-1-synchronizer:latest"
     command: ["/app/synchronize.sh"]
@@ -114,12 +115,15 @@ services:
 	bbClient := env.BBClient
 	t.Log("✓ Connected to blackboard")
 
-	// Step 1: Create CodeCommit ancestor
+	// M4.7: Create proper workflow spine (Manifest → Goal)
+	_, goalID := env.CreateWorkflowSpine(ctx, "Build and test the application")
+
+	// Step 1: Create CodeCommit ancestor (as continuation of goal)
 	t.Log("Step 1: Creating CodeCommit ancestor...")
 	codeCommit := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
-		ParentHashes:    []string{},
+		ParentHashes:    []string{goalID},
 		LogicalThreadID: blackboard.NewID(),
-		Version:         1,
+		Version:         2, // V2+ continuation of workflow
 		Type:            "CodeCommit",
 	}, "commit-abc123")
 	t.Logf("✓ CodeCommit created: %s", codeCommit.ID)
@@ -131,17 +135,17 @@ services:
 	t.Log("Step 2: Creating partial prerequisites...")
 
 	testResult := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
-		ParentHashes:    []string{codeCommit.ID},
+		ParentHashes:    []string{codeCommit.ID}, // Child of CodeCommit
 		LogicalThreadID: blackboard.NewID(),
-		Version:         1,
+		Version:         2, // V2+ continuation
 		Type:            "TestResult",
 	}, "tests-passed")
 	t.Logf("✓ TestResult created: %s", testResult.ID)
 
 	lintResult := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
-		ParentHashes:    []string{codeCommit.ID},
+		ParentHashes:    []string{codeCommit.ID}, // Child of CodeCommit
 		LogicalThreadID: blackboard.NewID(),
-		Version:         1,
+		Version:         2, // V2+ continuation
 		Type:            "LintResult",
 	}, "lint-clean")
 	t.Logf("✓ LintResult created: %s", lintResult.ID)
@@ -159,9 +163,9 @@ services:
 	t.Log("Step 3: Creating final prerequisite (SecurityScan)...")
 
 	securityScan := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
-		ParentHashes:    []string{codeCommit.ID},
+		ParentHashes:    []string{codeCommit.ID}, // Child of CodeCommit
 		LogicalThreadID: blackboard.NewID(),
-		Version:         1,
+		Version:         2, // V2+ continuation
 		Type:            "SecurityScan",
 	}, "no-vulnerabilities")
 	t.Logf("✓ SecurityScan created: %s", securityScan.ID)
@@ -234,6 +238,7 @@ agents:
     command: ["/app/produce-multi.sh"]
     bidding_strategy:
       type: "exclusive"
+      target_types: ["DataBatch"]
   Aggregator:
     image: "m5-1-aggregator:latest"
     command: ["/app/aggregate.sh"]
@@ -345,9 +350,11 @@ orchestrator:
 agents:
   ConcurrentSync:
     image: "m5-1-concurrent-sync:latest"
-    command: ["/app/sync-concurrent.sh"]
+    command: ["/app/pup"]
     mode: "controller"
     worker:
+      image: "m5-1-concurrent-sync:latest"
+      command: ["/app/sync-concurrent.sh"]
       max_concurrent: 2  # Multiple workers for race condition
     synchronize:
       ancestor_type: "CodeCommit"
@@ -395,7 +402,7 @@ services:
 	testResult := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
 		ParentHashes:    []string{codeCommit.ID},
 		LogicalThreadID: blackboard.NewID(),
-		Version:         1,
+		Version:         2, // M4.7: Version>1 to bypass root manifest validation
 		Type:            "TestResult",
 	}, "passed")
 
@@ -403,7 +410,7 @@ services:
 	lintResult := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
 		ParentHashes:    []string{codeCommit.ID},
 		LogicalThreadID: blackboard.NewID(),
-		Version:         1,
+		Version:         2, // M4.7: Version>1 to bypass root manifest validation
 		Type:            "LintResult",
 	}, "clean")
 
@@ -508,7 +515,7 @@ services:
 	buildResult := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
 		ParentHashes:    []string{codeCommit.ID},
 		LogicalThreadID: blackboard.NewID(),
-		Version:         1,
+		Version:         2, // M4.7: Version>1 to bypass root manifest validation
 		Type:            "BuildResult",
 	}, "build-ok")
 	t.Logf("✓ BuildResult: %s", buildResult.ID)
@@ -517,7 +524,7 @@ services:
 	testResult := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
 		ParentHashes:    []string{buildResult.ID}, // Child of BuildResult, not CodeCommit!
 		LogicalThreadID: blackboard.NewID(),
-		Version:         1,
+		Version:         2, // M4.7: Version>1 to bypass root manifest validation
 		Type:            "TestResult",
 	}, "tests-passed")
 	t.Logf("✓ TestResult (grandchild): %s", testResult.ID)
@@ -532,7 +539,7 @@ services:
 	lintResult := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
 		ParentHashes:    []string{codeCommit.ID},
 		LogicalThreadID: blackboard.NewID(),
-		Version:         1,
+		Version:         2, // M4.7: Version>1 to bypass root manifest validation
 		Type:            "LintResult",
 	}, "lint-clean")
 	t.Logf("✓ LintResult: %s", lintResult.ID)
@@ -630,7 +637,7 @@ services:
 	buildResult := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
 		ParentHashes:    []string{codeCommit.ID},
 		LogicalThreadID: blackboard.NewID(),
-		Version:         1,
+		Version:         2, // M4.7: Version>1 to bypass root manifest validation
 		Type:            "BuildResult",
 	}, "build-ok")
 	t.Logf("✓ BuildResult: %s", buildResult.ID)
@@ -639,7 +646,7 @@ services:
 	testResult := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
 		ParentHashes:    []string{buildResult.ID},
 		LogicalThreadID: blackboard.NewID(),
-		Version:         1,
+		Version:         2, // M4.7: Version>1 to bypass root manifest validation
 		Type:            "TestResult",
 	}, "tests-passed")
 	t.Logf("✓ TestResult (grandchild): %s", testResult.ID)
@@ -648,7 +655,7 @@ services:
 	lintResult := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
 		ParentHashes:    []string{codeCommit.ID},
 		LogicalThreadID: blackboard.NewID(),
-		Version:         1,
+		Version:         2, // M4.7: Version>1 to bypass root manifest validation
 		Type:            "LintResult",
 	}, "lint-clean")
 	t.Logf("✓ LintResult: %s", lintResult.ID)

@@ -227,6 +227,55 @@ test-failed:
 	return env
 }
 
+// CreateTestManifest creates a minimal SystemManifest for E2E tests.
+// This allows test artefacts to be properly anchored and pass M4.7 validation.
+// Returns the manifest artefact ID (hash) for use as parent in test artefacts.
+func (env *E2EEnvironment) CreateTestManifest(ctx context.Context) string {
+	manifestID := blackboard.NewID()
+
+	// Create minimal system identity
+	identity := &blackboard.SystemIdentity{
+		Strategy:     "local",
+		ConfigHash:   "test-config-hash",
+		GitCommit:    "test-git-hash",
+		ComputedAtMs: time.Now().UnixMilli(),
+	}
+
+	identityJSON, err := json.Marshal(identity)
+	require.NoError(env.T, err, "Failed to marshal test identity")
+
+	manifest := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
+		ParentHashes:    []string{}, // Manifests have no parents
+		LogicalThreadID: manifestID, // Manifests use their ID as thread
+		Version:         1,
+		StructuralType:  blackboard.StructuralTypeSystemManifest,
+		Type:            "SystemConfig",
+		ProducedByRole:  "orchestrator",
+		CreatedAtMs:     time.Now().UnixMilli(),
+	}, string(identityJSON))
+
+	env.T.Logf("✓ Test SystemManifest created: %s", manifest.ID[:16]+"...")
+	return manifest.ID
+}
+
+// CreateWorkflowSpine creates a minimal workflow spine (Manifest → Goal) for E2E tests.
+// This provides a proper M4.7-compliant starting point for test workflows.
+// Returns (manifestID, goalID) for use as anchors in test artefacts.
+func (env *E2EEnvironment) CreateWorkflowSpine(ctx context.Context, goalPayload string) (string, string) {
+	manifestID := env.CreateTestManifest(ctx)
+
+	goalThreadID := blackboard.NewID()
+	goalDefined := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
+		ParentHashes:    []string{manifestID},
+		LogicalThreadID: goalThreadID,
+		Version:         1,
+		Type:            "GoalDefined",
+	}, goalPayload)
+
+	env.T.Logf("✓ Workflow spine created: Manifest → GoalDefined")
+	return manifestID, goalDefined.ID
+}
+
 // CreateVerifiableArtefact helper creates a V2-compliant artefact (hashed ID) and writes it to the blackboard.
 // It handles the hashing, V1 conversion, and error checking to reduce boilerplate in E2E tests.
 func (env *E2EEnvironment) CreateVerifiableArtefact(ctx context.Context, header blackboard.ArtefactHeader, payload string) *blackboard.Artefact {
