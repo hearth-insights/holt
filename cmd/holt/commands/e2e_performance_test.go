@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/hearth-insights/holt/internal/instance"
 	"github.com/hearth-insights/holt/internal/testutil"
 	"github.com/hearth-insights/holt/pkg/blackboard"
-	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )
@@ -197,6 +197,7 @@ func TestPerformance_ContextAssembly(t *testing.T) {
 	artefactIDs := make([]string, 10)
 
 	for i := 0; i < 10; i++ {
+
 		artefact := &blackboard.Artefact{
 			ID:              uuid.NewString(),
 			LogicalID:       uuid.NewString(),
@@ -209,7 +210,7 @@ func TestPerformance_ContextAssembly(t *testing.T) {
 		}
 
 		if i > 0 {
-			artefact.SourceArtefacts = []string{previousArtefactID}
+			artefact.Header.ParentHashes = []string{previousArtefactID}
 		}
 
 		// Store artefact on blackboard
@@ -246,7 +247,7 @@ func TestPerformance_ContextAssembly(t *testing.T) {
 		require.NoError(t, err)
 
 		// Add source artefacts to queue
-		for _, sourceID := range artefact.SourceArtefacts {
+		for _, sourceID := range artefact.Header.ParentHashes {
 			if !visited[sourceID] {
 				queue = append(queue, sourceID)
 			}
@@ -344,7 +345,7 @@ services:
 	t.Logf("✓ Git commit operation completed in: %v", duration)
 
 	// Verify commit exists
-	env.VerifyGitCommitExists(codeCommitArtefact.Payload)
+	env.VerifyGitCommitExists(codeCommitArtefact.Payload.Content)
 	env.VerifyFileExists("perf-test.txt")
 
 	// Assert threshold (includes agent execution + file creation + git add + git commit)
@@ -441,7 +442,7 @@ services:
 	t.Logf("✓ Full workflow completed in: %v", totalDuration)
 
 	// Verify result
-	env.VerifyGitCommitExists(codeCommitArtefact.Payload)
+	env.VerifyGitCommitExists(codeCommitArtefact.Payload.Content)
 	env.VerifyFileExists("e2e-perf.txt")
 
 	// Log performance breakdown

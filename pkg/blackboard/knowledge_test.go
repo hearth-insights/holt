@@ -26,18 +26,18 @@ func TestCreateOrVersionKnowledge_FirstCreation(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.NotNil(t, knowledge)
-	assert.Equal(t, "test-docs", knowledge.Type)
-	assert.Equal(t, "This is the documentation content", knowledge.Payload)
-	assert.Equal(t, 1, knowledge.Version)
-	assert.Equal(t, StructuralTypeKnowledge, knowledge.StructuralType)
-	assert.Equal(t, []string{"coder*", "reviewer"}, knowledge.ContextForRoles)
-	assert.Equal(t, "test-agent", knowledge.ProducedByRole)
+	assert.Equal(t, "test-docs", knowledge.Header.Type)
+	assert.Equal(t, "This is the documentation content", knowledge.Payload.Content)
+	assert.Equal(t, 1, knowledge.Header.Version)
+	assert.Equal(t, StructuralTypeKnowledge, knowledge.Header.StructuralType)
+	assert.Equal(t, []string{"coder*", "reviewer"}, knowledge.Header.ContextForRoles)
+	assert.Equal(t, "test-agent", knowledge.Header.ProducedByRole)
 
 	// Verify it's in the knowledge_index
 	indexKey := KnowledgeIndexKey("test-instance")
 	logicalID, err := client.rdb.HGet(ctx, indexKey, "test-docs").Result()
 	require.NoError(t, err)
-	assert.Equal(t, knowledge.LogicalID, logicalID)
+	assert.Equal(t, knowledge.Header.LogicalThreadID, logicalID)
 
 	// Verify it's in thread_context
 	threadContextKey := ThreadContextKey("test-instance", "thread-123")
@@ -61,7 +61,7 @@ func TestCreateOrVersionKnowledge_Versioning(t *testing.T) {
 		"agent-1",
 	)
 	require.NoError(t, err)
-	assert.Equal(t, 1, v1.Version)
+	assert.Equal(t, 1, v1.Header.Version)
 
 	// Create v2 (same knowledge_name)
 	v2, err := client.CreateOrVersionKnowledge(
@@ -73,9 +73,9 @@ func TestCreateOrVersionKnowledge_Versioning(t *testing.T) {
 		"agent-1",
 	)
 	require.NoError(t, err)
-	assert.Equal(t, 2, v2.Version)
-	assert.Equal(t, v1.LogicalID, v2.LogicalID) // Same logical thread
-	assert.NotEqual(t, v1.ID, v2.ID)             // Different artefact IDs
+	assert.Equal(t, 2, v2.Header.Version)
+	assert.Equal(t, v1.Header.LogicalThreadID, v2.Header.LogicalThreadID) // Same logical thread
+	assert.NotEqual(t, v1.ID, v2.ID)                                      // Different artefact IDs
 
 	// Create v3
 	v3, err := client.CreateOrVersionKnowledge(
@@ -87,17 +87,17 @@ func TestCreateOrVersionKnowledge_Versioning(t *testing.T) {
 		"agent-2",
 	)
 	require.NoError(t, err)
-	assert.Equal(t, 3, v3.Version)
-	assert.Equal(t, v1.LogicalID, v3.LogicalID)
+	assert.Equal(t, 3, v3.Header.Version)
+	assert.Equal(t, v1.Header.LogicalThreadID, v3.Header.LogicalThreadID)
 
 	// Verify knowledge_index still points to same logical_id
 	indexKey := KnowledgeIndexKey("test-instance")
 	logicalID, err := client.rdb.HGet(ctx, indexKey, "sdk-docs").Result()
 	require.NoError(t, err)
-	assert.Equal(t, v1.LogicalID, logicalID)
+	assert.Equal(t, v1.Header.LogicalThreadID, logicalID)
 
 	// Verify thread tracking
-	threadKey := ThreadKey("test-instance", v1.LogicalID)
+	threadKey := ThreadKey("test-instance", v1.Header.LogicalThreadID)
 	members, err := client.rdb.ZRange(ctx, threadKey, 0, -1).Result()
 	require.NoError(t, err)
 	assert.Len(t, members, 3)
@@ -121,7 +121,7 @@ func TestCreateOrVersionKnowledge_DefaultTargetRoles(t *testing.T) {
 	)
 
 	require.NoError(t, err)
-	assert.Equal(t, []string{"*"}, knowledge.ContextForRoles)
+	assert.Equal(t, []string{"*"}, knowledge.Header.ContextForRoles)
 }
 
 // TestCreateOrVersionKnowledge_GlobalThread tests manually provisioned knowledge (empty threadLogicalID)
@@ -188,15 +188,15 @@ func TestCreateOrVersionKnowledge_RaceCondition(t *testing.T) {
 	}
 
 	// All should have same logical_id (from knowledge_index)
-	firstLogicalID := results[0].LogicalID
+	firstLogicalID := results[0].Header.LogicalThreadID
 	for i, k := range results {
-		assert.Equal(t, firstLogicalID, k.LogicalID, "goroutine %d has different logical_id", i)
+		assert.Equal(t, firstLogicalID, k.Header.LogicalThreadID, "goroutine %d has different logical_id", i)
 	}
 
 	// Collect all versions
 	versions := make(map[int]int) // version -> count
 	for _, k := range results {
-		versions[k.Version]++
+		versions[k.Header.Version]++
 	}
 
 	// Total versions should sum to goroutineCount
@@ -233,23 +233,23 @@ func TestCreateOrVersionKnowledge_MultipleKnowledgeNames(t *testing.T) {
 	require.NoError(t, err)
 
 	// All should have different logical_ids
-	assert.NotEqual(t, k1.LogicalID, k2.LogicalID)
-	assert.NotEqual(t, k1.LogicalID, k3.LogicalID)
-	assert.NotEqual(t, k2.LogicalID, k3.LogicalID)
+	assert.NotEqual(t, k1.Header.LogicalThreadID, k2.Header.LogicalThreadID)
+	assert.NotEqual(t, k1.Header.LogicalThreadID, k3.Header.LogicalThreadID)
+	assert.NotEqual(t, k2.Header.LogicalThreadID, k3.Header.LogicalThreadID)
 
 	// All should be v1
-	assert.Equal(t, 1, k1.Version)
-	assert.Equal(t, 1, k2.Version)
-	assert.Equal(t, 1, k3.Version)
+	assert.Equal(t, 1, k1.Header.Version)
+	assert.Equal(t, 1, k2.Header.Version)
+	assert.Equal(t, 1, k3.Header.Version)
 
 	// Verify knowledge_index has all three
 	indexKey := KnowledgeIndexKey("test-instance")
 	entries, err := client.rdb.HGetAll(ctx, indexKey).Result()
 	require.NoError(t, err)
 	assert.Len(t, entries, 3)
-	assert.Equal(t, k1.LogicalID, entries["docs-1"])
-	assert.Equal(t, k2.LogicalID, entries["docs-2"])
-	assert.Equal(t, k3.LogicalID, entries["docs-3"])
+	assert.Equal(t, k1.Header.LogicalThreadID, entries["docs-1"])
+	assert.Equal(t, k2.Header.LogicalThreadID, entries["docs-2"])
+	assert.Equal(t, k3.Header.LogicalThreadID, entries["docs-3"])
 }
 
 // TestCreateOrVersionKnowledge_PreservesSourceArtefacts tests Knowledge artefacts have empty sources
@@ -267,7 +267,7 @@ func TestCreateOrVersionKnowledge_PreservesSourceArtefacts(t *testing.T) {
 	)
 
 	require.NoError(t, err)
-	assert.Empty(t, knowledge.SourceArtefacts, "Knowledge artefacts should have empty source_artefacts")
+	assert.Empty(t, knowledge.Header.ParentHashes, "Knowledge artefacts should have empty source_artefacts")
 }
 
 // TestCreateOrVersionKnowledge_CreatedAtMsPopulated tests timestamp is set
@@ -285,5 +285,5 @@ func TestCreateOrVersionKnowledge_CreatedAtMsPopulated(t *testing.T) {
 	)
 
 	require.NoError(t, err)
-	assert.Greater(t, knowledge.CreatedAtMs, int64(0), "CreatedAtMs should be populated")
+	assert.Greater(t, knowledge.Header.CreatedAtMs, int64(0), "CreatedAtMs should be populated")
 }

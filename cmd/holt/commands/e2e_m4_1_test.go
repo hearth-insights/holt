@@ -36,7 +36,7 @@ func TestE2E_M4_1_AgentToHumanQA(t *testing.T) {
 	buildCmd := exec.Command("docker", "build",
 		"-t", "question-agent:latest",
 		"-f", "agents/question-agent/Dockerfile",
-		".")  // Build from project root (needs access to go.mod, cmd/pup, etc.)
+		".") // Build from project root (needs access to go.mod, cmd/pup, etc.)
 	buildCmd.Dir = projectRoot
 	output, err := buildCmd.CombinedOutput()
 	if err != nil {
@@ -128,7 +128,7 @@ services:
 				continue
 			}
 
-			if art.StructuralType == blackboard.StructuralTypeQuestion {
+			if art.Header.StructuralType == blackboard.StructuralTypeQuestion {
 				questionArtefact = art
 				break
 			}
@@ -154,7 +154,7 @@ services:
 		QuestionText     string `json:"question_text"`
 		TargetArtefactID string `json:"target_artefact_id"`
 	}
-	err = json.Unmarshal([]byte(questionArtefact.Payload), &questionPayload)
+	err = json.Unmarshal([]byte(questionArtefact.Payload.Content), &questionPayload)
 	require.NoError(t, err)
 	require.Equal(t, goalArtefact.ID, questionPayload.TargetArtefactID)
 	t.Logf("✓ Question text: \"%s\"", questionPayload.QuestionText)
@@ -186,8 +186,8 @@ services:
 
 	answerArtefact := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
 		ParentHashes:    []string{goalArtefact.ID, questionArtefact.ID},
-		LogicalThreadID: goalArtefact.LogicalID, // Same logical thread
-		Version:         goalArtefact.Version + 1, // Incremented version
+		LogicalThreadID: goalArtefact.Header.LogicalThreadID, // Same logical thread
+		Version:         goalArtefact.Header.Version + 1,     // Incremented version
 		CreatedAtMs:     time.Now().UnixMilli(),
 		ProducedByRole:  "user",
 		StructuralType:  blackboard.StructuralTypeStandard,
@@ -195,7 +195,7 @@ services:
 		ClaimID:         "",
 	}, clarifiedGoal)
 
-	t.Logf("✓ Clarified goal created: %s v%d", answerArtefact.ID, answerArtefact.Version)
+	t.Logf("✓ Clarified goal created: %s v%d", answerArtefact.ID, answerArtefact.Header.Version)
 
 	// Step 9: Verify new claim is created for clarified goal
 	t.Log("Step 9: Waiting for new claim on clarified goal...")
@@ -310,11 +310,11 @@ services:
 			continue
 		}
 
-		if art.StructuralType == blackboard.StructuralTypeFailure &&
-			art.Type == "MaxIterationsExceeded" {
+		if art.Header.StructuralType == blackboard.StructuralTypeFailure &&
+			art.Header.Type == "MaxIterationsExceeded" {
 			failureFound = true
 			t.Logf("✓ Failure artefact created: %s", art.ID)
-			t.Logf("  Payload: %s", art.Payload)
+			t.Logf("  Payload: %s", art.Payload.Content)
 			break
 		}
 	}

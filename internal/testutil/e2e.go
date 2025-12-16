@@ -292,7 +292,7 @@ func (env *E2EEnvironment) CreateVerifiableArtefact(ctx context.Context, header 
 	// ClaimID defaults to "" (correct for test artefacts created outside claims)
 
 	// Construct V2 artefact
-	v2Art := &blackboard.VerifiableArtefact{
+	artefact := &blackboard.Artefact{
 		Header: header,
 		Payload: blackboard.ArtefactPayload{
 			Content: payload,
@@ -300,30 +300,15 @@ func (env *E2EEnvironment) CreateVerifiableArtefact(ctx context.Context, header 
 	}
 
 	// Compute hash
-	hash, err := blackboard.ComputeArtefactHash(v2Art)
+	hash, err := blackboard.ComputeArtefactHash(artefact)
 	require.NoError(env.T, err, "Failed to compute artefact hash")
-	v2Art.ID = hash
-
-	// Convert to V1 for client compatibility
-	v1Art := &blackboard.Artefact{
-		ID:              v2Art.ID,
-		LogicalID:       v2Art.Header.LogicalThreadID,
-		Version:         v2Art.Header.Version,
-		StructuralType:  v2Art.Header.StructuralType,
-		Type:            v2Art.Header.Type,
-		Payload:         v2Art.Payload.Content,
-		ProducedByRole:  v2Art.Header.ProducedByRole,
-		SourceArtefacts: v2Art.Header.ParentHashes,
-		CreatedAtMs:     v2Art.Header.CreatedAtMs,
-		ClaimID:         v2Art.Header.ClaimID,
-		ContextForRoles: v2Art.Header.ContextForRoles,
-	}
+	artefact.ID = hash
 
 	// Create in Redis
-	err = env.BBClient.CreateArtefact(ctx, v1Art)
+	err = env.BBClient.CreateArtefact(ctx, artefact)
 	require.NoError(env.T, err, "Failed to create verifiable artefact")
 
-	return v1Art
+	return artefact
 }
 
 // InitializeBlackboardClient connects to the blackboard for this environment
@@ -455,24 +440,43 @@ func (env *E2EEnvironment) WaitForArtefactByType(artefactType string) *blackboar
 			if data["type"] == artefactType {
 				// Parse artefact
 				artefact := &blackboard.Artefact{
-					ID:              data["id"],
-					LogicalID:       data["logical_id"],
-					StructuralType:  blackboard.StructuralType(data["structural_type"]),
-					Type:            data["type"],
-					Payload:         data["payload"],
-					ProducedByRole:  data["produced_by_role"],
-					ClaimID:         data["claim_id"], // M4.6: Capture ClaimID
-					Metadata:        data["metadata"], // M5.1: Capture Metadata
-					SourceArtefacts: []string{},       // Simplified for now
+					ID: data["id"],
+					Header: blackboard.ArtefactHeader{
+						LogicalThreadID: data["logical_id"],
+						StructuralType:  blackboard.StructuralType(data["structural_type"]),
+						Type:            data["type"],
+						ProducedByRole:  data["produced_by_role"],
+						ClaimID:         data["claim_id"], // M4.6: Capture ClaimID
+						Metadata:        data["metadata"], // M5.1: Capture Metadata
+						ParentHashes:    []string{},       // Simplified for now
+					},
+					Payload: blackboard.ArtefactPayload{
+						Content: data["payload"],
+					},
 				}
 
 				if versionStr, ok := data["version"]; ok {
 					if version, err := strconv.Atoi(versionStr); err == nil {
-						artefact.Version = version
+						artefact.Header.Version = version
 					}
 				}
 
-				env.T.Logf("✓ Found artefact: type=%s, id=%s, claim_id=%s, payload=%s", artefact.Type, artefact.ID, artefact.ClaimID, artefact.Payload)
+				// Handle parent hashes if present
+				if parentHashesJSON, ok := data["parent_hashes"]; ok && parentHashesJSON != "" {
+					var parents []string
+					if err := json.Unmarshal([]byte(parentHashesJSON), &parents); err == nil {
+						artefact.Header.ParentHashes = parents
+					}
+				}
+
+				// Parse context_for_roles if present
+				if rolesJSON, ok := data["context_for_roles"]; ok && rolesJSON != "" {
+					var roles []string
+					json.Unmarshal([]byte(rolesJSON), &roles)
+					artefact.Header.ContextForRoles = roles
+				}
+
+				env.T.Logf("✓ Found artefact: type=%s, id=%s, claim_id=%s, payload=%s", artefact.Header.Type, artefact.ID, artefact.Header.ClaimID, artefact.Payload.Content)
 				return artefact
 			} else {
 				env.T.Logf("✗ other artefact: type=%s, id=%s, claim_id=%s, v=%s payload=%s",
@@ -707,17 +711,21 @@ func WaitForArtefactOfType(ctx context.Context, client *blackboard.Client, artef
 
 			if data["type"] == artefactType {
 				artefact := &blackboard.Artefact{
-					ID:             data["id"],
-					LogicalID:      data["logical_id"],
-					StructuralType: blackboard.StructuralType(data["structural_type"]),
-					Type:           data["type"],
-					Payload:        data["payload"],
-					ProducedByRole: data["produced_by_role"],
+					ID: data["id"],
+					Header: blackboard.ArtefactHeader{
+						LogicalThreadID: data["logical_id"],
+						StructuralType:  blackboard.StructuralType(data["structural_type"]),
+						Type:            data["type"],
+						ProducedByRole:  data["produced_by_role"],
+					},
+					Payload: blackboard.ArtefactPayload{
+						Content: data["payload"],
+					},
 				}
 
 				if versionStr, ok := data["version"]; ok {
 					if version, err := strconv.Atoi(versionStr); err == nil {
-						artefact.Version = version
+						artefact.Header.Version = version
 					}
 				}
 
@@ -725,7 +733,7 @@ func WaitForArtefactOfType(ctx context.Context, client *blackboard.Client, artef
 				if rolesJSON, ok := data["context_for_roles"]; ok && rolesJSON != "" {
 					var roles []string
 					json.Unmarshal([]byte(rolesJSON), &roles)
-					artefact.ContextForRoles = roles
+					artefact.Header.ContextForRoles = roles
 				}
 
 				return artefact, nil
@@ -758,13 +766,17 @@ func WaitForArtefactVersion(ctx context.Context, client *blackboard.Client, logi
 				versionStr := data["version"]
 				if version, err := strconv.Atoi(versionStr); err == nil && version == targetVersion {
 					artefact := &blackboard.Artefact{
-						ID:             data["id"],
-						LogicalID:      data["logical_id"],
-						Version:        version,
-						StructuralType: blackboard.StructuralType(data["structural_type"]),
-						Type:           data["type"],
-						Payload:        data["payload"],
-						ProducedByRole: data["produced_by_role"],
+						ID: data["id"],
+						Header: blackboard.ArtefactHeader{
+							LogicalThreadID: data["logical_id"],
+							Version:         version,
+							StructuralType:  blackboard.StructuralType(data["structural_type"]),
+							Type:            data["type"],
+							ProducedByRole:  data["produced_by_role"],
+						},
+						Payload: blackboard.ArtefactPayload{
+							Content: data["payload"],
+						},
 					}
 
 					return artefact, nil
@@ -806,18 +818,22 @@ func FindAllArtefactsOfType(ctx context.Context, client *blackboard.Client, arte
 			fmt.Printf("DEBUG: FindAllArtefactsOfType found %s with metadata raw: '%s'\n", data["id"], data["metadata"])
 
 			artefact := &blackboard.Artefact{
-				ID:             data["id"],
-				LogicalID:      data["logical_id"],
-				StructuralType: blackboard.StructuralType(data["structural_type"]),
-				Type:           data["type"],
-				Payload:        data["payload"],
-				ProducedByRole: data["produced_by_role"],
-				Metadata:       data["metadata"], // M5.1: Capture Metadata
+				ID: data["id"],
+				Header: blackboard.ArtefactHeader{
+					LogicalThreadID: data["logical_id"],
+					StructuralType:  blackboard.StructuralType(data["structural_type"]),
+					Type:            data["type"],
+					ProducedByRole:  data["produced_by_role"],
+					Metadata:        data["metadata"], // M5.1: Capture Metadata
+				},
+				Payload: blackboard.ArtefactPayload{
+					Content: data["payload"],
+				},
 			}
 
 			if versionStr, ok := data["version"]; ok {
 				if version, err := strconv.Atoi(versionStr); err == nil {
-					artefact.Version = version
+					artefact.Header.Version = version
 				}
 			}
 
@@ -825,7 +841,7 @@ func FindAllArtefactsOfType(ctx context.Context, client *blackboard.Client, arte
 			if rolesJSON, ok := data["context_for_roles"]; ok && rolesJSON != "" {
 				var roles []string
 				json.Unmarshal([]byte(rolesJSON), &roles)
-				artefact.ContextForRoles = roles
+				artefact.Header.ContextForRoles = roles
 			}
 
 			results = append(results, artefact)
@@ -869,7 +885,7 @@ func WaitForArtefactWithContext(ctx context.Context, client *blackboard.Client, 
 
 		// Check each artefact's thread_context to see if it contains the related artefact
 		for _, artefact := range artefacts {
-			threadContextKey := blackboard.ThreadContextKey(instanceName, artefact.LogicalID)
+			threadContextKey := blackboard.ThreadContextKey(instanceName, artefact.Header.LogicalThreadID)
 			isMember, err := client.GetRedisClient().SIsMember(ctx, threadContextKey, relatedArtefactID).Result()
 			if err != nil {
 				continue

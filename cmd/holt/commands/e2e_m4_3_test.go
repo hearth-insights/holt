@@ -207,33 +207,33 @@ services:
 		require.NoError(t, err, "Should find a DesignSpec with Knowledge attached")
 	}
 
-	require.Contains(t, designSpec.Payload, "first-time context discovery")
+	require.Contains(t, designSpec.Payload.Content, "first-time context discovery")
 	t.Log("✓ First run: Agent produced DesignSpec")
 
 	// Verify Knowledge was created (already fetched above)
-	require.Equal(t, blackboard.StructuralTypeKnowledge, knowledge.StructuralType)
-	require.Contains(t, knowledge.Payload, "GO SDK VERSION 1.21")
+	require.Equal(t, blackboard.StructuralTypeKnowledge, knowledge.Header.StructuralType)
+	require.Contains(t, knowledge.Payload.Content, "GO SDK VERSION 1.21")
 	t.Log("✓ First run: Knowledge checkpoint created")
 
 	// Verify knowledge_index was populated
 	indexKey := blackboard.KnowledgeIndexKey(env.InstanceName)
 	logicalID, err := bbClient.GetRedisClient().HGet(ctx, indexKey, "go-sdk-docs").Result()
 	require.NoError(t, err)
-	require.Equal(t, knowledge.LogicalID, logicalID)
+	require.Equal(t, knowledge.Header.LogicalThreadID, logicalID)
 	t.Log("✓ First run: knowledge_index populated")
 
 	// ========== VERIFY KNOWLEDGE ATTACHMENT ==========
 	t.Log("\n=== VERIFY: Knowledge is properly attached to thread ===")
 
 	// Verify Knowledge is attached to the DesignSpec's logical thread
-	threadContextKey := blackboard.ThreadContextKey(env.InstanceName, designSpec.LogicalID)
+	threadContextKey := blackboard.ThreadContextKey(env.InstanceName, designSpec.Header.LogicalThreadID)
 	knowledgeAttached, err := bbClient.GetRedisClient().SIsMember(ctx, threadContextKey, knowledge.ID).Result()
 	require.NoError(t, err)
 	require.True(t, knowledgeAttached, "Knowledge should be attached to the work thread")
 	t.Log("✓ Knowledge attached to work thread")
 
 	// Verify Knowledge thread tracking (may have multiple versions if orchestrator created duplicates)
-	threadKey := blackboard.ThreadKey(env.InstanceName, knowledge.LogicalID)
+	threadKey := blackboard.ThreadKey(env.InstanceName, knowledge.Header.LogicalThreadID)
 	versions, err := bbClient.GetRedisClient().ZRange(ctx, threadKey, 0, -1).Result()
 	require.NoError(t, err)
 	// NOTE: Due to orchestrator potentially creating multiple DesignSpecs, we may have multiple Knowledge versions

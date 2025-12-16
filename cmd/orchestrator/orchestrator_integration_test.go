@@ -63,7 +63,7 @@ func setupRedis(t *testing.T) (string, func()) {
 // helper to create a valid hashed artefact for V1 client
 func createValidArtefact(t *testing.T, logicalID string, version int, structuralType blackboard.StructuralType, typ, payload string, sourceArtefacts []string, role string) *blackboard.Artefact {
 	// Create V2 representation to compute hash
-	v2 := &blackboard.VerifiableArtefact{
+	v2 := &blackboard.Artefact{
 		Header: blackboard.ArtefactHeader{
 			ParentHashes:    sourceArtefacts,
 			LogicalThreadID: logicalID,
@@ -82,7 +82,7 @@ func createValidArtefact(t *testing.T, logicalID string, version int, structural
 	hash, err := blackboard.ComputeArtefactHash(v2)
 	require.NoError(t, err)
 
-	// Return V1 representation with computed hash
+	// Return V1 representation with computed hash // TODO MIGRATE TO V2
 	return &blackboard.Artefact{
 		ID:              hash,
 		LogicalID:       logicalID,

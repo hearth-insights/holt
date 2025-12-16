@@ -127,7 +127,7 @@ services:
 				continue
 			}
 
-			if art.StructuralType == blackboard.StructuralTypeReview && art.ProducedByRole == "HumanReviewer" {
+			if art.Header.StructuralType == blackboard.StructuralTypeReview && art.Header.ProducedByRole == "HumanReviewer" {
 				reviewArtefact = art
 				break
 			}
@@ -152,7 +152,7 @@ services:
 
 	// Step 6: Verify approval (payload should be {} for approval)
 	t.Log("Step 6: Verifying approval...")
-	require.Equal(t, "{}", reviewArtefact.Payload, "Review should be approval (empty JSON object)")
+	require.Equal(t, "{}", reviewArtefact.Payload.Content, "Review should be approval (empty JSON object)")
 	t.Log("✓ Review approved successfully")
 }
 
@@ -309,7 +309,7 @@ services:
 				continue
 			}
 
-			if art.StructuralType == blackboard.StructuralTypeReview && art.ProducedByRole == "TestRunner" {
+			if art.Header.StructuralType == blackboard.StructuralTypeReview && art.Header.ProducedByRole == "TestRunner" {
 				reviewArtefact = art
 				break
 			}

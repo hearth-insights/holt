@@ -110,9 +110,9 @@ func (ph *ProtocolHandler) PublishPausedEvent(ctx context.Context, sessionID str
 // PublishBreakpointSetEvent publishes a breakpoint_set event
 func (ph *ProtocolHandler) PublishBreakpointSetEvent(ctx context.Context, sessionID string, bp *Breakpoint) error {
 	payload := map[string]interface{}{
-		"breakpoint_id":   bp.ID,
-		"condition_type":  bp.ConditionType,
-		"pattern":         bp.Pattern,
+		"breakpoint_id":  bp.ID,
+		"condition_type": bp.ConditionType,
+		"pattern":        bp.Pattern,
 	}
 
 	return ph.PublishEvent(ctx, EventBreakpointSet, sessionID, payload)

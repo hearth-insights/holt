@@ -125,8 +125,8 @@ func TestE2E_Phase3_ThreePhaseWorkflow(t *testing.T) {
 	t.Log("Step 4: Verifying GoalDefined artefact...")
 	goalArtefact := env.WaitForArtefactByType("GoalDefined")
 	require.NotNil(t, goalArtefact)
-	require.Equal(t, goalFilename, goalArtefact.Payload)
-	require.Equal(t, "user", goalArtefact.ProducedByRole)
+	require.Equal(t, goalFilename, goalArtefact.Payload.Content)
+	require.Equal(t, "user", goalArtefact.Header.ProducedByRole)
 	t.Logf("✓ GoalDefined artefact created: id=%s", goalArtefact.ID)
 
 	// Step 5: Verify claim was created and all agents bid
@@ -158,9 +158,9 @@ func TestE2E_Phase3_ThreePhaseWorkflow(t *testing.T) {
 	// Wait for Review artefact from reviewer to prove review phase executed
 	reviewArtefact := env.WaitForArtefactByType("Review")
 	require.NotNil(t, reviewArtefact)
-	require.Equal(t, blackboard.StructuralTypeReview, reviewArtefact.StructuralType)
-	require.Equal(t, "Reviewer", reviewArtefact.ProducedByRole)
-	require.Equal(t, "{}", reviewArtefact.Payload, "Review should approve with empty object")
+	require.Equal(t, blackboard.StructuralTypeReview, reviewArtefact.Header.StructuralType)
+	require.Equal(t, "Reviewer", reviewArtefact.Header.ProducedByRole)
+	require.Equal(t, "{}", reviewArtefact.Payload.Content, "Review should approve with empty object")
 	t.Logf("✓ Review phase completed: artefact=%s, approved", reviewArtefact.ID)
 
 	// Step 7: Verify parallel phase execution
@@ -169,7 +169,7 @@ func TestE2E_Phase3_ThreePhaseWorkflow(t *testing.T) {
 	// Wait for ParallelWorkComplete artefact to prove parallel phase executed
 	parallelArtefact := env.WaitForArtefactByType("ParallelWorkComplete")
 	require.NotNil(t, parallelArtefact)
-	require.Equal(t, "ParallelWorker", parallelArtefact.ProducedByRole)
+	require.Equal(t, "ParallelWorker", parallelArtefact.Header.ProducedByRole)
 	t.Logf("✓ Parallel phase completed: artefact=%s", parallelArtefact.ID)
 
 	// Step 8: Verify exclusive phase execution
@@ -178,8 +178,8 @@ func TestE2E_Phase3_ThreePhaseWorkflow(t *testing.T) {
 	// Wait for CodeCommit artefact from coder to prove exclusive phase executed
 	codeCommitArtefact := env.WaitForArtefactByType("CodeCommit")
 	require.NotNil(t, codeCommitArtefact)
-	require.Equal(t, "Coder", codeCommitArtefact.ProducedByRole)
-	commitHash := codeCommitArtefact.Payload
+	require.Equal(t, "Coder", codeCommitArtefact.Header.ProducedByRole)
+	commitHash := codeCommitArtefact.Payload.Content
 	require.NotEmpty(t, commitHash, "CodeCommit payload should contain commit hash")
 	t.Logf("✓ Exclusive phase completed: artefact=%s, commit=%s", codeCommitArtefact.ID, commitHash)
 

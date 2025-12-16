@@ -186,10 +186,10 @@ services:
 	}
 
 	require.NotNil(t, failureArtefact, "ToolExecutionFailure artefact should be created")
-	require.NotEmpty(t, failureArtefact.Payload, "ToolExecutionFailure artefact should have error details")
-	require.Equal(t, "Failure", string(failureArtefact.StructuralType))
+	require.NotEmpty(t, failureArtefact.Payload.Content, "ToolExecutionFailure artefact should have error details")
+	require.Equal(t, "Failure", string(failureArtefact.Header.StructuralType))
 	t.Logf("✓ Failure artefact created: id=%s", failureArtefact.ID)
-	t.Logf("  Error details: %s", failureArtefact.Payload)
+	t.Logf("  Error details: %s", failureArtefact.Payload.Content)
 
 	// Verify claim was terminated (check claim status)
 	// We can infer this by verifying no more artefacts are created after Failure
@@ -286,13 +286,13 @@ services:
 	t.Log("Waiting for ToolExecutionFailure artefact...")
 	failureArtefact := env.WaitForArtefactByType("ToolExecutionFailure")
 	require.NotNil(t, failureArtefact)
-	require.NotEmpty(t, failureArtefact.Payload)
-	require.Equal(t, "Failure", string(failureArtefact.StructuralType))
+	require.NotEmpty(t, failureArtefact.Payload.Content)
+	require.Equal(t, "Failure", string(failureArtefact.Header.StructuralType))
 
 	// Verify error message mentions JSON parsing
-	require.Contains(t, failureArtefact.Payload, "JSON", "Error should mention JSON parsing failure")
+	require.Contains(t, failureArtefact.Payload.Content, "JSON", "Error should mention JSON parsing failure")
 	t.Logf("✓ Failure artefact created with JSON parse error")
-	t.Logf("  Error details: %s", failureArtefact.Payload)
+	t.Logf("  Error details: %s", failureArtefact.Payload.Content)
 
 	// Verify workflow terminated
 	time.Sleep(3 * time.Second)

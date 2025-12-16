@@ -83,7 +83,7 @@ func (e *Engine) CheckReviewPhaseCompletion(ctx context.Context, claim *blackboa
 		}
 
 		// Parse review payload
-		if !isApproval(artefact.Payload) {
+		if !isApproval(artefact.Payload.Content) {
 			feedbackArtefacts = append(feedbackArtefacts, artefact)
 
 			e.logEvent("review_rejection", map[string]interface{}{
@@ -93,7 +93,7 @@ func (e *Engine) CheckReviewPhaseCompletion(ctx context.Context, claim *blackboa
 			})
 
 			// Publish review_rejected workflow event
-			if err := e.publishReviewRejectedEvent(ctx, claim.ArtefactID, artefact.ID, agentRole, artefact.Payload); err != nil {
+			if err := e.publishReviewRejectedEvent(ctx, claim.ArtefactID, artefact.ID, agentRole, artefact.Payload.Content); err != nil {
 				log.Printf("[Orchestrator] Failed to publish review_rejected event: %v", err)
 			}
 		} else {

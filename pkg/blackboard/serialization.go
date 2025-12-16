@@ -14,37 +14,38 @@ import (
 
 // ArtefactToHash converts an Artefact struct to a Redis hash format.
 // Array fields (source_artefacts, context_for_roles) are JSON-encoded.
+// The nested Artefact struct is flattened into a Redis hash.
 func ArtefactToHash(a *Artefact) (map[string]interface{}, error) {
 	// Encode source artefacts array as JSON
-	sourceArtefactsJSON, err := json.Marshal(a.SourceArtefacts)
+	sourceArtefactsJSON, err := json.Marshal(a.Header.ParentHashes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal source artefacts: %w", err)
 	}
 
 	// M4.3: Encode context_for_roles array as JSON (only for Knowledge artefacts)
-	contextForRolesJSON, err := json.Marshal(a.ContextForRoles)
+	contextForRolesJSON, err := json.Marshal(a.Header.ContextForRoles)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal context_for_roles: %w", err)
 	}
 
 	// M5.1: Ensure metadata is valid JSON (default to empty object)
-	metadata := a.Metadata
+	metadata := a.Header.Metadata
 	if metadata == "" {
 		metadata = "{}"
 	}
 
 	hash := map[string]interface{}{
 		"id":                a.ID,
-		"logical_id":        a.LogicalID,
-		"version":           a.Version,
-		"structural_type":   string(a.StructuralType),
-		"type":              a.Type,
-		"payload":           a.Payload,
+		"logical_id":        a.Header.LogicalThreadID,
+		"version":           a.Header.Version,
+		"structural_type":   string(a.Header.StructuralType),
+		"type":              a.Header.Type,
+		"payload":           a.Payload.Content,
 		"source_artefacts":  string(sourceArtefactsJSON),
-		"produced_by_role":  a.ProducedByRole,
-		"created_at_ms":     a.CreatedAtMs,               // M3.9
+		"produced_by_role":  a.Header.ProducedByRole,
+		"created_at_ms":     a.Header.CreatedAtMs,        // M3.9
 		"context_for_roles": string(contextForRolesJSON), // M4.3
-		"claim_id":          a.ClaimID,                   // M4.6
+		"claim_id":          a.Header.ClaimID,            // M4.6
 		"metadata":          metadata,                    // M5.1
 	}
 
@@ -60,17 +61,17 @@ func HashToArtefact(hash map[string]string) (*Artefact, error) {
 		return nil, fmt.Errorf("invalid version field: %w", err)
 	}
 
-	// Decode source artefacts JSON array
-	var sourceArtefacts []string
+	// Decode source artefacts JSON array (maps to ParentHashes)
+	var parentHashes []string
 	if sourceArtefactsJSON := hash["source_artefacts"]; sourceArtefactsJSON != "" {
-		if err := json.Unmarshal([]byte(sourceArtefactsJSON), &sourceArtefacts); err != nil {
+		if err := json.Unmarshal([]byte(sourceArtefactsJSON), &parentHashes); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal source_artefacts: %w", err)
 		}
 	}
 
 	// Ensure we have an empty slice instead of nil for consistency
-	if sourceArtefacts == nil {
-		sourceArtefacts = []string{}
+	if parentHashes == nil {
+		parentHashes = []string{}
 	}
 
 	// M4.3: Decode context_for_roles JSON array (only present for Knowledge artefacts)
@@ -95,18 +96,22 @@ func HashToArtefact(hash map[string]string) (*Artefact, error) {
 	}
 
 	artefact := &Artefact{
-		ID:              hash["id"],
-		LogicalID:       hash["logical_id"],
-		Version:         version,
-		StructuralType:  StructuralType(hash["structural_type"]),
-		Type:            hash["type"],
-		Payload:         hash["payload"],
-		SourceArtefacts: sourceArtefacts,
-		ProducedByRole:  hash["produced_by_role"],
-		CreatedAtMs:     createdAtMs,        // M3.9
-		ContextForRoles: contextForRoles,    // M4.3
-		ClaimID:         hash["claim_id"],   // M4.6
-		Metadata:        metadata,           // M5.1
+		ID: hash["id"],
+		Header: ArtefactHeader{
+			LogicalThreadID: hash["logical_id"],
+			Version:         version,
+			StructuralType:  StructuralType(hash["structural_type"]),
+			Type:            hash["type"],
+			ParentHashes:    parentHashes,
+			ProducedByRole:  hash["produced_by_role"],
+			CreatedAtMs:     createdAtMs,
+			ContextForRoles: contextForRoles,
+			ClaimID:         hash["claim_id"],
+			Metadata:        metadata,
+		},
+		Payload: ArtefactPayload{
+			Content: hash["payload"],
+		},
 	}
 
 	return artefact, nil
@@ -140,7 +145,7 @@ func ClaimToHash(c *Claim) (map[string]interface{}, error) {
 		"granted_parallel_agents": string(parallelAgentsJSON),
 		"granted_exclusive_agent": c.GrantedExclusiveAgent,
 		"additional_context_ids":  string(additionalContextJSON), // M3.3
-		"termination_reason":      c.TerminationReason,            // M3.3
+		"termination_reason":      c.TerminationReason,           // M3.3
 	}
 
 	// M3.5: Encode phase state as JSON if present
@@ -243,13 +248,13 @@ func HashToClaim(hash map[string]string) (*Claim, error) {
 		GrantedReviewAgents:   reviewAgents,
 		GrantedParallelAgents: parallelAgents,
 		GrantedExclusiveAgent: hash["granted_exclusive_agent"],
-		AdditionalContextIDs:  additionalContextIDs,  // M3.3
-		TerminationReason:     hash["termination_reason"], // M3.3
-		PhaseState:            phaseState,            // M3.5
-		GrantQueue:            grantQueue,            // M3.5
-		LastGrantAgent:        hash["last_grant_agent"], // M3.5
-		LastGrantTime:         lastGrantTime,         // M3.5
-		ArtefactExpected:      artefactExpected,      // M3.5
+		AdditionalContextIDs:  additionalContextIDs,           // M3.3
+		TerminationReason:     hash["termination_reason"],     // M3.3
+		PhaseState:            phaseState,                     // M3.5
+		GrantQueue:            grantQueue,                     // M3.5
+		LastGrantAgent:        hash["last_grant_agent"],       // M3.5
+		LastGrantTime:         lastGrantTime,                  // M3.5
+		ArtefactExpected:      artefactExpected,               // M3.5
 		GrantedAgentImageID:   hash["granted_agent_image_id"], // M3.9
 	}
 

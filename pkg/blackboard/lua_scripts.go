@@ -49,7 +49,7 @@ local artefact_id = ARGV[1]
 local logical_id = ARGV[2]
 local version = tonumber(ARGV[3])
 local structural_type = ARGV[4]
-local type = ARGV[5]
+local artefact_type = ARGV[5]
 local payload = ARGV[6]
 local source_artefacts_json = ARGV[7]
 local produced_by_role = ARGV[8]
@@ -67,7 +67,7 @@ redis.call('HSET', artefact_key,
     'logical_id', logical_id,
     'version', version,
     'structural_type', structural_type,
-    'type', type,
+    'type', artefact_type,
     'payload', payload,
     'source_artefacts', source_artefacts_json,
     'produced_by_role', produced_by_role,
@@ -85,7 +85,7 @@ redis.call('ZADD', thread_key, version, artefact_id)
 local source_artefacts = cjson.decode(source_artefacts_json)
 
 -- Only update index if there are parent artefacts
-if source_artefacts and next(source_artefacts) ~= nil then
+if source_artefacts and type(source_artefacts) == 'table' and next(source_artefacts) ~= nil then
     -- Extract instance name from artefact_key
     -- Pattern: holt:{instance}:artefact:{uuid}
     local instance_name = string.match(artefact_key, 'holt:([^:]+):')

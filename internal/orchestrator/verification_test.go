@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/google/uuid"
 	"github.com/hearth-insights/holt/internal/config"
 	"github.com/hearth-insights/holt/pkg/blackboard"
-	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -45,7 +45,7 @@ func TestVerifyArtefact_Success(t *testing.T) {
 
 	// Create a valid verifiable artefact
 	// Use "user" role to make it a valid root artefact (bypassing claim check)
-	artefact := &blackboard.VerifiableArtefact{
+	artefact := &blackboard.Artefact{
 		Header: blackboard.ArtefactHeader{
 			ParentHashes:    []string{}, // Root artefact (no parents)
 			LogicalThreadID: "thread-123",
@@ -81,7 +81,7 @@ func TestVerifyArtefact_OrphanBlock(t *testing.T) {
 	// Create artefact with non-existent parent
 	// Stage 1 (Orphan Check) runs before Stage 3 (Topology), so this should fail
 	// with orphan error regardless of topology validity.
-	artefact := &blackboard.VerifiableArtefact{
+	artefact := &blackboard.Artefact{
 		Header: blackboard.ArtefactHeader{
 			ParentHashes:    []string{"nonexistent-parent-hash-123456789abcdef"},
 			LogicalThreadID: "thread-123",
@@ -123,7 +123,7 @@ func TestVerifyArtefact_TimestampDrift_Future(t *testing.T) {
 
 	// Create artefact with timestamp 2 minutes in the future
 	futureTimestamp := time.Now().UnixMilli() + (2 * 60 * 1000)
-	artefact := &blackboard.VerifiableArtefact{
+	artefact := &blackboard.Artefact{
 		Header: blackboard.ArtefactHeader{
 			ParentHashes:    []string{},
 			LogicalThreadID: "thread-123",
@@ -164,7 +164,7 @@ func TestVerifyArtefact_TimestampDrift_Past(t *testing.T) {
 
 	// Create artefact with timestamp 2 minutes in the past
 	pastTimestamp := time.Now().UnixMilli() - (2 * 60 * 1000)
-	artefact := &blackboard.VerifiableArtefact{
+	artefact := &blackboard.Artefact{
 		Header: blackboard.ArtefactHeader{
 			ParentHashes:    []string{},
 			LogicalThreadID: "thread-123",
@@ -204,7 +204,7 @@ func TestVerifyArtefact_HashMismatch(t *testing.T) {
 
 	// Create artefact with INCORRECT hash (tampered)
 	// Use "user" role to pass topology check (Stage 3) and reach Hash check (Stage 4)
-	artefact := &blackboard.VerifiableArtefact{
+	artefact := &blackboard.Artefact{
 		ID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", // Wrong hash
 		Header: blackboard.ArtefactHeader{
 			ParentHashes:    []string{},
@@ -241,7 +241,7 @@ func TestVerifyArtefact_ValidParentChain(t *testing.T) {
 	engine, client := setupVerificationTestEngine(t, "test-verify-parent-chain", 300000)
 
 	// Create parent artefact (root, user)
-	parentArtefact := &blackboard.VerifiableArtefact{
+	parentArtefact := &blackboard.Artefact{
 		Header: blackboard.ArtefactHeader{
 			ParentHashes:    []string{},
 			LogicalThreadID: "thread-123",
@@ -262,7 +262,7 @@ func TestVerifyArtefact_ValidParentChain(t *testing.T) {
 	parentArtefact.ID = parentHash
 
 	// Write parent to Redis (simulating it exists in the blackboard)
-	err = client.WriteVerifiableArtefact(ctx, parentArtefact)
+	err = client.CreateArtefact(ctx, parentArtefact)
 	require.NoError(t, err)
 
 	// Setup active claim for child to link to
@@ -277,7 +277,7 @@ func TestVerifyArtefact_ValidParentChain(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create child artefact referencing parent, with valid ClaimID
-	childArtefact := &blackboard.VerifiableArtefact{
+	childArtefact := &blackboard.Artefact{
 		Header: blackboard.ArtefactHeader{
 			ParentHashes:    []string{parentHash}, // References parent
 			LogicalThreadID: "thread-123",
@@ -359,7 +359,7 @@ func TestProcessArtefact_RejectsTamperedArtefact(t *testing.T) {
 	engine, client := setupVerificationTestEngine(t, "test-tamper-integration", 300000)
 
 	// Create parent for topology validity
-	parentArtefact := &blackboard.VerifiableArtefact{
+	parentArtefact := &blackboard.Artefact{
 		Header: blackboard.ArtefactHeader{
 			ParentHashes:    []string{},
 			LogicalThreadID: "thread-123",
@@ -373,7 +373,7 @@ func TestProcessArtefact_RejectsTamperedArtefact(t *testing.T) {
 	}
 	parentHash, _ := blackboard.ComputeArtefactHash(parentArtefact)
 	parentArtefact.ID = parentHash
-	client.WriteVerifiableArtefact(ctx, parentArtefact)
+	client.CreateArtefact(ctx, parentArtefact)
 
 	// Create valid claim
 	claimID := uuid.New().String() // Use valid UUID
@@ -387,7 +387,7 @@ func TestProcessArtefact_RejectsTamperedArtefact(t *testing.T) {
 	require.NoError(t, err, "Setup: Create valid claim")
 
 	// Create a tampered V2 artefact (hash doesn't match content)
-	artefact := &blackboard.VerifiableArtefact{
+	artefact := &blackboard.Artefact{
 		Header: blackboard.ArtefactHeader{
 			ParentHashes:    []string{parentHash},
 			LogicalThreadID: "thread-123",
@@ -411,26 +411,16 @@ func TestProcessArtefact_RejectsTamperedArtefact(t *testing.T) {
 	artefact.ID = strings.Repeat("f", 64) // Wrong hash!
 
 	// Write tampered artefact to Redis (bypassing normal checks)
-	err = client.WriteVerifiableArtefact(ctx, artefact)
+	err = client.CreateArtefact(ctx, artefact)
 	require.NoError(t, err, "Setup: Write tampered artefact to Redis")
 
-	// Convert to V1 format for processArtefact (which expects V1)
-	v1Artefact := &blackboard.Artefact{
-		ID:              artefact.ID,
-		LogicalID:       artefact.Header.LogicalThreadID,
-		Version:         artefact.Header.Version,
-		StructuralType:  artefact.Header.StructuralType,
-		Type:            artefact.Header.Type,
-		Payload:         artefact.Payload.Content,
-		SourceArtefacts: artefact.Header.ParentHashes,
-		ProducedByRole:  artefact.Header.ProducedByRole,
-		CreatedAtMs:     artefact.Header.CreatedAtMs,
-		ClaimID:         artefact.Header.ClaimID, // Important: pass ClaimID
-	}
+	// Recompute correct hash in case CreateArtefact modified the struct (e.g. nil slices)
+	correctHash, err = blackboard.ComputeArtefactHash(artefact)
+	require.NoError(t, err)
 
 	// CRITICAL TEST: Call processArtefact (main orchestrator flow)
 	// This MUST reject the tampered artefact
-	err = engine.processArtefact(ctx, v1Artefact)
+	err = engine.processArtefact(ctx, artefact)
 	assert.Error(t, err, "processArtefact MUST reject tampered artefact")
 	assert.Contains(t, err.Error(), "hash mismatch", "Error should indicate hash mismatch")
 
@@ -459,7 +449,7 @@ func TestProcessArtefact_RejectsOrphanBlock(t *testing.T) {
 	engine, client := setupVerificationTestEngine(t, "test-orphan-integration", 300000)
 
 	// Create artefact with non-existent parent (must be valid 64-char hex hash)
-	artefact := &blackboard.VerifiableArtefact{
+	artefact := &blackboard.Artefact{
 		Header: blackboard.ArtefactHeader{
 			ParentHashes:    []string{strings.Repeat("a", 64)}, // Valid format but doesn't exist
 			LogicalThreadID: "thread-456",
@@ -483,24 +473,11 @@ func TestProcessArtefact_RejectsOrphanBlock(t *testing.T) {
 	artefact.ID = hash
 
 	// Write to Redis
-	err = client.WriteVerifiableArtefact(ctx, artefact)
+	err = client.CreateArtefact(ctx, artefact)
 	require.NoError(t, err)
 
-	// Convert to V1 for processArtefact
-	v1Artefact := &blackboard.Artefact{
-		ID:              artefact.ID,
-		LogicalID:       artefact.Header.LogicalThreadID,
-		Version:         artefact.Header.Version,
-		StructuralType:  artefact.Header.StructuralType,
-		Type:            artefact.Header.Type,
-		Payload:         artefact.Payload.Content,
-		SourceArtefacts: artefact.Header.ParentHashes,
-		ProducedByRole:  artefact.Header.ProducedByRole,
-		CreatedAtMs:     artefact.Header.CreatedAtMs,
-	}
-
 	// Process artefact - should reject orphan block
-	err = engine.processArtefact(ctx, v1Artefact)
+	err = engine.processArtefact(ctx, artefact)
 	assert.Error(t, err, "processArtefact MUST reject orphan block")
 	assert.Contains(t, err.Error(), "orphan block", "Error should indicate orphan block")
 

@@ -17,11 +17,11 @@ import (
 )
 
 var (
-	questionsInstanceName  string
-	questionsWatch         bool
+	questionsInstanceName   string
+	questionsWatch          bool
 	questionsExitOnComplete bool
-	questionsSince         string
-	questionsOutputFormat  string
+	questionsSince          string
+	questionsOutputFormat   string
 )
 
 var questionsCmd = &cobra.Command{
@@ -191,9 +191,9 @@ func runQuestionsWatch(ctx context.Context, client *blackboard.Client, instanceN
 			}
 
 			// Check if it's a Question
-			if artefact.StructuralType != blackboard.StructuralTypeQuestion {
+			if artefact.Header.StructuralType != blackboard.StructuralTypeQuestion {
 				// If exit-on-complete is enabled, check for Terminal
-				if questionsExitOnComplete && artefact.StructuralType == blackboard.StructuralTypeTerminal {
+				if questionsExitOnComplete && artefact.Header.StructuralType == blackboard.StructuralTypeTerminal {
 					return nil
 				}
 				continue
@@ -232,7 +232,7 @@ func runQuestionsHistorical(ctx context.Context, client *blackboard.Client, inst
 	// Filter by time
 	var filtered []*blackboard.Artefact
 	for _, q := range unanswered {
-		if q.CreatedAtMs >= sinceMS {
+		if q.Header.CreatedAtMs >= sinceMS {
 			filtered = append(filtered, q)
 		}
 	}
@@ -281,7 +281,7 @@ func waitForNewQuestion(ctx context.Context, client *blackboard.Client, instance
 				return nil
 			}
 
-			if artefact.StructuralType == blackboard.StructuralTypeQuestion {
+			if artefact.Header.StructuralType == blackboard.StructuralTypeQuestion {
 				displayQuestion(artefact, questionsOutputFormat)
 				return nil
 			}
@@ -311,7 +311,7 @@ func getUnansweredQuestions(ctx context.Context, client *blackboard.Client) ([]*
 	// Find all Question artefacts
 	var questions []*blackboard.Artefact
 	for _, art := range allArtefacts {
-		if art.StructuralType == blackboard.StructuralTypeQuestion {
+		if art.Header.StructuralType == blackboard.StructuralTypeQuestion {
 			questions = append(questions, art)
 		}
 	}
@@ -326,7 +326,7 @@ func getUnansweredQuestions(ctx context.Context, client *blackboard.Client) ([]*
 
 	// Sort by creation time (oldest first)
 	sort.Slice(unanswered, func(i, j int) bool {
-		return unanswered[i].CreatedAtMs < unanswered[j].CreatedAtMs
+		return unanswered[i].Header.CreatedAtMs < unanswered[j].Header.CreatedAtMs
 	})
 
 	return unanswered, nil
@@ -338,7 +338,7 @@ func isQuestionUnanswered(ctx context.Context, client *blackboard.Client, questi
 	var payload struct {
 		TargetArtefactID string `json:"target_artefact_id"`
 	}
-	if err := json.Unmarshal([]byte(question.Payload), &payload); err != nil {
+	if err := json.Unmarshal([]byte(question.Payload.Content), &payload); err != nil {
 		return true // Can't parse - treat as unanswered
 	}
 
@@ -353,9 +353,9 @@ func isQuestionUnanswered(ctx context.Context, client *blackboard.Client, questi
 	// - Higher version than target
 	// - Question ID in source_artefacts
 	for _, art := range allArtefacts {
-		if art.LogicalID == targetArtefact.LogicalID &&
-			art.Version > targetArtefact.Version &&
-			containsString(art.SourceArtefacts, question.ID) {
+		if art.Header.LogicalThreadID == targetArtefact.Header.LogicalThreadID &&
+			art.Header.Version > targetArtefact.Header.Version &&
+			containsString(art.Header.ParentHashes, question.ID) {
 			return false // Found an answer
 		}
 	}
@@ -377,14 +377,14 @@ func displayQuestion(q *blackboard.Artefact, format string) {
 		QuestionText     string `json:"question_text"`
 		TargetArtefactID string `json:"target_artefact_id"`
 	}
-	_ = json.Unmarshal([]byte(q.Payload), &payload)
+	_ = json.Unmarshal([]byte(q.Payload.Content), &payload)
 
 	// Shorten IDs for display
 	questionIDShort := shortenID(q.ID)
 	targetIDShort := shortenID(payload.TargetArtefactID)
 
 	fmt.Printf("Question %s (about artefact %s)\n", questionIDShort, targetIDShort)
-	fmt.Printf("  Asked by: %s\n", q.ProducedByRole)
+	fmt.Printf("  Asked by: %s\n", q.Header.ProducedByRole)
 	if payload.QuestionText != "" {
 		fmt.Printf("  Question: \"%s\"\n", payload.QuestionText)
 	}

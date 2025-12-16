@@ -287,7 +287,7 @@ services:
 	defer bbClient.Close()
 
 	// Fetch v3 artefact
-	manifest3, err := bbClient.GetVerifiableArtefact(ctx, manifestID3)
+	manifest3, err := bbClient.GetArtefact(ctx, manifestID3)
 	require.NoError(t, err, "Failed to fetch manifest 3")
 
 	// Verify parent is previous manifest

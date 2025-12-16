@@ -9,8 +9,6 @@ import (
 	"github.com/hearth-insights/holt/pkg/blackboard"
 )
 
-
-
 // assembleContext performs breadth-first traversal of the artefact dependency graph
 // to build a rich historical context for agent execution.
 //
@@ -29,11 +27,11 @@ import (
 // Returns empty array for root artefacts (no source_artefacts).
 func (e *Engine) assembleContext(ctx context.Context, targetArtefact *blackboard.Artefact, claim *blackboard.Claim) ([]*blackboard.Artefact, error) {
 	log.Printf("[INFO] Assembling context for artefact: artefact_id=%s type=%s",
-		targetArtefact.ID, targetArtefact.Type)
+		targetArtefact.ID, targetArtefact.Header.Type)
 
 	// Initialize BFS queue with target's source artefacts
-	queue := make([]string, len(targetArtefact.SourceArtefacts))
-	copy(queue, targetArtefact.SourceArtefacts)
+	queue := make([]string, len(targetArtefact.Header.ParentHashes))
+	copy(queue, targetArtefact.Header.ParentHashes)
 
 	// M3.3: Add additional context IDs for feedback claims
 	if len(claim.AdditionalContextIDs) > 0 {
@@ -80,7 +78,7 @@ func (e *Engine) assembleContext(ctx context.Context, targetArtefact *blackboard
 			latestArtefact, err := e.getLatestVersionForContext(ctx, artefact)
 			if err != nil {
 				log.Printf("[WARN] Failed to get latest version for logical_id=%s: %v (using discovered version)",
-					artefact.LogicalID, err)
+					artefact.Header.LogicalThreadID, err)
 				latestArtefact = artefact // Fallback to discovered version
 			}
 
@@ -88,10 +86,10 @@ func (e *Engine) assembleContext(ctx context.Context, targetArtefact *blackboard
 			// If we have a reworked version (v > 1), we must fetch V1 to get the original input links.
 			// Intermediate versions (e.g. v2) often only link to the review that triggered them,
 			// dropping the original context (Version Shadowing).
-			if latestArtefact.Version > 1 {
-				v1ID, v1Version, err := e.bbClient.GetFirstVersion(ctx, latestArtefact.LogicalID)
+			if latestArtefact.Header.Version > 1 {
+				v1ID, v1Version, err := e.bbClient.GetFirstVersion(ctx, latestArtefact.Header.LogicalThreadID)
 				if err != nil {
-					log.Printf("[WARN] Failed to get first version for logical_id=%s: %v", latestArtefact.LogicalID, err)
+					log.Printf("[WARN] Failed to get first version for logical_id=%s: %v", latestArtefact.Header.LogicalThreadID, err)
 				} else if v1Version == 1 && v1ID != latestArtefact.ID {
 					// Fetch V1 artefact
 					v1Artefact, err := e.bbClient.GetArtefact(ctx, v1ID)
@@ -99,17 +97,17 @@ func (e *Engine) assembleContext(ctx context.Context, targetArtefact *blackboard
 						log.Printf("[WARN] Failed to fetch V1 artefact %s: %v", v1ID, err)
 					} else if v1Artefact != nil {
 						log.Printf("[DEBUG] Merging links from V1 (id=%s) into V%d (id=%s)",
-							v1Artefact.ID, latestArtefact.Version, latestArtefact.ID)
-						
+							v1Artefact.ID, latestArtefact.Header.Version, latestArtefact.ID)
+
 						// Merge V1 sources into latest sources (avoiding duplicates)
 						existingSources := make(map[string]bool)
-						for _, src := range latestArtefact.SourceArtefacts {
+						for _, src := range latestArtefact.Header.ParentHashes {
 							existingSources[src] = true
 						}
-						
-						for _, src := range v1Artefact.SourceArtefacts {
+
+						for _, src := range v1Artefact.Header.ParentHashes {
 							if !existingSources[src] {
-								latestArtefact.SourceArtefacts = append(latestArtefact.SourceArtefacts, src)
+								latestArtefact.Header.ParentHashes = append(latestArtefact.Header.ParentHashes, src)
 								existingSources[src] = true
 							}
 						}
@@ -118,19 +116,19 @@ func (e *Engine) assembleContext(ctx context.Context, targetArtefact *blackboard
 			}
 
 			// De-duplicate by logical_id (keep first occurrence in BFS order)
-			if seenLogicalIDs[latestArtefact.LogicalID] {
+			if seenLogicalIDs[latestArtefact.Header.LogicalThreadID] {
 				log.Printf("[DEBUG] De-duplication: logical_id=%s already in context, skipping",
-					latestArtefact.LogicalID)
+					latestArtefact.Header.LogicalThreadID)
 				continue
 			}
 
-			seenLogicalIDs[latestArtefact.LogicalID] = true
-			contextMap[latestArtefact.LogicalID] = latestArtefact
+			seenLogicalIDs[latestArtefact.Header.LogicalThreadID] = true
+			contextMap[latestArtefact.Header.LogicalThreadID] = latestArtefact
 			log.Printf("[DEBUG] Added to context: logical_id=%s version=%d type=%s",
-				latestArtefact.LogicalID, latestArtefact.Version, latestArtefact.Type)
+				latestArtefact.Header.LogicalThreadID, latestArtefact.Header.Version, latestArtefact.Header.Type)
 
 			// Add source artefacts to queue for next level
-			queue = append(queue, latestArtefact.SourceArtefacts...)
+			queue = append(queue, latestArtefact.Header.ParentHashes...)
 		}
 	}
 
@@ -158,7 +156,7 @@ func (e *Engine) assembleContext(ctx context.Context, targetArtefact *blackboard
 // or returns an older version.
 func (e *Engine) getLatestVersionForContext(ctx context.Context, discoveredArtefact *blackboard.Artefact) (*blackboard.Artefact, error) {
 	// Query thread tracking for latest version
-	latestID, latestVersion, err := e.bbClient.GetLatestVersion(ctx, discoveredArtefact.LogicalID)
+	latestID, latestVersion, err := e.bbClient.GetLatestVersion(ctx, discoveredArtefact.Header.LogicalThreadID)
 	if err != nil {
 		return nil, fmt.Errorf("GetLatestVersion failed: %w", err)
 	}
@@ -166,20 +164,20 @@ func (e *Engine) getLatestVersionForContext(ctx context.Context, discoveredArtef
 	// Thread tracking returned empty (no thread exists)
 	if latestID == "" {
 		log.Printf("[DEBUG] No thread tracking for logical_id=%s, using discovered version %d",
-			discoveredArtefact.LogicalID, discoveredArtefact.Version)
+			discoveredArtefact.Header.LogicalThreadID, discoveredArtefact.Header.Version)
 		return discoveredArtefact, nil
 	}
 
 	// Thread tracking returned same or older version - use discovered
-	if latestVersion <= discoveredArtefact.Version {
+	if latestVersion <= discoveredArtefact.Header.Version {
 		log.Printf("[DEBUG] Thread has version %d, discovered version %d, using discovered",
-			latestVersion, discoveredArtefact.Version)
+			latestVersion, discoveredArtefact.Header.Version)
 		return discoveredArtefact, nil
 	}
 
 	// Thread tracking found a newer version - fetch it
 	log.Printf("[DEBUG] Found latest version: logical_id=%s version=%d (discovered was %d)",
-		discoveredArtefact.LogicalID, latestVersion, discoveredArtefact.Version)
+		discoveredArtefact.Header.LogicalThreadID, latestVersion, discoveredArtefact.Header.Version)
 
 	latestArtefact, err := e.bbClient.GetArtefact(ctx, latestID)
 	if err != nil {
@@ -201,13 +199,13 @@ func filterContextArtefacts(contextMap map[string]*blackboard.Artefact) []*black
 	filtered := make([]*blackboard.Artefact, 0, len(contextMap))
 
 	for _, artefact := range contextMap {
-		if artefact.StructuralType == blackboard.StructuralTypeStandard ||
-			artefact.StructuralType == blackboard.StructuralTypeAnswer ||
-			artefact.StructuralType == blackboard.StructuralTypeReview {
+		if artefact.Header.StructuralType == blackboard.StructuralTypeStandard ||
+			artefact.Header.StructuralType == blackboard.StructuralTypeAnswer ||
+			artefact.Header.StructuralType == blackboard.StructuralTypeReview {
 			filtered = append(filtered, artefact)
 		} else {
 			log.Printf("[DEBUG] Filtered out artefact: logical_id=%s type=%s structural_type=%s",
-				artefact.LogicalID, artefact.Type, artefact.StructuralType)
+				artefact.Header.LogicalThreadID, artefact.Header.Type, artefact.Header.StructuralType)
 		}
 	}
 
@@ -251,7 +249,7 @@ func (e *Engine) loadKnowledgeForAgent(ctx context.Context, contextChain []*blac
 	// Collect all unique logical_ids from work history
 	logicalIDSet := make(map[string]bool)
 	for _, art := range contextChain {
-		logicalIDSet[art.LogicalID] = true
+		logicalIDSet[art.Header.LogicalThreadID] = true
 	}
 
 	// M4.3: Always include "global" logical_id for manually provisioned knowledge
@@ -324,11 +322,11 @@ func (e *Engine) loadKnowledgeForAgent(ctx context.Context, contextChain []*blac
 	loadedKnowledge := make([]string, 0, len(filtered))
 
 	for _, knowledge := range filtered {
-		knowledgeName := knowledge.Type // The knowledge_name is stored in the Type field
-		knowledgeBase[knowledgeName] = knowledge.Payload
+		knowledgeName := knowledge.Header.Type // The knowledge_name is stored in the Type field
+		knowledgeBase[knowledgeName] = knowledge.Payload.Content
 		loadedKnowledge = append(loadedKnowledge, knowledgeName)
 		log.Printf("[INFO] M4.3: Loaded knowledge '%s' (version=%d) for role %s",
-			knowledgeName, knowledge.Version, e.config.AgentName)
+			knowledgeName, knowledge.Header.Version, e.config.AgentName)
 	}
 
 	return true, knowledgeBase, loadedKnowledge, nil
@@ -344,13 +342,13 @@ func (e *Engine) filterAndMergeKnowledge(allKnowledge []*blackboard.Artefact) ([
 	roleMatched := make([]*blackboard.Artefact, 0)
 
 	for _, knowledge := range allKnowledge {
-		if e.matchesRole(knowledge.ContextForRoles) {
+		if e.matchesRole(knowledge.Header.ContextForRoles) {
 			roleMatched = append(roleMatched, knowledge)
 			log.Printf("[DEBUG] M4.3: Knowledge '%s' (v%d) matched role %s",
-				knowledge.Type, knowledge.Version, e.config.AgentName)
+				knowledge.Header.Type, knowledge.Header.Version, e.config.AgentName)
 		} else {
 			log.Printf("[DEBUG] M4.3: Knowledge '%s' (v%d) did not match role %s (target_roles=%v)",
-				knowledge.Type, knowledge.Version, e.config.AgentName, knowledge.ContextForRoles)
+				knowledge.Header.Type, knowledge.Header.Version, e.config.AgentName, knowledge.Header.ContextForRoles)
 		}
 	}
 
@@ -362,15 +360,15 @@ func (e *Engine) filterAndMergeKnowledge(allKnowledge []*blackboard.Artefact) ([
 	knowledgeMap := make(map[string]*blackboard.Artefact)
 
 	for _, knowledge := range roleMatched {
-		knowledgeName := knowledge.Type
+		knowledgeName := knowledge.Header.Type
 
 		existing, exists := knowledgeMap[knowledgeName]
-		if !exists || knowledge.Version > existing.Version {
+		if !exists || knowledge.Header.Version > existing.Header.Version {
 			// Either first time seeing this knowledge, or this is a newer version
 			knowledgeMap[knowledgeName] = knowledge
 			if exists {
 				log.Printf("[DEBUG] M4.3: Latest version wins: '%s' v%d replaced v%d",
-					knowledgeName, knowledge.Version, existing.Version)
+					knowledgeName, knowledge.Header.Version, existing.Header.Version)
 			}
 		}
 	}

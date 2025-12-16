@@ -15,7 +15,7 @@ import (
 
 func setupTestEngine(t *testing.T) (*Engine, *blackboard.Client, *miniredis.Miniredis) {
 	s := miniredis.RunT(t)
-	
+
 	client, err := blackboard.NewClient(&redis.Options{Addr: s.Addr()}, "test-instance")
 	require.NoError(t, err)
 	t.Cleanup(func() { client.Close() })
@@ -47,9 +47,9 @@ func TestHandleClaimEvent(t *testing.T) {
 			Status:                blackboard.ClaimStatusPendingAssignment,
 			GrantedExclusiveAgent: "test-agent",
 		}
-		
+
 		engine.handleClaimEvent(ctx, claim, workQueue)
-		
+
 		select {
 		case queuedClaim := <-workQueue:
 			assert.Equal(t, claim.ID, queuedClaim.ID)
@@ -66,9 +66,9 @@ func TestHandleClaimEvent(t *testing.T) {
 			Status:                blackboard.ClaimStatusPendingAssignment,
 			GrantedExclusiveAgent: "other-agent",
 		}
-		
+
 		engine.handleClaimEvent(ctx, claim, workQueue)
-		
+
 		select {
 		case <-workQueue:
 			t.Fatal("Expected claim NOT to be queued")
@@ -80,22 +80,25 @@ func TestHandleClaimEvent(t *testing.T) {
 	// Scenario 3: Regular claim - Bidding
 	t.Run("RegularClaim_Bidding", func(t *testing.T) {
 		// Create target artefact
+		// Create target artefact
 		artefact := &blackboard.Artefact{
-			ID:             "art-target",
-			LogicalID:      "logical-target",
-			Version:        1,
-			StructuralType: blackboard.StructuralTypeStandard,
-			Type:           "Code",
-			ProducedByRole: "user",
-			CreatedAtMs:    time.Now().UnixMilli(),
+			Header: blackboard.ArtefactHeader{
+				LogicalThreadID: blackboard.NewID(),
+				Version:         1,
+				StructuralType:  blackboard.StructuralTypeStandard,
+				Type:            "Code",
+				ProducedByRole:  "user",
+				ParentHashes:    []string{},
+				CreatedAtMs:     time.Now().UnixMilli(),
+			},
+			Payload: blackboard.ArtefactPayload{
+				Content: "code",
+			},
 		}
-		// We don't verify hash here as we are just testing bidding logic which doesn't verify hash
-		// But GetArtefact reads from Redis, so we need to write it.
-		// CreateArtefact validates, so we need valid hash if validation is strict.
-		// Let's see if CreateArtefact enforces hash. Yes, it calls Validate().
-		// Validate() checks fields but doesn't re-compute hash.
-		// So we can just set ID.
-		err := client.CreateArtefact(ctx, artefact)
+		hash, err := blackboard.ComputeArtefactHash(artefact)
+		require.NoError(t, err)
+		artefact.ID = hash
+		err = client.CreateArtefact(ctx, artefact)
 		require.NoError(t, err)
 
 		claim := &blackboard.Claim{
@@ -111,7 +114,7 @@ func TestHandleClaimEvent(t *testing.T) {
 		require.NoError(t, err)
 		assert.Len(t, bids, 1)
 		assert.Equal(t, blackboard.BidTypeExclusive, bids["test-agent"].BidType)
-		
+
 		// Verify NOT queued (only queued on grant)
 		select {
 		case <-workQueue:
@@ -143,9 +146,9 @@ func TestHandleGrantNotification(t *testing.T) {
 			ClaimID:   claim.ID,
 		}
 		jsonBytes, _ := json.Marshal(notification)
-		
+
 		engine.handleGrantNotification(ctx, string(jsonBytes), workQueue)
-		
+
 		select {
 		case queuedClaim := <-workQueue:
 			assert.Equal(t, claim.ID, queuedClaim.ID)
@@ -170,9 +173,9 @@ func TestHandleGrantNotification(t *testing.T) {
 			ClaimID:   claim.ID,
 		}
 		jsonBytes, _ := json.Marshal(notification)
-		
+
 		engine.handleGrantNotification(ctx, string(jsonBytes), workQueue)
-		
+
 		select {
 		case <-workQueue:
 			t.Fatal("Expected claim NOT to be queued")
@@ -181,4 +184,3 @@ func TestHandleGrantNotification(t *testing.T) {
 		}
 	})
 }
-

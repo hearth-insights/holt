@@ -29,10 +29,10 @@ func ResolveRelationships(ctx context.Context, bbClient *blackboard.Client, arte
 	info := &RelationshipInfo{}
 
 	// 1. Resolve Upstream Claim (Produced By)
-	if artefact.ClaimID != "" {
-		claim, err := bbClient.GetClaim(ctx, artefact.ClaimID)
+	if artefact.Header.ClaimID != "" {
+		claim, err := bbClient.GetClaim(ctx, artefact.Header.ClaimID)
 		if err != nil && !isRedisNotFound(err) {
-			return nil, fmt.Errorf("failed to get upstream claim %s: %w", artefact.ClaimID, err)
+			return nil, fmt.Errorf("failed to get upstream claim %s: %w", artefact.Header.ClaimID, err)
 		}
 		if claim != nil {
 			info.ProducedBy = summarizeClaim(claim)

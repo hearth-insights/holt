@@ -97,9 +97,9 @@ func (e *Engine) TransitionToNextPhase(ctx context.Context, claim *blackboard.Cl
 
 	// M4.2: Emit phase_completed event after successful phase completion
 	e.logEvent("phase_completed", map[string]interface{}{
-		"claim_id":       claim.ID,
+		"claim_id":        claim.ID,
 		"completed_phase": claim.Status,
-		"next_phase":     nextPhase,
+		"next_phase":      nextPhase,
 	})
 
 	// M4.2: Check breakpoints after phase completion

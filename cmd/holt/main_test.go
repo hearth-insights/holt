@@ -14,7 +14,7 @@ func TestRun(t *testing.T) {
 
 	// Test with --help to ensure it runs without error
 	os.Args = []string{"holt", "--help"}
-	
+
 	err := run()
 	assert.NoError(t, err)
 }

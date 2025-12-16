@@ -14,10 +14,10 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
+	"github.com/google/uuid"
 	"github.com/hearth-insights/holt/internal/config"
 	"github.com/hearth-insights/holt/internal/orchestrator/debug"
 	"github.com/hearth-insights/holt/pkg/blackboard"
-	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -302,7 +302,7 @@ func TestDebugProtocol_BasicPauseResume(t *testing.T) {
 		Agents: map[string]config.Agent{
 			"test-agent": {
 				Image:           "test:latest",
-				BiddingStrategy: "exclusive",
+				BiddingStrategy: config.BiddingStrategyConfig{Type: "exclusive"},
 			},
 		},
 	}
@@ -339,7 +339,7 @@ func TestDebugProtocol_BasicPauseResume(t *testing.T) {
 	bpID := debugger.SetBreakpoint(t, string(debug.ConditionArtefactType), "TestArtefact")
 	t.Logf("Breakpoint set: %s", bpID)
 
-	// Create an artefact that will trigger breakpoint
+	// Create an artefact that will trigger breakpoint // TODO migrate to V2 format
 	artefact := &blackboard.Artefact{
 		ID:              uuid.New().String(),
 		LogicalID:       uuid.New().String(),
@@ -394,7 +394,6 @@ func TestDebugProtocol_ReviewConsensusReached(t *testing.T) {
 	_, redisAddr, cleanup := startTestRedis(t)
 	defer cleanup()
 
-
 	instanceName := "test-review-debug-" + uuid.New().String()[:8]
 
 	// Setup
@@ -410,11 +409,11 @@ func TestDebugProtocol_ReviewConsensusReached(t *testing.T) {
 		Agents: map[string]config.Agent{
 			"reviewer": {
 				Image:           "reviewer:latest",
-				BiddingStrategy: "review",
+				BiddingStrategy: config.BiddingStrategyConfig{Type: "review"},
 			},
 			"worker": {
 				Image:           "worker:latest",
-				BiddingStrategy: "exclusive",
+				BiddingStrategy: config.BiddingStrategyConfig{Type: "exclusive"},
 			},
 		},
 	}
@@ -519,7 +518,6 @@ func TestDebugProtocol_ManualReview(t *testing.T) {
 	// Start Redis container
 	_, redisAddr, cleanup := startTestRedis(t)
 	defer cleanup()
-
 
 	instanceName := "test-manual-review-" + uuid.New().String()[:8]
 
@@ -629,7 +627,6 @@ func TestDebugProtocol_SessionExpiration(t *testing.T) {
 	_, redisAddr, cleanup := startTestRedis(t)
 	defer cleanup()
 
-
 	instanceName := "test-expiration-" + uuid.New().String()[:8]
 
 	bbClient, err := blackboard.NewClient(&redis.Options{Addr: redisAddr, DB: 0}, instanceName)
@@ -640,7 +637,7 @@ func TestDebugProtocol_SessionExpiration(t *testing.T) {
 		Agents: map[string]config.Agent{
 			"agent": {
 				Image:           "agent:latest",
-				BiddingStrategy: "exclusive",
+				BiddingStrategy: config.BiddingStrategyConfig{Type: "exclusive"},
 			},
 		},
 	}

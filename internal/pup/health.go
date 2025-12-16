@@ -140,7 +140,7 @@ func (hs *HealthServer) handleHealthz(w http.ResponseWriter, r *http.Request) {
 // Runs in background goroutine with configurable interval and timeout.
 type HealthChecker struct {
 	config       *config.HealthCheckConfig
-	lastResult   atomic.Value  // stores bool: true = healthy, false = unhealthy
+	lastResult   atomic.Value // stores bool: true = healthy, false = unhealthy
 	checkRunning atomic.Bool
 	workspace    string
 	env          []string

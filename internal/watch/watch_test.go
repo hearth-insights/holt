@@ -32,18 +32,25 @@ func TestPollForClaim(t *testing.T) {
 
 	t.Run("returns claim when found immediately", func(t *testing.T) {
 		// Create artefact
-		artefactID := uuid.New().String()
 		artefact := &blackboard.Artefact{
-			ID:              artefactID,
-			LogicalID:       uuid.New().String(),
-			Version:         1,
-			StructuralType:  blackboard.StructuralTypeStandard,
-			Type:            "TestType",
-			ProducedByRole:  "test-agent",
-			Payload:         "test",
-			SourceArtefacts: []string{},
+			Header: blackboard.ArtefactHeader{
+				LogicalThreadID: blackboard.NewID(),
+				Version:         1,
+				StructuralType:  blackboard.StructuralTypeStandard,
+				Type:            "TestType",
+				ProducedByRole:  "test-agent",
+				ParentHashes:    []string{},
+				CreatedAtMs:     time.Now().UnixMilli(),
+			},
+			Payload: blackboard.ArtefactPayload{
+				Content: "test",
+			},
 		}
-		err := client.CreateArtefact(ctx, artefact)
+		hash, err := blackboard.ComputeArtefactHash(artefact)
+		require.NoError(t, err)
+		artefact.ID = hash
+		artefactID := artefact.ID
+		err = client.CreateArtefact(ctx, artefact)
 		require.NoError(t, err)
 
 		// Create claim immediately
@@ -69,18 +76,25 @@ func TestPollForClaim(t *testing.T) {
 
 	t.Run("returns claim when found after delay", func(t *testing.T) {
 		// Create artefact
-		artefactID := uuid.New().String()
 		artefact := &blackboard.Artefact{
-			ID:              artefactID,
-			LogicalID:       uuid.New().String(),
-			Version:         1,
-			StructuralType:  blackboard.StructuralTypeStandard,
-			Type:            "TestType",
-			ProducedByRole:  "test-agent",
-			Payload:         "test",
-			SourceArtefacts: []string{},
+			Header: blackboard.ArtefactHeader{
+				LogicalThreadID: blackboard.NewID(),
+				Version:         1,
+				StructuralType:  blackboard.StructuralTypeStandard,
+				Type:            "TestType",
+				ProducedByRole:  "test-agent",
+				ParentHashes:    []string{},
+				CreatedAtMs:     time.Now().UnixMilli(),
+			},
+			Payload: blackboard.ArtefactPayload{
+				Content: "test",
+			},
 		}
-		err := client.CreateArtefact(ctx, artefact)
+		hash, err := blackboard.ComputeArtefactHash(artefact)
+		require.NoError(t, err)
+		artefact.ID = hash
+		artefactID := artefact.ID
+		err = client.CreateArtefact(ctx, artefact)
 		require.NoError(t, err)
 
 		// Create claim after a delay
@@ -112,18 +126,25 @@ func TestPollForClaim(t *testing.T) {
 
 	t.Run("returns error on timeout", func(t *testing.T) {
 		// Create artefact but no claim
-		artefactID := uuid.New().String()
 		artefact := &blackboard.Artefact{
-			ID:              artefactID,
-			LogicalID:       uuid.New().String(),
-			Version:         1,
-			StructuralType:  blackboard.StructuralTypeStandard,
-			Type:            "TestType",
-			ProducedByRole:  "test-agent",
-			Payload:         "test",
-			SourceArtefacts: []string{},
+			Header: blackboard.ArtefactHeader{
+				LogicalThreadID: blackboard.NewID(),
+				Version:         1,
+				StructuralType:  blackboard.StructuralTypeStandard,
+				Type:            "TestType",
+				ProducedByRole:  "test-agent",
+				ParentHashes:    []string{},
+				CreatedAtMs:     time.Now().UnixMilli(),
+			},
+			Payload: blackboard.ArtefactPayload{
+				Content: "test",
+			},
 		}
-		err := client.CreateArtefact(ctx, artefact)
+		hash, err := blackboard.ComputeArtefactHash(artefact)
+		require.NoError(t, err)
+		artefact.ID = hash
+		artefactID := artefact.ID
+		err = client.CreateArtefact(ctx, artefact)
 		require.NoError(t, err)
 
 		// Poll should timeout
@@ -139,18 +160,25 @@ func TestPollForClaim(t *testing.T) {
 
 	t.Run("returns error when context cancelled", func(t *testing.T) {
 		// Create artefact but no claim
-		artefactID := uuid.New().String()
 		artefact := &blackboard.Artefact{
-			ID:              artefactID,
-			LogicalID:       uuid.New().String(),
-			Version:         1,
-			StructuralType:  blackboard.StructuralTypeStandard,
-			Type:            "TestType",
-			ProducedByRole:  "test-agent",
-			Payload:         "test",
-			SourceArtefacts: []string{},
+			Header: blackboard.ArtefactHeader{
+				LogicalThreadID: blackboard.NewID(),
+				Version:         1,
+				StructuralType:  blackboard.StructuralTypeStandard,
+				Type:            "TestType",
+				ProducedByRole:  "test-agent",
+				ParentHashes:    []string{},
+				CreatedAtMs:     time.Now().UnixMilli(),
+			},
+			Payload: blackboard.ArtefactPayload{
+				Content: "test",
+			},
 		}
-		err := client.CreateArtefact(ctx, artefact)
+		hash, err := blackboard.ComputeArtefactHash(artefact)
+		require.NoError(t, err)
+		artefact.ID = hash
+		artefactID := artefact.ID
+		err = client.CreateArtefact(ctx, artefact)
 		require.NoError(t, err)
 
 		// Cancel context after 100ms
@@ -168,18 +196,25 @@ func TestPollForClaim(t *testing.T) {
 
 	t.Run("handles multiple polling attempts", func(t *testing.T) {
 		// Create artefact
-		artefactID := uuid.New().String()
 		artefact := &blackboard.Artefact{
-			ID:              artefactID,
-			LogicalID:       uuid.New().String(),
-			Version:         1,
-			StructuralType:  blackboard.StructuralTypeStandard,
-			Type:            "TestType",
-			ProducedByRole:  "test-agent",
-			Payload:         "test",
-			SourceArtefacts: []string{},
+			Header: blackboard.ArtefactHeader{
+				LogicalThreadID: blackboard.NewID(),
+				Version:         1,
+				StructuralType:  blackboard.StructuralTypeStandard,
+				Type:            "TestType",
+				ProducedByRole:  "test-agent",
+				ParentHashes:    []string{},
+				CreatedAtMs:     time.Now().UnixMilli(),
+			},
+			Payload: blackboard.ArtefactPayload{
+				Content: "test",
+			},
 		}
-		err := client.CreateArtefact(ctx, artefact)
+		hash, err := blackboard.ComputeArtefactHash(artefact)
+		require.NoError(t, err)
+		artefact.ID = hash
+		artefactID := artefact.ID
+		err = client.CreateArtefact(ctx, artefact)
 		require.NoError(t, err)
 
 		// Create claim after multiple poll intervals (>400ms, so at least 2 polls)
@@ -213,9 +248,11 @@ func TestFormatters(t *testing.T) {
 		formatter := &defaultFormatter{writer: writer}
 
 		artefact := &blackboard.Artefact{
-			ID:             "abc-123",
-			Type:           "GoalDefined",
-			ProducedByRole: "test-agent",
+			ID: "abc-123",
+			Header: blackboard.ArtefactHeader{
+				Type:           "GoalDefined",
+				ProducedByRole: "test-agent",
+			},
 		}
 
 		err := formatter.FormatArtefact(artefact)
@@ -233,10 +270,12 @@ func TestFormatters(t *testing.T) {
 		formatter := &defaultFormatter{writer: writer}
 
 		artefact := &blackboard.Artefact{
-			ID:             "terminal-12345678-1234-1234-1234-123456789012",
-			Type:           "PackagedModule",
-			StructuralType: blackboard.StructuralTypeTerminal,
-			ProducedByRole: "ModulePackager",
+			ID: "terminal-12345678-1234-1234-1234-123456789012",
+			Header: blackboard.ArtefactHeader{
+				Type:           "PackagedModule",
+				StructuralType: blackboard.StructuralTypeTerminal,
+				ProducedByRole: "ModulePackager",
+			},
 		}
 
 		err := formatter.FormatArtefact(artefact)
@@ -325,9 +364,11 @@ func TestFormatters(t *testing.T) {
 		formatter := &jsonlFormatter{writer: writer}
 
 		artefact := &blackboard.Artefact{
-			ID:             "abc-123",
-			Type:           "GoalDefined",
-			ProducedByRole: "test-agent",
+			ID: "abc-123",
+			Header: blackboard.ArtefactHeader{
+				Type:           "GoalDefined",
+				ProducedByRole: "test-agent",
+			},
 		}
 
 		err := formatter.FormatArtefact(artefact)
@@ -409,18 +450,24 @@ func TestDisplayHistoricalArtefacts_DeterministicTimestamps(t *testing.T) {
 	defer client.Close()
 
 	// Create artefact
-	artefactID := "test-artefact-id"
 	artefact := &blackboard.Artefact{
-		ID:              artefactID,
-		LogicalID:       "logical-id",
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "TestType",
-		ProducedByRole:  "test-agent",
-		Payload:         "test",
-		SourceArtefacts: []string{},
-		CreatedAtMs:     1000000, // Fixed timestamp
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: "logical-id",
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "TestType",
+			ProducedByRole:  "test-agent",
+			ParentHashes:    []string{},
+			CreatedAtMs:     1000000,
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "test",
+		},
 	}
+	hash, err := blackboard.ComputeArtefactHash(artefact)
+	require.NoError(t, err)
+	artefact.ID = hash
+	artefactID := artefact.ID
 	err = client.CreateArtefact(ctx, artefact)
 	require.NoError(t, err)
 
@@ -496,17 +543,24 @@ func TestDisplayHistoricalArtefacts_FeedbackClaim_Comprehensive(t *testing.T) {
 	defer client.Close()
 
 	// 1. Create Original Artefact (t=1000)
-	artefactID := "original-artefact-id"
 	artefact := &blackboard.Artefact{
-		ID:             artefactID,
-		LogicalID:      "logical-id",
-		Version:        1,
-		StructuralType: blackboard.StructuralTypeStandard,
-		Type:           "Code",
-		ProducedByRole: "coder",
-		Payload:        "bad code",
-		CreatedAtMs:    1000,
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: "logical-id",
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "Code",
+			ProducedByRole:  "coder",
+			CreatedAtMs:     1000,
+			ParentHashes:    []string{}, // Important to init to avoid nil/empty mismatch in hash
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "bad code",
+		},
 	}
+	hash, err := blackboard.ComputeArtefactHash(artefact)
+	require.NoError(t, err)
+	artefact.ID = hash
+	artefactID := artefact.ID
 	require.NoError(t, client.CreateArtefact(ctx, artefact))
 
 	// 2. Create Original Claim (Terminated)
@@ -530,18 +584,24 @@ func TestDisplayHistoricalArtefacts_FeedbackClaim_Comprehensive(t *testing.T) {
 	require.NoError(t, client.CreateClaim(ctx, claim))
 
 	// 3. Create Review Artefact (Rejected) (t=2000)
-	reviewID := "review-artefact-id"
 	reviewArtefact := &blackboard.Artefact{
-		ID:              reviewID,
-		LogicalID:       "review-logical-id",
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeReview,
-		Type:            "Review",
-		ProducedByRole:  "reviewer",
-		Payload:         `{"status":"rejected"}`, // Not empty {} so it is a rejection
-		SourceArtefacts: []string{artefactID},
-		CreatedAtMs:     2000,
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: "review-logical-id",
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeReview,
+			Type:            "Review",
+			ProducedByRole:  "reviewer",
+			ParentHashes:    []string{artefactID},
+			CreatedAtMs:     2000,
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: `{"status":"rejected"}`,
+		},
 	}
+	reviewHash, err := blackboard.ComputeArtefactHash(reviewArtefact)
+	require.NoError(t, err)
+	reviewArtefact.ID = reviewHash
+	reviewID := reviewArtefact.ID
 	require.NoError(t, client.CreateArtefact(ctx, reviewArtefact))
 
 	// 4. Create Feedback Claim (PendingAssignment)
@@ -582,7 +642,7 @@ func TestDisplayHistoricalArtefacts_FeedbackClaim_Comprehensive(t *testing.T) {
 	require.Contains(t, output, fmt.Sprintf("[%s] ✨ Artefact created: by=coder, type=Code", fmtTime(1000)))
 
 	// 2. Check Original Claim Creation
-	require.Contains(t, output, fmt.Sprintf("[%s] ⏳ Claim created: claim=original, artefact=original, status=terminated", fmtTime(1000)))
+	require.Contains(t, output, fmt.Sprintf("[%s] ⏳ Claim created: claim=original, artefact=%s, status=terminated", fmtTime(1000), artefactID[:8]))
 
 	// 3. Check Bid Submitted (reconstructed from PhaseState)
 	require.Contains(t, output, fmt.Sprintf("[%s] 🙋 Bid submitted: agent=reviewer, claim=original, type=review", fmtTime(1001)))
@@ -592,7 +652,7 @@ func TestDisplayHistoricalArtefacts_FeedbackClaim_Comprehensive(t *testing.T) {
 	require.Contains(t, output, fmt.Sprintf("[%s] 🏆 Claim granted: agent=reviewer, claim=original, type=review", fmtTime(1100)))
 
 	// 5. Check Review Rejection (from Review Artefact)
-	require.Contains(t, output, fmt.Sprintf("[%s] ❌ Review Rejected: by=reviewer for artefact original (review: review-a)", fmtTime(2000)))
+	require.Contains(t, output, fmt.Sprintf("[%s] ❌ Review Rejected: by=reviewer for artefact %s (review: %s)", fmtTime(2000), artefactID[:8], reviewID[:8]))
 
 	// 6. Check Rework Assignment (synthetic event from feedback claim existence)
 	// Logic: timestamp = latest_review_ts (2000) + 1 = 2001ms = 2.001s

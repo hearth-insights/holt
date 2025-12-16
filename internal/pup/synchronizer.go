@@ -55,7 +55,7 @@ func (s *Synchronizer) shouldBidOnClaim(ctx context.Context, claim *blackboard.C
 	// Step 1: Check if target artefact is a potential trigger
 	if !s.isPotentialTrigger(targetArtefact) {
 		log.Printf("[Synchronizer] Artefact %s (type=%s) is not a potential trigger, ignoring",
-			targetArtefact.ID, targetArtefact.Type)
+			targetArtefact.ID, targetArtefact.Header.Type)
 		return false, nil
 	}
 
@@ -71,7 +71,7 @@ func (s *Synchronizer) shouldBidOnClaim(ctx context.Context, claim *blackboard.C
 		return false, nil
 	}
 
-	log.Printf("[Synchronizer] Found ancestor %s (type=%s)", ancestor.ID, ancestor.Type)
+	log.Printf("[Synchronizer] Found ancestor %s (type=%s)", ancestor.ID, ancestor.Header.Type)
 
 	// Step 3: Verify all dependencies (fan-in check)
 	allReady, err := s.checkAllDependenciesMet(ctx, ancestor)
@@ -103,7 +103,7 @@ func (s *Synchronizer) shouldBidOnClaim(ctx context.Context, claim *blackboard.C
 // M5.1: Early filter to avoid traversal for irrelevant artefacts.
 func (s *Synchronizer) isPotentialTrigger(artefact *blackboard.Artefact) bool {
 	for _, condition := range s.config.WaitFor {
-		if artefact.Type == condition.Type {
+		if artefact.Header.Type == condition.Type {
 			return true
 		}
 	}
@@ -136,12 +136,12 @@ func (s *Synchronizer) findCommonAncestor(ctx context.Context, artefact *blackbo
 		}
 
 		// Check if this is the ancestor we're looking for
-		if current.Type == s.config.AncestorType {
+		if current.Header.Type == s.config.AncestorType {
 			return current, nil
 		}
 
 		// Add parents to queue (traverse upward)
-		queue = append(queue, current.SourceArtefacts...)
+		queue = append(queue, current.Header.ParentHashes...)
 	}
 
 	return nil, nil // Not found
@@ -166,7 +166,7 @@ func (s *Synchronizer) checkAllDependenciesMet(ctx context.Context, ancestor *bl
 	// Group descendants by type
 	descendantsByType := make(map[string][]*blackboard.Artefact)
 	for _, desc := range descendants {
-		descendantsByType[desc.Type] = append(descendantsByType[desc.Type], desc)
+		descendantsByType[desc.Header.Type] = append(descendantsByType[desc.Header.Type], desc)
 	}
 
 	// Check each wait condition
@@ -216,7 +216,7 @@ func (s *Synchronizer) checkAllDependenciesMet(ctx context.Context, ancestor *bl
 //   - error if metadata missing, invalid JSON, or not a positive integer
 func (s *Synchronizer) getExpectedCountFromMetadata(artefact *blackboard.Artefact, metadataKey string) (int, error) {
 	var metadata map[string]string
-	if err := json.Unmarshal([]byte(artefact.Metadata), &metadata); err != nil {
+	if err := json.Unmarshal([]byte(artefact.Header.Metadata), &metadata); err != nil {
 		return 0, fmt.Errorf("invalid metadata JSON: %w", err)
 	}
 

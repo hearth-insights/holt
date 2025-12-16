@@ -79,7 +79,7 @@ func RunControllerMode(ctx context.Context, config *Config, bbClient *blackboard
 				if len(config.BiddingStrategy.TargetTypes) > 0 {
 					match := false
 					for _, t := range config.BiddingStrategy.TargetTypes {
-						if t == targetArtefact.Type {
+						if t == targetArtefact.Header.Type {
 							match = true
 							break
 						}

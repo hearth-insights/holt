@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/hearth-insights/holt/pkg/blackboard"
 	"github.com/google/uuid"
+	"github.com/hearth-insights/holt/pkg/blackboard"
 	"github.com/stretchr/testify/require"
 )
 
@@ -41,8 +41,10 @@ fi
 	t.Run("should ignore GoalDefined artefact", func(t *testing.T) {
 		// Create a GoalDefined artefact
 		goalArtefact := &blackboard.Artefact{
-			ID:   uuid.New().String(),
-			Type: "GoalDefined",
+			ID: uuid.New().String(),
+			Header: blackboard.ArtefactHeader{
+				Type: "GoalDefined",
+			},
 		}
 
 		// Determine the bid
@@ -57,8 +59,10 @@ fi
 	t.Run("should review RecipeYAML artefact", func(t *testing.T) {
 		// Create a RecipeYAML artefact
 		recipeArtefact := &blackboard.Artefact{
-			ID:   uuid.New().String(),
-			Type: "RecipeYAML",
+			ID: uuid.New().String(),
+			Header: blackboard.ArtefactHeader{
+				Type: "RecipeYAML",
+			},
 		}
 
 		// Determine the bid
@@ -78,7 +82,7 @@ fi
 			},
 		}
 
-		goalArtefact := &blackboard.Artefact{Type: "GoalDefined"}
+		goalArtefact := &blackboard.Artefact{Header: blackboard.ArtefactHeader{Type: "GoalDefined"}}
 		claim := &blackboard.Claim{ID: "test-claim", ArtefactID: goalArtefact.ID}
 		bidType, err := staticEngine.determineBidType(ctx, claim, goalArtefact)
 
@@ -104,7 +108,7 @@ exit 1
 			},
 		}
 
-		artefact := &blackboard.Artefact{Type: "SomeType"}
+		artefact := &blackboard.Artefact{Header: blackboard.ArtefactHeader{Type: "SomeType"}}
 		claim := &blackboard.Claim{ID: "test-claim", ArtefactID: artefact.ID}
 		bidType, err := engineWithFallback.determineBidType(ctx, claim, artefact)
 
@@ -130,7 +134,7 @@ exit 1
 			},
 		}
 
-		artefact := &blackboard.Artefact{Type: "SomeType"}
+		artefact := &blackboard.Artefact{Header: blackboard.ArtefactHeader{Type: "SomeType"}}
 		claim := &blackboard.Claim{ID: "test-claim", ArtefactID: artefact.ID}
 		bidType, err := engineNoFallback.determineBidType(ctx, claim, artefact)
 
@@ -156,7 +160,7 @@ echo "invalid_bid_type"
 			},
 		}
 
-		artefact := &blackboard.Artefact{Type: "SomeType"}
+		artefact := &blackboard.Artefact{Header: blackboard.ArtefactHeader{Type: "SomeType"}}
 		claim := &blackboard.Claim{ID: "test-claim", ArtefactID: artefact.ID}
 		bidType, err := engineWithFallback.determineBidType(ctx, claim, artefact)
 
@@ -179,7 +183,7 @@ echo "  claim  "
 			},
 		}
 
-		artefact := &blackboard.Artefact{Type: "SomeType"}
+		artefact := &blackboard.Artefact{Header: blackboard.ArtefactHeader{Type: "SomeType"}}
 		claim := &blackboard.Claim{ID: "test-claim", ArtefactID: artefact.ID}
 		bidType, err := engineWhitespace.determineBidType(ctx, claim, artefact)
 

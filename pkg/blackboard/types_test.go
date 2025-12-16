@@ -2,19 +2,25 @@ package blackboard
 
 import (
 	"testing"
+	"time"
 )
 
 // TestArtefactValidate_Valid tests that valid artefacts pass validation
 func TestArtefactValidate_Valid(t *testing.T) {
 	artefact := &Artefact{
-		ID:              NewID(),
-		LogicalID:       NewID(),
-		Version:         1,
-		StructuralType:  StructuralTypeStandard,
-		Type:            "CodeCommit",
-		ProducedByRole:  "test-agent",
-		Payload:         "abc123",
-		SourceArtefacts: []string{NewID(), NewID()},
+		ID: NewID(),
+		Header: ArtefactHeader{
+			LogicalThreadID: NewID(),
+			Version:         1,
+			StructuralType:  StructuralTypeStandard,
+			Type:            "CodeCommit",
+			ProducedByRole:  "test-agent",
+			ParentHashes:    []string{NewID(), NewID()},
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: ArtefactPayload{
+			Content: "abc123",
+		},
 	}
 
 	if err := artefact.Validate(); err != nil {
@@ -25,14 +31,19 @@ func TestArtefactValidate_Valid(t *testing.T) {
 // TestArtefactValidate_EmptySourceArtefacts tests that empty source artefacts array is valid
 func TestArtefactValidate_EmptySourceArtefacts(t *testing.T) {
 	artefact := &Artefact{
-		ID:              NewID(),
-		LogicalID:       NewID(),
-		Version:         1,
-		StructuralType:  StructuralTypeStandard,
-		Type:            "GoalDefined",
-		ProducedByRole:  "test-agent",
-		Payload:         "Create a REST API",
-		SourceArtefacts: []string{}, // Empty is valid for root artefacts
+		ID: NewID(),
+		Header: ArtefactHeader{
+			LogicalThreadID: NewID(),
+			Version:         1,
+			StructuralType:  StructuralTypeStandard,
+			Type:            "GoalDefined",
+			ProducedByRole:  "test-agent",
+			ParentHashes:    []string{}, // Empty is valid for root artefacts
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: ArtefactPayload{
+			Content: "Create a REST API",
+		},
 	}
 
 	if err := artefact.Validate(); err != nil {
@@ -53,12 +64,16 @@ func TestArtefactValidate_InvalidVersion(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			artefact := &Artefact{
-				ID:             NewID(),
-				Version:        tc.version,
-				StructuralType: StructuralTypeStandard,
-				Type:           "CodeCommit",
-				ProducedByRole: "test-agent",
-				Payload:        "abc123",
+				ID: NewID(),
+				Header: ArtefactHeader{
+					Version:        tc.version,
+					StructuralType: StructuralTypeStandard,
+					Type:           "CodeCommit",
+					ProducedByRole: "test-agent",
+				},
+				Payload: ArtefactPayload{
+					Content: "abc123",
+				},
 			}
 
 			if err := artefact.Validate(); err == nil {
@@ -71,13 +86,17 @@ func TestArtefactValidate_InvalidVersion(t *testing.T) {
 // TestArtefactValidate_InvalidStructuralType tests that invalid structural type fails validation
 func TestArtefactValidate_InvalidStructuralType(t *testing.T) {
 	artefact := &Artefact{
-		ID:             NewID(),
-		LogicalID:      NewID(),
-		Version:        1,
-		StructuralType: "InvalidType",
-		Type:           "CodeCommit",
-		ProducedByRole: "test-agent",
-		Payload:        "abc123",
+		ID: NewID(),
+		Header: ArtefactHeader{
+			LogicalThreadID: NewID(),
+			Version:         1,
+			StructuralType:  "InvalidType",
+			Type:            "CodeCommit",
+			ProducedByRole:  "test-agent",
+		},
+		Payload: ArtefactPayload{
+			Content: "abc123",
+		},
 	}
 
 	if err := artefact.Validate(); err == nil {
@@ -88,13 +107,17 @@ func TestArtefactValidate_InvalidStructuralType(t *testing.T) {
 // TestArtefactValidate_EmptyType tests that empty type fails validation
 func TestArtefactValidate_EmptyType(t *testing.T) {
 	artefact := &Artefact{
-		ID:             NewID(),
-		LogicalID:      NewID(),
-		Version:        1,
-		StructuralType: StructuralTypeStandard,
-		Type:           "",
-		ProducedByRole: "test-agent",
-		Payload:        "abc123",
+		ID: NewID(),
+		Header: ArtefactHeader{
+			LogicalThreadID: NewID(),
+			Version:         1,
+			StructuralType:  StructuralTypeStandard,
+			Type:            "",
+			ProducedByRole:  "test-agent",
+		},
+		Payload: ArtefactPayload{
+			Content: "abc123",
+		},
 	}
 
 	if err := artefact.Validate(); err == nil {
@@ -105,13 +128,17 @@ func TestArtefactValidate_EmptyType(t *testing.T) {
 // TestArtefactValidate_EmptyProducedByRole tests that empty produced_by_role fails validation
 func TestArtefactValidate_EmptyProducedByRole(t *testing.T) {
 	artefact := &Artefact{
-		ID:             NewID(),
-		LogicalID:      NewID(),
-		Version:        1,
-		StructuralType: StructuralTypeStandard,
-		Type:           "CodeCommit",
-		ProducedByRole: "",
-		Payload:        "abc123",
+		ID: NewID(),
+		Header: ArtefactHeader{
+			LogicalThreadID: NewID(),
+			Version:         1,
+			StructuralType:  StructuralTypeStandard,
+			Type:            "CodeCommit",
+			ProducedByRole:  "",
+		},
+		Payload: ArtefactPayload{
+			Content: "abc123",
+		},
 	}
 
 	if err := artefact.Validate(); err == nil {

@@ -37,10 +37,10 @@ func TestIsAtWorkerLimit(t *testing.T) {
 
 func TestWorkerCleanupLogic(t *testing.T) {
 	// Test the internal logic of cleanupWorker without actual Docker calls
-	// We can't easily mock Docker client here without complex setup, 
+	// We can't easily mock Docker client here without complex setup,
 	// so we'll test the state management part if possible.
 	// However, cleanupWorker calls dockerClient.ContainerRemove which will panic if nil.
 	// So we skip deep logic testing here and rely on integration tests or future refactoring for testability.
-	
+
 	// For now, IsAtWorkerLimit provides some coverage.
 }

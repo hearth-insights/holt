@@ -5,17 +5,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"time"
 
-	"github.com/hearth-insights/holt/pkg/blackboard"
 	"github.com/google/uuid"
+	"github.com/hearth-insights/holt/pkg/blackboard"
 )
 
 // QuestionPayload represents the JSON structure stored in Question artefact payloads.
 // M4.1: This schema is defined in the design document section 2.1.
 type QuestionPayload struct {
-	QuestionText      string `json:"question_text"`
-	TargetArtefactID  string `json:"target_artefact_id"`
-	Routing           string `json:"routing,omitempty"` // "auto" (default) or "human"
+	QuestionText     string `json:"question_text"`
+	TargetArtefactID string `json:"target_artefact_id"`
+	Routing          string `json:"routing,omitempty"` // "auto" (default) or "human"
 }
 
 // handleQuestionArtefact processes a Question artefact by terminating the original claim
@@ -24,7 +25,7 @@ type QuestionPayload struct {
 func (e *Engine) handleQuestionArtefact(ctx context.Context, questionArtefact *blackboard.Artefact) error {
 	// Parse Question payload
 	var payload QuestionPayload
-	if err := json.Unmarshal([]byte(questionArtefact.Payload), &payload); err != nil {
+	if err := json.Unmarshal([]byte(questionArtefact.Payload.Content), &payload); err != nil {
 		log.Printf("[Orchestrator] Failed to parse Question payload (artefact: %s): %v", questionArtefact.ID, err)
 		e.logEvent("question_parse_error", map[string]interface{}{
 			"question_id": questionArtefact.ID,
@@ -67,7 +68,7 @@ func (e *Engine) handleQuestionArtefact(ctx context.Context, questionArtefact *b
 	}
 
 	// Check iteration limit using target artefact version
-	iterationCount := targetArtefact.Version - 1
+	iterationCount := targetArtefact.Header.Version - 1
 	maxIterations := *e.config.Orchestrator.MaxReviewIterations
 
 	if maxIterations > 0 && iterationCount >= maxIterations {
@@ -88,22 +89,38 @@ func (e *Engine) handleQuestionArtefact(ctx context.Context, questionArtefact *b
 			log.Printf("[Orchestrator] Failed to publish human_input_required event: %v", err)
 			return fmt.Errorf("failed to publish human_input_required event: %w", err)
 		}
+
+		// Terminate the original claim as the question interrupts the flow
+		originalClaim.Status = blackboard.ClaimStatusTerminated
+		originalClaim.TerminationReason = fmt.Sprintf("Agent asked a clarifying question (Question artefact: %s) with direct-to-human routing", questionArtefact.ID)
+		if err := e.client.UpdateClaim(ctx, originalClaim); err != nil {
+			return fmt.Errorf("failed to terminate original claim (human routing): %w", err)
+		}
+
 		// Bypass feedback claim creation
 		return nil
 	}
 
 	// M4.1: Special handling for questions targeting "user" (legacy implicit routing)
-	if targetArtefact.ProducedByRole == "user" {
+	if targetArtefact.Header.ProducedByRole == "user" {
 		if err := e.publishHumanInputRequiredEvent(ctx, questionArtefact.ID, payload.QuestionText, targetArtefact.ID); err != nil {
 			log.Printf("[Orchestrator] Failed to publish human_input_required event: %v", err)
 		}
+
+		// Terminate the original claim as the question interrupts the flow
+		originalClaim.Status = blackboard.ClaimStatusTerminated
+		originalClaim.TerminationReason = fmt.Sprintf("Agent asked a clarifying question (Question artefact: %s)", questionArtefact.ID)
+		if err := e.client.UpdateClaim(ctx, originalClaim); err != nil {
+			return fmt.Errorf("failed to terminate original claim (user target): %w", err)
+		}
+
 		// For user targets, we don't create a feedback claim or look up an agent.
 		// The event signals external intervention is needed.
 		return nil
 	}
 
 	// Find the agent that produced the target artefact
-	producerAgent, err := e.findAgentByRole(targetArtefact.ProducedByRole)
+	producerAgent, err := e.findAgentByRole(targetArtefact.Header.ProducedByRole)
 	if err != nil {
 		// Agent no longer exists in config
 		return e.terminateMissingAgent(ctx, originalClaim, targetArtefact)
@@ -112,7 +129,7 @@ func (e *Engine) handleQuestionArtefact(ctx context.Context, questionArtefact *b
 	// Create feedback claim assigned to the original author
 	feedbackClaim := &blackboard.Claim{
 		ID:                    uuid.New().String(),
-		ArtefactID:            targetArtefact.ID,             // Target is the questioned artefact
+		ArtefactID:            targetArtefact.ID, // Target is the questioned artefact
 		Status:                blackboard.ClaimStatusPendingAssignment,
 		GrantedExclusiveAgent: producerAgent,
 		AdditionalContextIDs:  []string{questionArtefact.ID}, // Inject Question into context
@@ -139,6 +156,13 @@ func (e *Engine) handleQuestionArtefact(ctx context.Context, questionArtefact *b
 	// Track feedback claim for completion checking
 	e.pendingAssignmentClaims[feedbackClaim.ID] = targetArtefact.ID
 
+	// Terminate the original claim
+	originalClaim.Status = blackboard.ClaimStatusTerminated
+	originalClaim.TerminationReason = fmt.Sprintf("Agent asked a clarifying question (Question artefact: %s)", questionArtefact.ID)
+	if err := e.client.UpdateClaim(ctx, originalClaim); err != nil {
+		return fmt.Errorf("failed to terminate original claim: %w", err)
+	}
+
 	return nil
 }
 
@@ -153,7 +177,7 @@ func (e *Engine) findClaimByProducedArtefact(ctx context.Context, artefactID str
 
 	// The artefact's source should contain the target artefact of the claim
 	// Find a claim whose ArtefactID matches any of the source artefacts
-	for _, sourceID := range artefact.SourceArtefacts {
+	for _, sourceID := range artefact.Header.ParentHashes {
 		claim, err := e.client.GetClaimByArtefactID(ctx, sourceID)
 		if err != nil {
 			if blackboard.IsNotFound(err) {
@@ -178,21 +202,30 @@ func (e *Engine) terminateQuestionIterationLimit(ctx context.Context, claim *bla
 
 	// Parse question text for better error message
 	var payload QuestionPayload
-	_ = json.Unmarshal([]byte(questionArtefact.Payload), &payload)
+	_ = json.Unmarshal([]byte(questionArtefact.Payload.Content), &payload)
 
 	failurePayload := fmt.Sprintf("Max review iterations (%d) exceeded for artefact %s (version %d). Latest question: %s",
-		maxIterations, artefact.ID, artefact.Version, payload.QuestionText)
+		maxIterations, artefact.ID, artefact.Header.Version, payload.QuestionText)
 
 	failure := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeFailure,
-		Type:            "MaxIterationsExceeded",
-		Payload:         failurePayload,
-		SourceArtefacts: []string{artefact.ID, questionArtefact.ID},
-		ProducedByRole:  "orchestrator",
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeFailure,
+			Type:            "MaxIterationsExceeded",
+			ProducedByRole:  "orchestrator",
+			ParentHashes:    []string{artefact.ID, questionArtefact.ID},
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: failurePayload,
+		},
 	}
+	failureHash, err := blackboard.ComputeArtefactHash(failure)
+	if err != nil {
+		return fmt.Errorf("failed to compute hash for Failure artefact: %w", err)
+	}
+	failure.ID = failureHash
 
 	if err := e.client.CreateArtefact(ctx, failure); err != nil {
 		return fmt.Errorf("failed to create Failure artefact: %w", err)
@@ -221,15 +254,24 @@ func (e *Engine) createTargetNotFoundFailure(ctx context.Context, questionArtefa
 	failurePayload := fmt.Sprintf("Cannot process Question: target artefact '%s' not found in Redis.", targetArtefactID)
 
 	failure := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeFailure,
-		Type:            "TargetArtefactNotFound",
-		Payload:         failurePayload,
-		SourceArtefacts: []string{questionArtefact.ID},
-		ProducedByRole:  "orchestrator",
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(), // Use NewID for thread
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeFailure,
+			Type:            "TargetArtefactNotFound",
+			ProducedByRole:  "orchestrator",
+			ParentHashes:    []string{questionArtefact.ID},
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: failurePayload,
+		},
 	}
+	failureHash, err := blackboard.ComputeArtefactHash(failure)
+	if err != nil {
+		return fmt.Errorf("failed to compute hash for Failure artefact: %w", err)
+	}
+	failure.ID = failureHash
 
 	if err := e.client.CreateArtefact(ctx, failure); err != nil {
 		return fmt.Errorf("failed to create Failure artefact: %w", err)

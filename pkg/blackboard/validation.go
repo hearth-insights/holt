@@ -19,11 +19,11 @@ func (p *ArtefactPayload) Validate() error {
 	return nil
 }
 
-// Validate checks if the VerifiableArtefact has valid field values.
+// Validate checks if the Artefact has valid field values.
 // Does NOT verify the cryptographic hash - use ValidateArtefactHash for that.
 //
 // Returns an error if any validation fails.
-func (a *VerifiableArtefact) Validate() error {
+func (a *Artefact) Validate() error {
 	// Validate hash ID format (64 lowercase hex characters)
 	if !isValidSHA256Hash(a.ID) {
 		return fmt.Errorf("invalid hash ID: must be 64 lowercase hex characters, got %q", a.ID)

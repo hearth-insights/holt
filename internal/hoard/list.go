@@ -35,23 +35,23 @@ type FilterCriteria struct {
 // matchesFilter returns true if the artefact matches all filter criteria.
 func (fc *FilterCriteria) matchesFilter(art *blackboard.Artefact) bool {
 	// Time filtering
-	if fc.SinceTimestampMs > 0 && art.CreatedAtMs < fc.SinceTimestampMs {
+	if fc.SinceTimestampMs > 0 && art.Header.CreatedAtMs < fc.SinceTimestampMs {
 		return false
 	}
-	if fc.UntilTimestampMs > 0 && art.CreatedAtMs > fc.UntilTimestampMs {
+	if fc.UntilTimestampMs > 0 && art.Header.CreatedAtMs > fc.UntilTimestampMs {
 		return false
 	}
 
 	// Type filtering - glob pattern matching
 	if fc.TypeGlob != "" {
-		matched, err := filepath.Match(fc.TypeGlob, art.Type)
+		matched, err := filepath.Match(fc.TypeGlob, art.Header.Type)
 		if err != nil || !matched {
 			return false
 		}
 	}
 
 	// Agent filtering - exact match on produced_by_role
-	if fc.AgentRole != "" && art.ProducedByRole != fc.AgentRole {
+	if fc.AgentRole != "" && art.Header.ProducedByRole != fc.AgentRole {
 		return false
 	}
 
@@ -121,7 +121,7 @@ func ListArtefacts(ctx context.Context, bbClient *blackboard.Client, instanceNam
 
 	// Sort by creation time (oldest first) for chronological output
 	sort.Slice(artefacts, func(i, j int) bool {
-		return artefacts[i].CreatedAtMs < artefacts[j].CreatedAtMs
+		return artefacts[i].Header.CreatedAtMs < artefacts[j].Header.CreatedAtMs
 	})
 
 	// Format output based on requested format

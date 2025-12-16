@@ -148,7 +148,6 @@ func TestLoadConfig_MissingAgentName(t *testing.T) {
 	}
 }
 
-
 func TestLoadConfig_MissingRedisURL(t *testing.T) {
 	// Set up environment with missing REDIS_URL
 	os.Setenv("HOLT_INSTANCE_NAME", "test-instance")
@@ -213,7 +212,6 @@ func TestLoadConfig_EmptyAgentName(t *testing.T) {
 		t.Errorf("Expected error '%s', got '%s'", expected, err.Error())
 	}
 }
-
 
 func TestLoadConfig_EmptyRedisURL(t *testing.T) {
 	// Set up environment with empty REDIS_URL

@@ -3,9 +3,9 @@ package pup
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/hearth-insights/holt/pkg/blackboard"
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -26,71 +26,106 @@ func TestAssembleContext_VersionShadowing_DirectV1(t *testing.T) {
 
 	// 1. Create Grandparent (The original input we must not lose)
 	grandparent := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "ClinicalTerms",
-		ProducedByRole:  "test-agent",
-		Payload:         "terms-v1",
-		SourceArtefacts: []string{},
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "ClinicalTerms",
+			ProducedByRole:  "test-agent",
+			ParentHashes:    []string{},
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "terms-v1",
+		},
 	}
+	hash, err := blackboard.ComputeArtefactHash(grandparent)
+	require.NoError(t, err)
+	grandparent.ID = hash
 	require.NoError(t, bbClient.CreateArtefact(ctx, grandparent))
 
 	// 2. Create Parent V1 (Links to Grandparent)
-	parentLogicalID := uuid.New().String()
+	parentLogicalID := blackboard.NewID()
 	parentV1 := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       parentLogicalID,
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "HPOMappingResult",
-		ProducedByRole:  "test-agent",
-		Payload:         "mapping-v1",
-		SourceArtefacts: []string{grandparent.ID},
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: parentLogicalID,
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "HPOMappingResult",
+			ProducedByRole:  "test-agent",
+			ParentHashes:    []string{grandparent.ID},
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "mapping-v1",
+		},
 	}
+	v1Hash, err := blackboard.ComputeArtefactHash(parentV1)
+	require.NoError(t, err)
+	parentV1.ID = v1Hash
 	require.NoError(t, bbClient.CreateArtefact(ctx, parentV1))
 	require.NoError(t, bbClient.AddVersionToThread(ctx, parentLogicalID, parentV1.ID, 1))
 
 	// 3. Create Parent V2 (Rework - NO link to Grandparent)
 	parentV2 := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       parentLogicalID,
-		Version:         2,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "HPOMappingResult",
-		ProducedByRole:  "test-agent",
-		Payload:         "mapping-v2",
-		SourceArtefacts: []string{}, // Missing link!
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: parentLogicalID,
+			Version:         2,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "HPOMappingResult",
+			ProducedByRole:  "test-agent",
+			ParentHashes:    []string{}, // Missing link!
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "mapping-v2",
+		},
 	}
+	v2Hash, err := blackboard.ComputeArtefactHash(parentV2)
+	require.NoError(t, err)
+	parentV2.ID = v2Hash
 	require.NoError(t, bbClient.CreateArtefact(ctx, parentV2))
 	require.NoError(t, bbClient.AddVersionToThread(ctx, parentLogicalID, parentV2.ID, 2))
 
 	// 4. Create Parent V3 (Latest - NO link to Grandparent)
 	parentV3 := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       parentLogicalID,
-		Version:         3,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "HPOMappingResult",
-		ProducedByRole:  "test-agent",
-		Payload:         "mapping-v3",
-		SourceArtefacts: []string{}, // Missing link!
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: parentLogicalID,
+			Version:         3,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "HPOMappingResult",
+			ProducedByRole:  "test-agent",
+			ParentHashes:    []string{}, // Missing link!
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "mapping-v3",
+		},
 	}
+	v3Hash, err := blackboard.ComputeArtefactHash(parentV3)
+	require.NoError(t, err)
+	parentV3.ID = v3Hash
 	require.NoError(t, bbClient.CreateArtefact(ctx, parentV3))
 	require.NoError(t, bbClient.AddVersionToThread(ctx, parentLogicalID, parentV3.ID, 3))
 
 	// 5. Create Target (Links to ParentV2 - simulating working from an intermediate state)
 	targetArtefact := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "ReviewResult",
-		ProducedByRole:  "test-agent",
-		Payload:         "review-v1",
-		SourceArtefacts: []string{parentV2.ID}, // Links to V2
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "ReviewResult",
+			ProducedByRole:  "test-agent",
+			ParentHashes:    []string{parentV2.ID}, // Links to V2
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "review-v1",
+		},
 	}
+	targetHash, err := blackboard.ComputeArtefactHash(targetArtefact)
+	require.NoError(t, err)
+	targetArtefact.ID = targetHash
 	require.NoError(t, bbClient.CreateArtefact(ctx, targetArtefact))
 
 	// 6. Assemble Context
@@ -103,7 +138,7 @@ func TestAssembleContext_VersionShadowing_DirectV1(t *testing.T) {
 	// Should contain:
 	// - ParentV3 (Latest version of Parent)
 	// - Grandparent (Merged from V1)
-	
+
 	var foundParentV3, foundGrandparent bool
 	for _, art := range contextChain {
 		if art.ID == parentV3.ID {

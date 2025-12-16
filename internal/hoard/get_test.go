@@ -26,16 +26,26 @@ func TestGetArtefact(t *testing.T) {
 
 		ctx := context.Background()
 
-		// Create test artefact
+		// Create test artefact with proper hash ID
 		artefact := &blackboard.Artefact{
-			ID:              "550e8400-e29b-41d4-a716-446655440000",
-			LogicalID:       "650e8400-e29b-41d4-a716-446655440000",
-			Version:         1,
-			StructuralType:  blackboard.StructuralTypeStandard,
-			Type:            "GoalDefined",
-			ProducedByRole:  "test-agent",
-			SourceArtefacts: []string{},
+			Header: blackboard.ArtefactHeader{
+				LogicalThreadID: blackboard.NewID(),
+				Version:         1,
+				StructuralType:  blackboard.StructuralTypeStandard,
+				Type:            "GoalDefined",
+				ProducedByRole:  "test-agent",
+				ParentHashes:    []string{},
+				CreatedAtMs:     1234567890,
+			},
+			Payload: blackboard.ArtefactPayload{
+				Content: "test payload",
+			},
 		}
+
+		// Compute hash ID
+		hash, err := blackboard.ComputeArtefactHash(artefact)
+		require.NoError(t, err)
+		artefact.ID = hash
 
 		err = bbClient.CreateArtefact(ctx, artefact)
 		require.NoError(t, err)
@@ -50,8 +60,8 @@ func TestGetArtefact(t *testing.T) {
 		err = json.Unmarshal(buf.Bytes(), &result)
 		require.NoError(t, err)
 		assert.Equal(t, artefact.ID, result.ID)
-		assert.Equal(t, artefact.Type, result.Type)
-		assert.Equal(t, artefact.Payload, result.Payload)
+		assert.Equal(t, artefact.Header.Type, result.Header.Type)
+		assert.Equal(t, artefact.Payload.Content, result.Payload.Content)
 	})
 
 	t.Run("artefact not found", func(t *testing.T) {
@@ -68,7 +78,7 @@ func TestGetArtefact(t *testing.T) {
 
 		// Try to get non-existent artefact
 		var buf bytes.Buffer
-		err = GetArtefact(ctx, bbClient, "550e8400-e29b-41d4-a716-446655440000", &buf)
+		err = GetArtefact(ctx, bbClient, "0508eb36a3d0dd327c235b6d900f26455a2ee715300f1c4b78c3d3edce8dafe9", &buf)
 
 		require.Error(t, err)
 		assert.True(t, IsNotFound(err), "error should be ArtefactNotFoundError")
@@ -76,7 +86,7 @@ func TestGetArtefact(t *testing.T) {
 		// Verify error message
 		notFoundErr, ok := err.(*ArtefactNotFoundError)
 		require.True(t, ok)
-		assert.Equal(t, "550e8400-e29b-41d4-a716-446655440000", notFoundErr.ArtefactID)
+		assert.Equal(t, "0508eb36a3d0dd327c235b6d900f26455a2ee715300f1c4b78c3d3edce8dafe9", notFoundErr.ArtefactID)
 		assert.Contains(t, err.Error(), "artefact with ID")
 	})
 
@@ -138,13 +148,15 @@ func TestGetArtefact(t *testing.T) {
 		// Create test artefact with SHA-256 hash ID (64 chars)
 		hashID := "a3f2b9c4e8d6f1a7b5c3e9d2f4a8b6c1e7d3f9a2b8c4e6d1f7a3b9c5e2d8f4a1"
 		artefact := &blackboard.Artefact{
-			ID:              hashID,
-			LogicalID:       "550e8400-e29b-41d4-a716-446655440000",
-			Version:         1,
-			StructuralType:  blackboard.StructuralTypeStandard,
-			Type:            "GoalDefined",
-			ProducedByRole:  "test-agent",
-			SourceArtefacts: []string{},
+			ID: hashID,
+			Header: blackboard.ArtefactHeader{
+				LogicalThreadID: "0508eb36a3d0dd327c235b6d900f26455a2ee715300f1c4b78c3d3edce8dafe9",
+				Version:         1,
+				StructuralType:  blackboard.StructuralTypeStandard,
+				Type:            "GoalDefined",
+				ProducedByRole:  "test-agent",
+				ParentHashes:    []string{},
+			},
 		}
 
 		err = bbClient.CreateArtefact(ctx, artefact)

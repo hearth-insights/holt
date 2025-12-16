@@ -15,9 +15,28 @@ func TestGrantReviewPhase(t *testing.T) {
 	ctx := context.Background()
 	e, _, _ := setupTestEngine(t)
 
+	// Create review artefact
+	reviewArt := &blackboard.Artefact{
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "Code",
+			ProducedByRole:  "Coder",
+			ParentHashes:    []string{},
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "code",
+		},
+	}
+	reviewHash, _ := blackboard.ComputeArtefactHash(reviewArt)
+	reviewArt.ID = reviewHash
+	require.NoError(t, e.client.CreateArtefact(ctx, reviewArt))
+
 	claim := &blackboard.Claim{
 		ID:         "claim-review",
-		ArtefactID: "art-review",
+		ArtefactID: reviewArt.ID,
 		Status:     blackboard.ClaimStatusPendingReview,
 	}
 	require.NoError(t, e.client.CreateClaim(ctx, claim))
@@ -54,10 +73,29 @@ func TestCheckReviewPhaseCompletion(t *testing.T) {
 	ctx := context.Background()
 	e, _, _ := setupTestEngine(t)
 
+	// Create target artefact (needed for claim)
+	targetArtefact := &blackboard.Artefact{
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "Code",
+			ProducedByRole:  "Coder",
+			ParentHashes:    []string{},
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "code",
+		},
+	}
+	targetHash, _ := blackboard.ComputeArtefactHash(targetArtefact)
+	targetArtefact.ID = targetHash
+	require.NoError(t, e.client.CreateArtefact(ctx, targetArtefact))
+
 	// Setup Claim
 	claim := &blackboard.Claim{
 		ID:                  "claim-check",
-		ArtefactID:          "art-target",
+		ArtefactID:          targetArtefact.ID,
 		Status:              blackboard.ClaimStatusPendingReview,
 		GrantedReviewAgents: []string{"Reviewer"},
 	}
@@ -81,20 +119,28 @@ func TestCheckReviewPhaseCompletion(t *testing.T) {
 	assert.Equal(t, blackboard.ClaimStatusPendingReview, updatedClaim.Status)
 
 	// Scenario 2: Complete with Approval
-	// Create approval artefact
-	approval := &blackboard.Artefact{
-		ID:             "art-approval",
-		LogicalID:      "art-approval",
-		Version:        1,
-		StructuralType: blackboard.StructuralTypeStandard,
-		Type:           "Review",
-		ProducedByRole: "Reviewer",
-		Payload:        "{}", // Empty object = approval
+	// Create review artefact 1
+	reviewArt1 := &blackboard.Artefact{
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard, // Standard for review
+			Type:            "Review",
+			ProducedByRole:  "Reviewer",
+			ParentHashes:    []string{claim.ArtefactID},
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "LGTM",
+		},
 	}
-	require.NoError(t, e.client.CreateArtefact(ctx, approval))
+	reviewHash1, _ := blackboard.ComputeArtefactHash(reviewArt1)
+	reviewArt1.ID = reviewHash1
+	err = e.client.CreateArtefact(ctx, reviewArt1)
+	require.NoError(t, err)
 
 	// Update PhaseState
-	phaseState.ReceivedArtefacts["Reviewer"] = approval.ID
+	phaseState.ReceivedArtefacts["Reviewer"] = reviewHash1
 
 	// We need to mock TransitionToNextPhase or ensure it handles end of flow
 	// Since TransitionToNextPhase is complex, we expect it to fail or return nil if no next phase
@@ -102,55 +148,57 @@ func TestCheckReviewPhaseCompletion(t *testing.T) {
 	// Actually, TransitionToNextPhase logic depends on config.
 	// Let's just check that it proceeds past the "all received" check.
 	// If it tries to transition, it means it accepted the approval.
-	
+
 	// However, TransitionToNextPhase might fail if not set up correctly.
 	// Let's assume for this unit test we just want to verify it doesn't terminate for feedback.
-	
+
 	// Wait, CheckReviewPhaseCompletion calls TransitionToNextPhase.
 	// If we want to test REJECTION/FEEDBACK, that's easier because it terminates.
-	
+
 	// Scenario 3: Complete with Feedback (Rejection)
 	// Reset claim status
 	claim.Status = blackboard.ClaimStatusPendingReview
 	require.NoError(t, e.client.UpdateClaim(ctx, claim))
 
-	// Create target artefact (needed for feedback claim creation)
-	targetArtefact := &blackboard.Artefact{
-		ID:             "art-target",
-		LogicalID:      "art-target",
-		Version:        1,
-		StructuralType: blackboard.StructuralTypeStandard,
-		Type:           "Code",
-		ProducedByRole: "Coder",
-		Payload:        "code",
-	}
-	require.NoError(t, e.client.CreateArtefact(ctx, targetArtefact))
-	
+	// Target artefact already created above (targetArtefact)
+	// We reuse it for feedback scenario
+	// Ensure it exists (it does) but "art-target" string usage below needs update?
+	// The test logic re-creates? lines 122-139 were creating "art-target"
+	// We can just skip re-creation or update re-creation to use hash if needed.
+	// But clearer to just remove this re-creation block since we created it at start of test.
+
 	// Create feedback artefact
 	feedback := &blackboard.Artefact{
-		ID:             "art-feedback",
-		LogicalID:      "art-feedback",
-		Version:        1,
-		StructuralType: blackboard.StructuralTypeStandard,
-		Type:           "Review",
-		ProducedByRole: "Reviewer",
-		Payload:        `{"issue": "fix this"}`, // Non-empty = feedback
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "Review",
+			ProducedByRole:  "Reviewer",
+			ParentHashes:    []string{claim.ArtefactID},
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: `{"issue": "fix this"}`,
+		},
 	}
+	feedbackHash, _ := blackboard.ComputeArtefactHash(feedback)
+	feedback.ID = feedbackHash
 	require.NoError(t, e.client.CreateArtefact(ctx, feedback))
-	
+
 	// Update PhaseState
 	phaseState.ReceivedArtefacts["Reviewer"] = feedback.ID
-	
+
 	// Run check
 	err = e.CheckReviewPhaseCompletion(ctx, claim, phaseState)
 	require.NoError(t, err)
-	
+
 	// Verify claim terminated
 	updatedClaim, err = e.client.GetClaim(ctx, claim.ID)
 	require.NoError(t, err)
 	assert.Equal(t, blackboard.ClaimStatusTerminated, updatedClaim.Status)
-	assert.Contains(t, updatedClaim.TerminationReason, "art-feedback")
-	
+	assert.Contains(t, updatedClaim.TerminationReason, feedback.ID)
+
 	// Verify feedback claim created
 	feedbackClaims, err := e.client.GetClaimsByStatus(ctx, []string{string(blackboard.ClaimStatusPendingAssignment)})
 	require.NoError(t, err)
@@ -164,7 +212,7 @@ func TestCheckReviewPhaseCompletion_GetArtefactError(t *testing.T) {
 	// Setup Claim
 	claim := &blackboard.Claim{
 		ID:                  "claim-error-check",
-		ArtefactID:          "art-missing", // This artefact does not exist
+		ArtefactID:          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", // Valid hash format, but likely missing
 		Status:              blackboard.ClaimStatusPendingReview,
 		GrantedReviewAgents: []string{"Reviewer"},
 	}
@@ -181,15 +229,25 @@ func TestCheckReviewPhaseCompletion_GetArtefactError(t *testing.T) {
 
 	// Create approval artefact so we pass the "reviews received" check
 	approval := &blackboard.Artefact{
-		ID:             "art-approval",
-		LogicalID:      "art-approval",
-		Version:        1,
-		StructuralType: blackboard.StructuralTypeStandard,
-		Type:           "Review",
-		ProducedByRole: "Reviewer",
-		Payload:        "{}",
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "Review",
+			ProducedByRole:  "Reviewer",
+			ParentHashes:    []string{claim.ArtefactID},
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "{}",
+		},
 	}
+	approvalHash, _ := blackboard.ComputeArtefactHash(approval)
+	approval.ID = approvalHash
 	require.NoError(t, e.client.CreateArtefact(ctx, approval))
+
+	// Update PhaseState with computed hash
+	phaseState.ReceivedArtefacts["Reviewer"] = approvalHash
 
 	// Run check - should fail when trying to fetch "art-missing" for breakpoint evaluation
 	err := e.CheckReviewPhaseCompletion(ctx, claim, phaseState)

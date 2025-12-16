@@ -220,7 +220,7 @@ func runForage(cmd *cobra.Command, args []string) error {
 
 		// Create V2-compatible artefact to compute hash
 		// M4.7: Anchor to active SystemManifest
-		v2Artefact := &blackboard.VerifiableArtefact{
+		artefact := &blackboard.Artefact{
 			Header: blackboard.ArtefactHeader{
 				ParentHashes:    []string{activeManifestID}, // M4.7: Anchor to SystemManifest
 				LogicalThreadID: blackboard.NewID(),         // New thread
@@ -236,27 +236,13 @@ func runForage(cmd *cobra.Command, args []string) error {
 			},
 		}
 
-		hash, err := blackboard.ComputeArtefactHash(v2Artefact)
+		hash, err := blackboard.ComputeArtefactHash(artefact)
 		if err != nil {
 			return fmt.Errorf("failed to compute hash: %w", err)
 		}
-		v2Artefact.ID = hash
+		artefact.ID = hash
 
-		// Convert to V1 for client.CreateArtefact
-		v1Artefact := &blackboard.Artefact{
-			ID:              v2Artefact.ID,
-			LogicalID:       v2Artefact.Header.LogicalThreadID,
-			Version:         v2Artefact.Header.Version,
-			StructuralType:  v2Artefact.Header.StructuralType,
-			Type:            v2Artefact.Header.Type,
-			Payload:         v2Artefact.Payload.Content,
-			SourceArtefacts: v2Artefact.Header.ParentHashes,
-			ProducedByRole:  v2Artefact.Header.ProducedByRole,
-			CreatedAtMs:     v2Artefact.Header.CreatedAtMs,
-			ClaimID:         v2Artefact.Header.ClaimID,
-		}
-
-		if err := bbClient.CreateArtefact(ctx, v1Artefact); err != nil {
+		if err := bbClient.CreateArtefact(ctx, artefact); err != nil {
 			return fmt.Errorf("failed to create artefact: %w", err)
 		}
 
@@ -267,7 +253,7 @@ func runForage(cmd *cobra.Command, args []string) error {
 	// Non-watch mode: create artefact and return
 	// Create V2-compatible artefact to compute hash
 	// M4.7: Anchor to active SystemManifest
-	v2Artefact := &blackboard.VerifiableArtefact{
+	artefact := &blackboard.Artefact{
 		Header: blackboard.ArtefactHeader{
 			ParentHashes:    []string{activeManifestID}, // M4.7: Anchor to SystemManifest
 			LogicalThreadID: blackboard.NewID(),         // New thread
@@ -283,31 +269,17 @@ func runForage(cmd *cobra.Command, args []string) error {
 		},
 	}
 
-	hash, err := blackboard.ComputeArtefactHash(v2Artefact)
+	hash, err := blackboard.ComputeArtefactHash(artefact)
 	if err != nil {
 		return fmt.Errorf("failed to compute hash: %w", err)
 	}
-	v2Artefact.ID = hash
+	artefact.ID = hash
 
-	// Convert to V1 for client.CreateArtefact
-	v1Artefact := &blackboard.Artefact{
-		ID:              v2Artefact.ID,
-		LogicalID:       v2Artefact.Header.LogicalThreadID,
-		Version:         v2Artefact.Header.Version,
-		StructuralType:  v2Artefact.Header.StructuralType,
-		Type:            v2Artefact.Header.Type,
-		Payload:         v2Artefact.Payload.Content,
-		SourceArtefacts: v2Artefact.Header.ParentHashes,
-		ProducedByRole:  v2Artefact.Header.ProducedByRole,
-		CreatedAtMs:     v2Artefact.Header.CreatedAtMs,
-		ClaimID:         v2Artefact.Header.ClaimID,
-	}
-
-	if err := bbClient.CreateArtefact(ctx, v1Artefact); err != nil {
+	if err := bbClient.CreateArtefact(ctx, artefact); err != nil {
 		return fmt.Errorf("failed to create artefact: %w", err)
 	}
 
-	printer.Success("Goal artefact created: %s\n", v1Artefact.ID)
+	printer.Success("Goal artefact created: %s\n", artefact.ID)
 
 	printer.Info("\nNext steps:\n")
 	printer.Info("  • View all artefacts: holt hoard --name %s\n", targetInstanceName)

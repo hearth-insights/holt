@@ -126,6 +126,7 @@ services:
 		LogicalThreadID: blackboard.NewID(),
 		Version:         2, // V2+ continuation of workflow
 		Type:            "CodeCommit",
+		CreatedAtMs:     time.Now().UnixMilli(),
 	}, "commit-abc123")
 	t.Logf("✓ CodeCommit created: %s", codeCommit.ID)
 
@@ -140,6 +141,7 @@ services:
 		LogicalThreadID: blackboard.NewID(),
 		Version:         2, // V2+ continuation
 		Type:            "TestResult",
+		CreatedAtMs:     time.Now().UnixMilli(),
 	}, "tests-passed")
 	t.Logf("✓ TestResult created: %s", testResult.ID)
 
@@ -148,6 +150,7 @@ services:
 		LogicalThreadID: blackboard.NewID(),
 		Version:         2, // V2+ continuation
 		Type:            "LintResult",
+		CreatedAtMs:     time.Now().UnixMilli(),
 	}, "lint-clean")
 	t.Logf("✓ LintResult created: %s", lintResult.ID)
 
@@ -168,6 +171,7 @@ services:
 		LogicalThreadID: blackboard.NewID(),
 		Version:         2, // V2+ continuation
 		Type:            "SecurityScan",
+		CreatedAtMs:     time.Now().UnixMilli(),
 	}, "no-vulnerabilities")
 	t.Logf("✓ SecurityScan created: %s", securityScan.ID)
 
@@ -181,7 +185,7 @@ services:
 	t.Logf("✓ Synchronizer executed successfully: DeployResult %s", deployResult.ID)
 
 	// Verify DeployResult payload contains confirmation
-	require.Contains(t, deployResult.Payload, "synchronized", "DeployResult should confirm synchronization")
+	require.Contains(t, deployResult.Payload.Content, "synchronized", "DeployResult should confirm synchronization")
 
 	t.Log("=== Named Pattern E2E Test PASSED ===")
 }
@@ -287,6 +291,7 @@ services:
 		LogicalThreadID: blackboard.NewID(),
 		Version:         2, // V2+ continuation
 		Type:            "DataBatch",
+		CreatedAtMs:     time.Now().UnixMilli(),
 	}, "batch-123")
 	t.Logf("✓ DataBatch created: %s", dataBatch.ID)
 
@@ -304,8 +309,8 @@ services:
 	// Verify metadata injection
 	for i, record := range records {
 		var metadata map[string]string
-		if record.Metadata != "" {
-			_ = json.Unmarshal([]byte(record.Metadata), &metadata)
+		if record.Header.Metadata != "" {
+			_ = json.Unmarshal([]byte(record.Header.Metadata), &metadata)
 		}
 
 		if metadata == nil {
@@ -328,7 +333,7 @@ services:
 	require.NotNil(t, report, "AggregatedReport should exist")
 	t.Logf("✓ Aggregator synchronized: %s", report.ID)
 
-	require.Contains(t, report.Payload, "5 records", "Report should mention 5 records")
+	require.Contains(t, report.Payload.Content, "5 records", "Report should mention 5 records")
 
 	t.Log("=== Producer-Declared E2E Test PASSED ===")
 }
@@ -416,6 +421,7 @@ services:
 		LogicalThreadID: blackboard.NewID(),
 		Version:         2, // V2+ continuation
 		Type:            "CodeCommit",
+		CreatedAtMs:     time.Now().UnixMilli(),
 	}, "commit-xyz")
 	t.Logf("✓ CodeCommit created: %s", codeCommit.ID)
 
@@ -427,6 +433,7 @@ services:
 		LogicalThreadID: blackboard.NewID(),
 		Version:         2, // V2+ continuation
 		Type:            "TestResult",
+		CreatedAtMs:     time.Now().UnixMilli(),
 	}, "passed")
 
 	// Create second artefact immediately (race condition)
@@ -435,6 +442,7 @@ services:
 		LogicalThreadID: blackboard.NewID(),
 		Version:         2, // V2+ continuation
 		Type:            "LintResult",
+		CreatedAtMs:     time.Now().UnixMilli(),
 	}, "clean")
 
 	t.Logf("✓ Both prerequisites created (race): TestResult=%s, LintResult=%s", testResult.ID, lintResult.ID)
@@ -531,6 +539,7 @@ services:
 		LogicalThreadID: blackboard.NewID(),
 		Version:         1,
 		Type:            "CodeCommit",
+		CreatedAtMs:     time.Now().UnixMilli(),
 	}, "commit-recursive")
 	t.Logf("✓ CodeCommit: %s", codeCommit.ID)
 
@@ -540,6 +549,7 @@ services:
 		LogicalThreadID: blackboard.NewID(),
 		Version:         2, // M4.7: Version>1 to bypass root manifest validation
 		Type:            "BuildResult",
+		CreatedAtMs:     time.Now().UnixMilli(),
 	}, "build-ok")
 	t.Logf("✓ BuildResult: %s", buildResult.ID)
 
@@ -549,6 +559,7 @@ services:
 		LogicalThreadID: blackboard.NewID(),
 		Version:         2, // M4.7: Version>1 to bypass root manifest validation
 		Type:            "TestResult",
+		CreatedAtMs:     time.Now().UnixMilli(),
 	}, "tests-passed")
 	t.Logf("✓ TestResult (grandchild): %s", testResult.ID)
 
@@ -564,6 +575,7 @@ services:
 		LogicalThreadID: blackboard.NewID(),
 		Version:         2, // M4.7: Version>1 to bypass root manifest validation
 		Type:            "LintResult",
+		CreatedAtMs:     time.Now().UnixMilli(),
 	}, "lint-clean")
 	t.Logf("✓ LintResult: %s", lintResult.ID)
 
@@ -653,6 +665,7 @@ services:
 		LogicalThreadID: blackboard.NewID(),
 		Version:         1,
 		Type:            "CodeCommit",
+		CreatedAtMs:     time.Now().UnixMilli(),
 	}, "commit-depth-test")
 	t.Logf("✓ CodeCommit: %s", codeCommit.ID)
 
@@ -662,6 +675,7 @@ services:
 		LogicalThreadID: blackboard.NewID(),
 		Version:         2, // M4.7: Version>1 to bypass root manifest validation
 		Type:            "BuildResult",
+		CreatedAtMs:     time.Now().UnixMilli(),
 	}, "build-ok")
 	t.Logf("✓ BuildResult: %s", buildResult.ID)
 
@@ -671,6 +685,7 @@ services:
 		LogicalThreadID: blackboard.NewID(),
 		Version:         2, // M4.7: Version>1 to bypass root manifest validation
 		Type:            "TestResult",
+		CreatedAtMs:     time.Now().UnixMilli(),
 	}, "tests-passed")
 	t.Logf("✓ TestResult (grandchild): %s", testResult.ID)
 
@@ -680,6 +695,7 @@ services:
 		LogicalThreadID: blackboard.NewID(),
 		Version:         2, // M4.7: Version>1 to bypass root manifest validation
 		Type:            "LintResult",
+		CreatedAtMs:     time.Now().UnixMilli(),
 	}, "lint-clean")
 	t.Logf("✓ LintResult: %s", lintResult.ID)
 
@@ -726,7 +742,7 @@ func getArtefactsByType(ctx context.Context, bbClient *blackboard.Client, artefa
 
 	for _, artefactID := range artefactIDs {
 		artefact, err := bbClient.GetArtefact(ctx, artefactID)
-		if err == nil && artefact != nil && artefact.Type == artefactType {
+		if err == nil && artefact != nil && artefact.Header.Type == artefactType {
 			results = append(results, artefact)
 		}
 	}

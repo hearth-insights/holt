@@ -46,7 +46,7 @@ func (e *Engine) executeWork(ctx context.Context, claim *blackboard.Claim) {
 	}
 
 	log.Printf("[INFO] Fetched target artefact: artefact_id=%s type=%s",
-		targetArtefact.ID, targetArtefact.Type)
+		targetArtefact.ID, targetArtefact.Header.Type)
 
 	// Prepare tool input with context assembly
 	inputJSON, err := e.prepareToolInput(ctx, claim, targetArtefact)
@@ -98,6 +98,13 @@ func (e *Engine) executeWork(ctx context.Context, claim *blackboard.Claim) {
 	artefacts, err := e.createVerifiableResultArtefacts(ctx, claim, outputs, targetArtefact)
 	if err != nil {
 		log.Printf("[ERROR] Failed to create artefacts: claim_id=%s error=%v", claim.ID, err)
+		// Check if this is a terminal failure
+		if targetArtefact.Header.Type == "Failure" {
+			e.createFailureArtefact(ctx, claim, 0, stdout, stderr,
+				fmt.Sprintf("Tool succeeded but artefact creation failed: %v", err))
+			e.createTerminalArtefact(ctx, claim, 0)
+			return
+		}
 		// Try to create a Failure artefact describing the artefact creation failure
 		e.createFailureArtefact(ctx, claim, 0, stdout, stderr,
 			fmt.Sprintf("Tool succeeded but artefact creation failed: %v", err))
@@ -386,82 +393,10 @@ func (e *Engine) parseToolOutputs(fd3Result string) ([]ToolOutput, error) {
 	return outputs, nil
 }
 
-// createResultArtefact builds a new artefact from the tool output and writes it to the blackboard.
-// M2.4: Uses the DERIVATIVE relationship model for new work
-// M3.3: Automatically manages versioning for feedback claims (rework)
-//
-// For regular claims:
-//   - New logical_id (creates new logical thread)
-//   - Version = 1 (first version of this new work)
-//   - source_artefacts = [claim.ArtefactID] (links back to input)
-//
-// For feedback claims (pending_assignment):
-//   - Same logical_id as target (continues thread)
-//   - Version = target.Version + 1 (increment version)
-//   - Same type as target (rework, not new type)
-//   - source_artefacts = [target.ID] + claim.AdditionalContextIDs (includes Review artefacts)
-//
-// Agents remain completely unaware of this versioning logic.
-func (e *Engine) createResultArtefact(ctx context.Context, claim *blackboard.Claim, output *ToolOutput) (*blackboard.Artefact, error) {
-	// M2.4: Validate git commit for CodeCommit artefacts
-	if output.ArtefactType == "CodeCommit" {
-		log.Printf("[INFO] Validating git commit: hash=%s", output.ArtefactPayload)
-		if err := validateCommitExists(output.ArtefactPayload); err != nil {
-			return nil, fmt.Errorf("git commit validation failed for hash %s: %w",
-				output.ArtefactPayload, err)
-		}
-		log.Printf("[DEBUG] Git commit validation passed: hash=%s", output.ArtefactPayload)
-	}
-
-	// M3.3: Check if this is a feedback claim (rework scenario)
-	if claim.Status == blackboard.ClaimStatusPendingAssignment {
-		// This is a feedback claim - create rework artefact
-		return e.createReworkArtefact(ctx, claim, output)
-	}
-
-	// Regular claim - create new work artefact
-	// Generate new IDs
-	artefactID := blackboard.NewID()
-	logicalID := artefactID // Derivative: new logical thread
-
-	artefact := &blackboard.Artefact{
-		ID:              artefactID,
-		LogicalID:       logicalID,
-		Version:         1, // First version of new thread
-		StructuralType:  output.GetStructuralType(),
-		Type:            output.ArtefactType,
-		Payload:         output.ArtefactPayload,
-		SourceArtefacts: []string{claim.ArtefactID}, // Derivative from target artefact
-		ProducedByRole:  e.config.AgentName,         // M3.7: AgentName IS the role
-		CreatedAtMs:     time.Now().UnixMilli(),     // M3.9: Millisecond precision timestamp
-	}
-
-	// Create artefact in Redis (also publishes event)
-	if err := e.bbClient.CreateArtefact(ctx, artefact); err != nil {
-		return nil, fmt.Errorf("failed to create artefact: %w", err)
-	}
-
-	// Add to thread tracking
-	if err := e.bbClient.AddVersionToThread(ctx, logicalID, artefactID, 1); err != nil {
-		// Log but don't fail - artefact was created successfully
-		log.Printf("[WARN] Failed to add version to thread: logical_id=%s error=%v", logicalID, err)
-	}
-
-	// M4.3: Process checkpoints if present
-	if len(output.Checkpoints) > 0 {
-		if err := e.processCheckpoints(ctx, output.Checkpoints, artefact.LogicalID); err != nil {
-			// Log but don't fail - main artefact was created successfully
-			log.Printf("[WARN] Failed to process checkpoints: %v", err)
-		}
-	}
-
-	return artefact, nil
-}
-
-// createVerifiableResultArtefact creates a V2 VerifiableArtefact with cryptographic hash ID.
-// M4.6: This is the hash-based artefact creation path for Phase 3.
+// createResultArtefact creates a V2 Artefact with cryptographic hash ID.
+// M4.6: This is the hash-based artefact creation path.
 // Handles both new work (derivative) and rework (feedback loop) scenarios.
-func (e *Engine) createVerifiableResultArtefact(ctx context.Context, claim *blackboard.Claim, output *ToolOutput, targetArtefact *blackboard.Artefact) (*blackboard.VerifiableArtefact, error) {
+func (e *Engine) createResultArtefact(ctx context.Context, claim *blackboard.Claim, output *ToolOutput, targetArtefact *blackboard.Artefact, metadata string) (*blackboard.Artefact, error) {
 	// M2.4: Validate git commit for CodeCommit artefacts
 	if output.ArtefactType == "CodeCommit" {
 		log.Printf("[INFO] Validating git commit: hash=%s", output.ArtefactPayload)
@@ -480,15 +415,15 @@ func (e *Engine) createVerifiableResultArtefact(ctx context.Context, claim *blac
 	// M3.3: Check if this is a feedback claim (rework scenario)
 	if claim.Status == blackboard.ClaimStatusPendingAssignment {
 		// Rework: Continue existing thread
-		logicalThreadID = targetArtefact.LogicalID
-		version = targetArtefact.Version + 1
+		logicalThreadID = targetArtefact.Header.LogicalThreadID
+		version = targetArtefact.Header.Version + 1
 
 		// Parent hashes = Target + Reviews
 		parentHashes = []string{targetArtefact.ID}
 		parentHashes = append(parentHashes, claim.AdditionalContextIDs...)
 
-		log.Printf("[INFO] Creating V2 rework artefact: logical_id=%s version=%d→%d",
-			logicalThreadID, targetArtefact.Version, version)
+		log.Printf("[INFO] Creating V2 rework artefact: logical_id=%s version=%d->%d",
+			logicalThreadID, targetArtefact.Header.Version, version)
 	} else {
 		// New Work: Start new thread
 		logicalThreadID = blackboard.NewID()
@@ -519,12 +454,13 @@ func (e *Engine) createVerifiableResultArtefact(ctx context.Context, claim *blac
 		ProducedByRole:  e.config.AgentName, // M3.7: AgentName IS the role
 		StructuralType:  output.GetStructuralType(),
 		Type:            output.ArtefactType,
-		ContextForRoles: nil,     // Not used for standard work artefacts
-		ClaimID:         claimID, // M4.6 Security Addendum: Grant Linkage
+		ContextForRoles: nil,      // Not used for standard work artefacts
+		ClaimID:         claimID,  // M4.6 Security Addendum: Grant Linkage
+		Metadata:        metadata, // M5.1: Inject metadata
 	}
 
-	// Create verifiable artefact (ID will be set after hash computation)
-	artefact := &blackboard.VerifiableArtefact{
+	// Create V2 artefact (ID will be set after hash computation)
+	artefact := &blackboard.Artefact{
 		Header:  header,
 		Payload: payload,
 	}
@@ -540,45 +476,14 @@ func (e *Engine) createVerifiableResultArtefact(ctx context.Context, claim *blac
 
 	log.Printf("[INFO] M4.6: Computed artefact hash: %s (Prover step)", hash)
 
-	// Create artefact in Redis (Orchestrator will verify hash - Verifier step)
-	if err := e.bbClient.WriteVerifiableArtefact(ctx, artefact); err != nil {
-		return nil, fmt.Errorf("failed to create verifiable artefact: %w", err)
+	// Create artefact in Redis (uses Lua script for atomic thread updates and events)
+	if err := e.bbClient.CreateArtefact(ctx, artefact); err != nil {
+		return nil, fmt.Errorf("failed to create artefact in Redis: %w", err)
 	}
 
-	// Add to thread tracking
-	if err := e.bbClient.AddVersionToThread(ctx, logicalThreadID, artefact.ID, version); err != nil {
-		log.Printf("[WARN] Failed to add version to thread: logical_id=%s error=%v", logicalThreadID, err)
-	}
-
-	// Publish artefact event (so orchestrator picks it up)
-	// Note: In full V2, this would be integrated into WriteVerifiableArtefact
-	// For now, we manually publish to maintain compatibility
-	v1Wrapper := &blackboard.Artefact{
-		ID:              artefact.ID,
-		LogicalID:       artefact.Header.LogicalThreadID,
-		Version:         artefact.Header.Version,
-		StructuralType:  artefact.Header.StructuralType,
-		Type:            artefact.Header.Type,
-		Payload:         artefact.Payload.Content,
-		SourceArtefacts: artefact.Header.ParentHashes,
-		ProducedByRole:  artefact.Header.ProducedByRole,
-		CreatedAtMs:     artefact.Header.CreatedAtMs,
-		ClaimID:         artefact.Header.ClaimID,
-	}
-
-	artefactJSON, err := json.Marshal(v1Wrapper)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal artefact for event: %w", err)
-	}
-
-	channel := fmt.Sprintf("holt:%s:artefact_events", e.config.InstanceName)
-	if err := e.bbClient.PublishRaw(ctx, channel, string(artefactJSON)); err != nil {
-		return nil, fmt.Errorf("failed to publish artefact event: %w", err)
-	}
-
-	// If rework, publish artefact_reworked event
+	// If rework, publish artefact_reworked event (CreateArtefact only publishes artefact_events)
 	if claim.Status == blackboard.ClaimStatusPendingAssignment {
-		if err := e.publishArtefactReworkedEvent(ctx, v1Wrapper, targetArtefact.ID); err != nil {
+		if err := e.publishArtefactReworkedEvent(ctx, artefact, targetArtefact.ID); err != nil {
 			log.Printf("[WARN] Failed to publish artefact_reworked event: %v", err)
 		}
 	}
@@ -606,12 +511,12 @@ func (e *Engine) createVerifiableResultArtefact(ctx context.Context, claim *blac
 //   - Are created atomically via Lua script
 //
 // Returns all created artefacts or error on first failure.
-func (e *Engine) createVerifiableResultArtefacts(ctx context.Context, claim *blackboard.Claim, outputs []ToolOutput, targetArtefact *blackboard.Artefact) ([]*blackboard.VerifiableArtefact, error) {
+func (e *Engine) createVerifiableResultArtefacts(ctx context.Context, claim *blackboard.Claim, outputs []ToolOutput, targetArtefact *blackboard.Artefact) ([]*blackboard.Artefact, error) {
 	batchSize := len(outputs)
 
 	log.Printf("[INFO] Creating batch of %d artefacts with metadata injection", batchSize)
 
-	var artefacts []*blackboard.VerifiableArtefact
+	var artefacts []*blackboard.Artefact
 
 	for i, output := range outputs {
 		// M5.1: Inject batch_size metadata
@@ -623,8 +528,8 @@ func (e *Engine) createVerifiableResultArtefacts(ctx context.Context, claim *bla
 			return nil, fmt.Errorf("failed to marshal metadata for artefact %d: %w", i+1, err)
 		}
 
-		// Create artefact with metadata (reuse existing logic)
-		artefact, err := e.createVerifiableResultArtefactWithMetadata(ctx, claim, &output, targetArtefact, string(metadataJSON))
+		// Create artefact with metadata
+		artefact, err := e.createResultArtefact(ctx, claim, &output, targetArtefact, string(metadataJSON))
 		if err != nil {
 			return nil, fmt.Errorf("failed to create artefact %d/%d: %w", i+1, batchSize, err)
 		}
@@ -633,129 +538,6 @@ func (e *Engine) createVerifiableResultArtefacts(ctx context.Context, claim *bla
 	}
 
 	return artefacts, nil
-}
-
-// createVerifiableResultArtefactWithMetadata creates a V2 VerifiableArtefact with custom metadata.
-// M5.1: Helper function that wraps createVerifiableResultArtefact with metadata injection.
-//
-// This is a temporary bridge until we refactor the artefact creation to support metadata natively.
-// For now, we delegate to the existing function and manually inject metadata.
-func (e *Engine) createVerifiableResultArtefactWithMetadata(ctx context.Context, claim *blackboard.Claim, output *ToolOutput, targetArtefact *blackboard.Artefact, metadata string) (*blackboard.VerifiableArtefact, error) {
-	// M2.4: Validate git commit for CodeCommit artefacts
-	if output.ArtefactType == "CodeCommit" {
-		log.Printf("[INFO] Validating git commit: hash=%s", output.ArtefactPayload)
-		if err := validateCommitExists(output.ArtefactPayload); err != nil {
-			return nil, fmt.Errorf("git commit validation failed for hash %s: %w",
-				output.ArtefactPayload, err)
-		}
-		log.Printf("[DEBUG] Git commit validation passed: hash=%s", output.ArtefactPayload)
-	}
-
-	// Determine relationship (Derivative vs Rework)
-	var logicalThreadID string
-	var version int
-	var parentHashes []string
-
-	// M3.3: Check if this is a feedback claim (rework scenario)
-	if claim.Status == blackboard.ClaimStatusPendingAssignment {
-		// Rework: Continue existing thread
-		logicalThreadID = targetArtefact.LogicalID
-		version = targetArtefact.Version + 1
-
-		// Parent hashes = Target + Reviews
-		parentHashes = []string{targetArtefact.ID}
-		parentHashes = append(parentHashes, claim.AdditionalContextIDs...)
-
-		log.Printf("[INFO] Creating V2 rework artefact: logical_id=%s version=%d→%d",
-			logicalThreadID, targetArtefact.Version, version)
-	} else {
-		// New Work: Start new thread
-		logicalThreadID = blackboard.NewID()
-		version = 1
-		parentHashes = []string{targetArtefact.ID}
-	}
-
-	// Assemble payload
-	payload := blackboard.ArtefactPayload{
-		Content: output.ArtefactPayload,
-	}
-
-	// M4.6: Validate payload size BEFORE hashing (1MB hard limit)
-	if err := payload.Validate(); err != nil {
-		return nil, fmt.Errorf("payload validation failed: %w", err)
-	}
-
-	// M4.6 Security Addendum: Inject HOLT_CLAIM_ID into header for topology validation
-	claimID := claim.ID
-
-	// Assemble header
-	header := blackboard.ArtefactHeader{
-		ParentHashes:    parentHashes,
-		LogicalThreadID: logicalThreadID,
-		Version:         version,
-		CreatedAtMs:     time.Now().UnixMilli(),
-		ProducedByRole:  e.config.AgentName,
-		StructuralType:  output.GetStructuralType(),
-		Type:            output.ArtefactType,
-		ContextForRoles: nil,
-		ClaimID:         claimID,
-		Metadata:        metadata, // M5.1: Inject metadata (e.g. batch_size)
-	}
-
-	// Create verifiable artefact
-	artefact := &blackboard.VerifiableArtefact{
-		Header:  header,
-		Payload: payload,
-	}
-
-	// M4.6: Compute SHA-256 hash
-	hash, err := blackboard.ComputeArtefactHash(artefact)
-	if err != nil {
-		return nil, fmt.Errorf("failed to compute artefact hash: %w", err)
-	}
-
-	artefact.ID = hash
-
-	// M5.1: Create V1 wrapper with metadata for Lua script
-	v1Wrapper := &blackboard.Artefact{
-		ID:              artefact.ID,
-		LogicalID:       artefact.Header.LogicalThreadID,
-		Version:         artefact.Header.Version,
-		StructuralType:  artefact.Header.StructuralType,
-		Type:            artefact.Header.Type,
-		Payload:         artefact.Payload.Content,
-		SourceArtefacts: artefact.Header.ParentHashes,
-		ProducedByRole:  artefact.Header.ProducedByRole,
-		CreatedAtMs:     artefact.Header.CreatedAtMs,
-		ClaimID:         artefact.Header.ClaimID,
-		Metadata:        metadata, // M5.1: Inject metadata
-	}
-
-	// Write V1 wrapper (uses Lua script from Phase 1)
-	if err := e.bbClient.CreateArtefact(ctx, v1Wrapper); err != nil {
-		return nil, fmt.Errorf("failed to create artefact with metadata: %w", err)
-	}
-
-	// Also write V2 verifiable artefact (for verification)
-	if err := e.bbClient.WriteVerifiableArtefact(ctx, artefact); err != nil {
-		return nil, fmt.Errorf("failed to write verifiable artefact: %w", err)
-	}
-
-	// If rework, publish artefact_reworked event
-	if claim.Status == blackboard.ClaimStatusPendingAssignment {
-		if err := e.publishArtefactReworkedEvent(ctx, v1Wrapper, targetArtefact.ID); err != nil {
-			log.Printf("[WARN] Failed to publish artefact_reworked event: %v", err)
-		}
-	}
-
-	// M4.3: Process checkpoints if present
-	if len(output.Checkpoints) > 0 {
-		if err := e.processCheckpoints(ctx, output.Checkpoints, artefact.Header.LogicalThreadID); err != nil {
-			log.Printf("[WARN] Failed to process checkpoints: %v", err)
-		}
-	}
-
-	return artefact, nil
 }
 
 // processCheckpoints handles declarative context caching (M4.3).
@@ -793,7 +575,7 @@ func (e *Engine) processCheckpoints(ctx context.Context, checkpoints []Checkpoin
 		}
 
 		log.Printf("[INFO] M4.3: Created Knowledge artefact: name=%s version=%d id=%s",
-			checkpoint.KnowledgeName, knowledge.Version, knowledge.ID)
+			checkpoint.KnowledgeName, knowledge.Header.Version, knowledge.ID)
 	}
 
 	return nil
@@ -820,14 +602,14 @@ func (e *Engine) createFailureArtefact(ctx context.Context, claim *blackboard.Cl
 		payloadContent = fmt.Sprintf(`{"reason": "Failed to marshal failure data: %v"}`, err)
 	}
 
-	// M4.6: Use V2 VerifiableArtefact structure
+	// M4.6: Use V2 Artefact structure
 	logicalThreadID := blackboard.NewID()
 
 	// M4.6 Security Addendum: Inject HOLT_CLAIM_ID into header
 	// For failures during claim processing, we know the claim ID
 	claimID := claim.ID
 
-	v2Artefact := &blackboard.VerifiableArtefact{
+	artefact := &blackboard.Artefact{
 		Header: blackboard.ArtefactHeader{
 			ParentHashes:    []string{claim.ArtefactID},
 			LogicalThreadID: logicalThreadID,
@@ -844,51 +626,20 @@ func (e *Engine) createFailureArtefact(ctx context.Context, claim *blackboard.Cl
 	}
 
 	// Compute hash
-	hash, err := blackboard.ComputeArtefactHash(v2Artefact)
+	hash, err := blackboard.ComputeArtefactHash(artefact)
 	if err != nil {
 		log.Printf("[ERROR] Failed to compute hash for Failure artefact: %v", err)
 		return
 	}
-	v2Artefact.ID = hash
+	artefact.ID = hash
 
-	// Write to blackboard
-	if err := e.bbClient.WriteVerifiableArtefact(ctx, v2Artefact); err != nil {
+	// Write to blackboard using atomic CreateArtefact (V2)
+	if err := e.bbClient.CreateArtefact(ctx, artefact); err != nil {
 		log.Printf("[ERROR] Failed to create Failure artefact: %v", err)
 		return
 	}
 
-	// Publish event (manual until V2 integration complete)
-	// We need to convert to V1 struct for event publishing if subscribers expect V1
-	// But wait, WriteVerifiableArtefact might not publish event?
-	// The client.WriteVerifiableArtefact does NOT publish event by default in current impl?
-	// Let's check client code... actually WriteVerifiableArtefact just writes hash.
-	// We need to publish.
-
-	// Create V1 wrapper for event publishing/thread tracking
-	artefact := &blackboard.Artefact{
-		ID:              v2Artefact.ID,
-		LogicalID:       v2Artefact.Header.LogicalThreadID,
-		Version:         v2Artefact.Header.Version,
-		StructuralType:  v2Artefact.Header.StructuralType,
-		Type:            v2Artefact.Header.Type,
-		Payload:         v2Artefact.Payload.Content,
-		SourceArtefacts: v2Artefact.Header.ParentHashes,
-		ProducedByRole:  v2Artefact.Header.ProducedByRole,
-		CreatedAtMs:     v2Artefact.Header.CreatedAtMs,
-		ClaimID:         v2Artefact.Header.ClaimID,
-	}
-
-	// Add to thread tracking
-	if err := e.bbClient.AddVersionToThread(ctx, logicalThreadID, v2Artefact.ID, 1); err != nil {
-		log.Printf("[WARN] Failed to add Failure artefact to thread: %v", err)
-	}
-
-	// Publish event
-	artefactJSON, _ := json.Marshal(artefact)
-	channel := fmt.Sprintf("holt:%s:artefact_events", e.config.InstanceName)
-	e.bbClient.PublishRaw(ctx, channel, string(artefactJSON))
-
-	log.Printf("[INFO] Created Failure artefact: artefact_id=%s claim_id=%s", v2Artefact.ID, claim.ID)
+	log.Printf("[INFO] Created Failure artefact: artefact_id=%s claim_id=%s", artefact.ID, claim.ID)
 }
 
 // limitedWriter wraps a writer and enforces a size limit.
@@ -970,7 +721,7 @@ func (e *Engine) createReworkArtefact(ctx context.Context, claim *blackboard.Cla
 	}
 
 	log.Printf("[INFO] Creating rework artefact: logical_id=%s version=%d→%d type=%s",
-		targetArtefact.LogicalID, targetArtefact.Version, targetArtefact.Version+1, targetArtefact.Type)
+		targetArtefact.Header.LogicalThreadID, targetArtefact.Header.Version, targetArtefact.Header.Version+1, targetArtefact.Header.Type)
 
 	// Build source_artefacts: target + Review artefacts
 	sourceArtefacts := []string{targetArtefact.ID}
@@ -980,15 +731,19 @@ func (e *Engine) createReworkArtefact(ctx context.Context, claim *blackboard.Cla
 	artefactID := blackboard.NewID()
 
 	artefact := &blackboard.Artefact{
-		ID:              artefactID,
-		LogicalID:       targetArtefact.LogicalID,   // Same thread
-		Version:         targetArtefact.Version + 1, // Increment version
-		StructuralType:  output.GetStructuralType(),
-		Type:            targetArtefact.Type, // Same type (rework)
-		Payload:         output.ArtefactPayload,
-		SourceArtefacts: sourceArtefacts,        // Target + Reviews
-		ProducedByRole:  e.config.AgentName,     // M3.7: AgentName IS the role
-		CreatedAtMs:     time.Now().UnixMilli(), // M3.9: Millisecond precision timestamp
+		ID: artefactID,
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: targetArtefact.Header.LogicalThreadID, // Same thread
+			Version:         targetArtefact.Header.Version + 1,     // Increment version
+			StructuralType:  output.GetStructuralType(),
+			Type:            targetArtefact.Header.Type, // Same type (rework)
+			ParentHashes:    sourceArtefacts,            // Target + Reviews
+			ProducedByRole:  e.config.AgentName,         // M3.7: AgentName IS the role
+			CreatedAtMs:     time.Now().UnixMilli(),     // M3.9: Millisecond precision timestamp
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: output.ArtefactPayload,
+		},
 	}
 
 	// Create artefact in Redis (also publishes event)
@@ -997,10 +752,10 @@ func (e *Engine) createReworkArtefact(ctx context.Context, claim *blackboard.Cla
 	}
 
 	// Add to thread tracking
-	if err := e.bbClient.AddVersionToThread(ctx, artefact.LogicalID, artefact.ID, artefact.Version); err != nil {
+	if err := e.bbClient.AddVersionToThread(ctx, artefact.Header.LogicalThreadID, artefact.ID, artefact.Header.Version); err != nil {
 		// Log but don't fail - artefact was created successfully
 		log.Printf("[WARN] Failed to add rework artefact to thread: logical_id=%s error=%v",
-			artefact.LogicalID, err)
+			artefact.Header.LogicalThreadID, err)
 	}
 
 	// Publish artefact_reworked workflow event
@@ -1009,11 +764,11 @@ func (e *Engine) createReworkArtefact(ctx context.Context, claim *blackboard.Cla
 	}
 
 	log.Printf("[INFO] Rework artefact created: id=%s logical_id=%s version=%d (agent unaware of versioning)",
-		artefact.ID, artefact.LogicalID, artefact.Version)
+		artefact.ID, artefact.Header.LogicalThreadID, artefact.Header.Version)
 
 	// M4.3: Process checkpoints if present
 	if len(output.Checkpoints) > 0 {
-		if err := e.processCheckpoints(ctx, output.Checkpoints, artefact.LogicalID); err != nil {
+		if err := e.processCheckpoints(ctx, output.Checkpoints, artefact.Header.LogicalThreadID); err != nil {
 			// Log but don't fail - main artefact was created successfully
 			log.Printf("[WARN] Failed to process checkpoints: %v", err)
 		}
@@ -1027,11 +782,11 @@ func (e *Engine) createReworkArtefact(ctx context.Context, claim *blackboard.Cla
 func (e *Engine) publishArtefactReworkedEvent(ctx context.Context, newArtefact *blackboard.Artefact, previousVersionID string) error {
 	eventData := map[string]interface{}{
 		"new_artefact_id":     newArtefact.ID,
-		"logical_id":          newArtefact.LogicalID,
-		"new_version":         newArtefact.Version,
+		"logical_id":          newArtefact.Header.LogicalThreadID,
+		"new_version":         newArtefact.Header.Version,
 		"previous_version_id": previousVersionID,
-		"artefact_type":       newArtefact.Type,
-		"produced_by_role":    newArtefact.ProducedByRole,
+		"artefact_type":       newArtefact.Header.Type,
+		"produced_by_role":    newArtefact.Header.ProducedByRole,
 	}
 
 	if err := e.bbClient.PublishWorkflowEvent(ctx, "artefact_reworked", eventData); err != nil {
@@ -1039,7 +794,7 @@ func (e *Engine) publishArtefactReworkedEvent(ctx context.Context, newArtefact *
 	}
 
 	log.Printf("[INFO] Published artefact_reworked event: new_id=%s logical_id=%s version=%d",
-		newArtefact.ID, newArtefact.LogicalID, newArtefact.Version)
+		newArtefact.ID, newArtefact.Header.LogicalThreadID, newArtefact.Header.Version)
 
 	return nil
 }
@@ -1076,7 +831,7 @@ func (e *Engine) shouldCreateTerminalForClaim(claim *blackboard.Claim) bool {
 // confirmArtefactsInRedis verifies that all artefacts are written to Redis before proceeding.
 // This ensures the orchestrator will see Question/Failure artefacts before processing the Terminal artefact.
 // Prevents race conditions where Terminal is processed before siblings are available.
-func (e *Engine) confirmArtefactsInRedis(ctx context.Context, artefacts []*blackboard.VerifiableArtefact) error {
+func (e *Engine) confirmArtefactsInRedis(ctx context.Context, artefacts []*blackboard.Artefact) error {
 	log.Printf("[INFO] Confirming %d artefacts are in Redis before creating Terminal", len(artefacts))
 
 	for i, artefact := range artefacts {
@@ -1159,7 +914,7 @@ func (e *Engine) createTerminalArtefact(ctx context.Context, claim *blackboard.C
 	// Create unique logical thread for Terminal artefact
 	logicalThreadID := blackboard.NewID()
 
-	v2Artefact := &blackboard.VerifiableArtefact{
+	artefact := &blackboard.Artefact{
 		Header: blackboard.ArtefactHeader{
 			ParentHashes:    []string{claim.ArtefactID},
 			LogicalThreadID: logicalThreadID,
@@ -1176,42 +931,18 @@ func (e *Engine) createTerminalArtefact(ctx context.Context, claim *blackboard.C
 	}
 
 	// Compute hash
-	hash, err := blackboard.ComputeArtefactHash(v2Artefact)
+	hash, err := blackboard.ComputeArtefactHash(artefact)
 	if err != nil {
 		log.Printf("[ERROR] Failed to compute hash for Terminal artefact: %v", err)
 		return
 	}
-	v2Artefact.ID = hash
+	artefact.ID = hash
 
-	// Write to blackboard
-	if err := e.bbClient.WriteVerifiableArtefact(ctx, v2Artefact); err != nil {
+	// Write to blackboard using atomic CreateArtefact (V2)
+	if err := e.bbClient.CreateArtefact(ctx, artefact); err != nil {
 		log.Printf("[ERROR] Failed to create Terminal artefact: %v", err)
 		return
 	}
 
-	// Create V1 wrapper for event publishing/thread tracking
-	artefact := &blackboard.Artefact{
-		ID:              v2Artefact.ID,
-		LogicalID:       v2Artefact.Header.LogicalThreadID,
-		Version:         v2Artefact.Header.Version,
-		StructuralType:  v2Artefact.Header.StructuralType,
-		Type:            v2Artefact.Header.Type,
-		Payload:         v2Artefact.Payload.Content,
-		SourceArtefacts: v2Artefact.Header.ParentHashes,
-		ProducedByRole:  v2Artefact.Header.ProducedByRole,
-		CreatedAtMs:     v2Artefact.Header.CreatedAtMs,
-		ClaimID:         v2Artefact.Header.ClaimID,
-	}
-
-	// Add to thread tracking
-	if err := e.bbClient.AddVersionToThread(ctx, logicalThreadID, v2Artefact.ID, 1); err != nil {
-		log.Printf("[WARN] Failed to add Terminal artefact to thread: %v", err)
-	}
-
-	// Publish event
-	artefactJSON, _ := json.Marshal(artefact)
-	channel := fmt.Sprintf("holt:%s:artefact_events", e.config.InstanceName)
-	e.bbClient.PublishRaw(ctx, channel, string(artefactJSON))
-
-	log.Printf("[INFO] Terminal artefact created: artefact_id=%s type=%s", artefact.ID, artefact.Type)
+	log.Printf("[INFO] Terminal artefact created: artefact_id=%s type=%s", artefact.ID, artefact.Header.Type)
 }

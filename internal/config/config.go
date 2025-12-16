@@ -12,8 +12,8 @@ import (
 
 // OrchestratorConfig specifies orchestrator behavior settings (M3.3, M4.6)
 type OrchestratorConfig struct {
-	Image                     string `yaml:"image,omitempty"`                      // Docker image to use (default: holt-orchestrator:latest)
-	MaxReviewIterations       *int   `yaml:"max_review_iterations,omitempty"`      // How many times an artefact can be rejected and reworked (0 = unlimited, default = 3)
+	Image                     string `yaml:"image,omitempty"`                        // Docker image to use (default: holt-orchestrator:latest)
+	MaxReviewIterations       *int   `yaml:"max_review_iterations,omitempty"`        // How many times an artefact can be rejected and reworked (0 = unlimited, default = 3)
 	TimestampDriftToleranceMs *int   `yaml:"timestamp_drift_tolerance_ms,omitempty"` // M4.6: Max allowed timestamp drift in milliseconds (default = 300000 = 5 minutes)
 }
 
@@ -27,7 +27,7 @@ type HoltConfig struct {
 
 // BiddingStrategyConfig defines the agent's bidding behavior (M4.8)
 type BiddingStrategyConfig struct {
-	Type        string   `yaml:"type" json:"type"`                   // Required: review, claim, exclusive, or ignore
+	Type        string   `yaml:"type" json:"type"`                                     // Required: review, claim, exclusive, or ignore
 	TargetTypes []string `yaml:"target_types,omitempty" json:"target_types,omitempty"` // Optional: list of artefact types to bid on
 }
 
@@ -88,8 +88,8 @@ type WorkspaceConfig struct {
 
 // WorkerConfig specifies worker configuration for controller-worker pattern (M3.4)
 type WorkerConfig struct {
-	Image          string           `yaml:"image"`                      // Worker image (can differ from controller)
-	MaxConcurrent  int              `yaml:"max_concurrent,omitempty"`   // Default: 1
+	Image          string           `yaml:"image"`                    // Worker image (can differ from controller)
+	MaxConcurrent  int              `yaml:"max_concurrent,omitempty"` // Default: 1
 	Command        []string         `yaml:"command"`
 	Workspace      *WorkspaceConfig `yaml:"workspace,omitempty"`
 	KeepContainers bool             `yaml:"keep_containers,omitempty"` // M4.10: Retain worker containers for debugging (default: false)

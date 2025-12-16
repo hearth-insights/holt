@@ -13,8 +13,8 @@ import (
 	"time"
 
 	canonicaljson "github.com/gibson042/canonicaljson-go"
-	"github.com/hearth-insights/holt/pkg/blackboard"
 	"github.com/google/uuid"
+	"github.com/hearth-insights/holt/pkg/blackboard"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -127,8 +127,8 @@ func (sm *SpineManager) createManifest(
 		return "", fmt.Errorf("failed to marshal identity: %w", err)
 	}
 
-	// Create VerifiableArtefact
-	manifest := &blackboard.VerifiableArtefact{
+	// Create Artefact
+	manifest := &blackboard.Artefact{
 		Header: blackboard.ArtefactHeader{
 			ParentHashes:    parentHashes,
 			LogicalThreadID: sm.spineThreadID, // Shared thread for this instance
@@ -152,7 +152,7 @@ func (sm *SpineManager) createManifest(
 	manifest.ID = manifestID
 
 	// Write to blackboard
-	if err := sm.client.WriteVerifiableArtefact(ctx, manifest); err != nil {
+	if err := sm.client.CreateArtefact(ctx, manifest); err != nil {
 		return "", fmt.Errorf("failed to write manifest: %w", err)
 	}
 
@@ -174,7 +174,7 @@ func (sm *SpineManager) createManifest(
 
 // fetchLatestManifest queries the spine ZSET for the highest version manifest.
 // Returns ErrNoManifest if spine doesn't exist yet.
-func (sm *SpineManager) fetchLatestManifest(ctx context.Context) (*blackboard.VerifiableArtefact, error) {
+func (sm *SpineManager) fetchLatestManifest(ctx context.Context) (*blackboard.Artefact, error) {
 	// Query spine ZSET for highest version
 	key := fmt.Sprintf("holt:%s:system_spine:%s", sm.instanceName, sm.spineThreadID)
 
@@ -188,7 +188,7 @@ func (sm *SpineManager) fetchLatestManifest(ctx context.Context) (*blackboard.Ve
 	}
 
 	manifestID := results[0].Member.(string)
-	return sm.client.GetVerifiableArtefact(ctx, manifestID)
+	return sm.client.GetArtefact(ctx, manifestID)
 }
 
 // addToSpine adds a manifest to the spine ZSET (score = version).
@@ -224,7 +224,7 @@ func (sm *SpineManager) GetActiveManifest(ctx context.Context) (string, error) {
 
 // extractIdentityHash extracts the identity hash from a SystemManifest payload.
 // For comparison during drift detection.
-func (sm *SpineManager) extractIdentityHash(manifest *blackboard.VerifiableArtefact) (string, error) {
+func (sm *SpineManager) extractIdentityHash(manifest *blackboard.Artefact) (string, error) {
 	// Parse the payload as SystemIdentity
 	var identity blackboard.SystemIdentity
 	if err := json.Unmarshal([]byte(manifest.Payload.Content), &identity); err != nil {
@@ -266,22 +266,22 @@ func (sm *SpineManager) extractIdentityHash(manifest *blackboard.VerifiableArtef
 }
 
 // FetchSpineHistory returns all SystemManifest artefacts in chronological order (oldest first).
-func (sm *SpineManager) FetchSpineHistory(ctx context.Context) ([]*blackboard.VerifiableArtefact, error) {
+func (sm *SpineManager) FetchSpineHistory(ctx context.Context) ([]*blackboard.Artefact, error) {
 	key := fmt.Sprintf("holt:%s:system_spine:%s", sm.instanceName, sm.spineThreadID)
 
 	// Get all manifests (ordered by version ascending)
 	results, err := sm.client.GetRedisClient().ZRangeWithScores(ctx, key, 0, -1).Result()
 	if err == redis.Nil || len(results) == 0 {
-		return []*blackboard.VerifiableArtefact{}, nil
+		return []*blackboard.Artefact{}, nil
 	}
 	if err != nil {
 		return nil, err
 	}
 
-	manifests := make([]*blackboard.VerifiableArtefact, 0, len(results))
+	manifests := make([]*blackboard.Artefact, 0, len(results))
 	for _, result := range results {
 		manifestID := result.Member.(string)
-		manifest, err := sm.client.GetVerifiableArtefact(ctx, manifestID)
+		manifest, err := sm.client.GetArtefact(ctx, manifestID)
 		if err != nil {
 			// Log warning but continue - spine may have gaps
 			log.Printf("[SpineManager] Warning: failed to fetch manifest %s: %v", manifestID, err)

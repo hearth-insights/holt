@@ -3,6 +3,7 @@ package pup
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/hearth-insights/holt/pkg/blackboard"
@@ -43,7 +44,9 @@ func TestSynchronizer_IsPotentialTrigger_Matching(t *testing.T) {
 
 	// Matching type
 	artefact := &blackboard.Artefact{
-		Type: "TestResult",
+		Header: blackboard.ArtefactHeader{
+			Type: "TestResult",
+		},
 	}
 
 	assert.True(t, sync.isPotentialTrigger(artefact))
@@ -63,7 +66,9 @@ func TestSynchronizer_IsPotentialTrigger_NonMatching(t *testing.T) {
 
 	// Non-matching type
 	artefact := &blackboard.Artefact{
-		Type: "SecurityScan", // Not in wait_for list
+		Header: blackboard.ArtefactHeader{
+			Type: "SecurityScan", // Not in wait_for list
+		},
 	}
 
 	assert.False(t, sync.isPotentialTrigger(artefact))
@@ -81,38 +86,52 @@ func TestSynchronizer_FindCommonAncestor_DirectParent(t *testing.T) {
 
 	// Create ancestor
 	ancestor := &blackboard.Artefact{
-		ID:              "ancestor-id",
-		LogicalID:       "ancestor-logical",
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "CodeCommit",
-		Payload:         "commit-abc",
-		SourceArtefacts: []string{},
-		ProducedByRole:  "coder",
-		Metadata:        "{}",
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "CodeCommit",
+			ProducedByRole:  "coder",
+			Metadata:        "{}",
+			ParentHashes:    []string{},
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "commit-abc",
+		},
 	}
+	ancestorHash, err := blackboard.ComputeArtefactHash(ancestor)
+	require.NoError(t, err)
+	ancestor.ID = ancestorHash
 	require.NoError(t, bbClient.CreateArtefact(ctx, ancestor))
 
 	// Create child
 	child := &blackboard.Artefact{
-		ID:              "child-id",
-		LogicalID:       "child-logical",
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "TestResult",
-		Payload:         "test-passed",
-		SourceArtefacts: []string{"ancestor-id"}, // Direct parent
-		ProducedByRole:  "tester",
-		Metadata:        "{}",
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "TestResult",
+			ProducedByRole:  "tester",
+			Metadata:        "{}",
+			ParentHashes:    []string{ancestor.ID}, // Direct parent
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "test-passed",
+		},
 	}
+	childHash, err := blackboard.ComputeArtefactHash(child)
+	require.NoError(t, err)
+	child.ID = childHash
 	require.NoError(t, bbClient.CreateArtefact(ctx, child))
 
 	// Find ancestor from child
 	found, err := sync.findCommonAncestor(ctx, child)
 	require.NoError(t, err)
 	require.NotNil(t, found)
-	assert.Equal(t, "ancestor-id", found.ID)
-	assert.Equal(t, "CodeCommit", found.Type)
+	assert.Equal(t, ancestor.ID, found.ID)
+	assert.Equal(t, "CodeCommit", found.Header.Type)
 }
 
 // TestSynchronizer_FindCommonAncestor_Grandparent tests finding grandparent ancestor
@@ -127,52 +146,73 @@ func TestSynchronizer_FindCommonAncestor_Grandparent(t *testing.T) {
 
 	// Create ancestor (CodeCommit)
 	ancestor := &blackboard.Artefact{
-		ID:              "ancestor-id",
-		LogicalID:       "ancestor-logical",
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "CodeCommit",
-		Payload:         "commit-abc",
-		SourceArtefacts: []string{},
-		ProducedByRole:  "coder",
-		Metadata:        "{}",
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "CodeCommit",
+			ProducedByRole:  "coder",
+			Metadata:        "{}",
+			ParentHashes:    []string{},
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "commit-abc",
+		},
 	}
+	ancestorHash, err := blackboard.ComputeArtefactHash(ancestor)
+	require.NoError(t, err)
+	ancestor.ID = ancestorHash
 	require.NoError(t, bbClient.CreateArtefact(ctx, ancestor))
 
 	// Create intermediate (BuildResult)
 	intermediate := &blackboard.Artefact{
-		ID:              "intermediate-id",
-		LogicalID:       "intermediate-logical",
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "BuildResult",
-		Payload:         "build-ok",
-		SourceArtefacts: []string{"ancestor-id"},
-		ProducedByRole:  "builder",
-		Metadata:        "{}",
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "BuildResult",
+			ProducedByRole:  "builder",
+			Metadata:        "{}",
+			ParentHashes:    []string{ancestor.ID},
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "build-ok",
+		},
 	}
+	intHash, err := blackboard.ComputeArtefactHash(intermediate)
+	require.NoError(t, err)
+	intermediate.ID = intHash
 	require.NoError(t, bbClient.CreateArtefact(ctx, intermediate))
 
 	// Create grandchild (DeployResult)
 	grandchild := &blackboard.Artefact{
-		ID:              "grandchild-id",
-		LogicalID:       "grandchild-logical",
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "DeployResult",
-		Payload:         "deployed",
-		SourceArtefacts: []string{"intermediate-id"}, // Parent is intermediate
-		ProducedByRole:  "deployer",
-		Metadata:        "{}",
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "DeployResult",
+			ProducedByRole:  "deployer",
+			Metadata:        "{}",
+			ParentHashes:    []string{intermediate.ID}, // Parent is intermediate
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "deployed",
+		},
 	}
+	gcHash, err := blackboard.ComputeArtefactHash(grandchild)
+	require.NoError(t, err)
+	grandchild.ID = gcHash
 	require.NoError(t, bbClient.CreateArtefact(ctx, grandchild))
 
 	// Find ancestor from grandchild (should traverse upward)
 	found, err := sync.findCommonAncestor(ctx, grandchild)
 	require.NoError(t, err)
 	require.NotNil(t, found)
-	assert.Equal(t, "ancestor-id", found.ID)
-	assert.Equal(t, "CodeCommit", found.Type)
+	assert.Equal(t, ancestor.ID, found.ID)
+	assert.Equal(t, "CodeCommit", found.Header.Type)
 }
 
 // TestSynchronizer_FindCommonAncestor_NotFound tests ancestor not found
@@ -187,16 +227,23 @@ func TestSynchronizer_FindCommonAncestor_NotFound(t *testing.T) {
 
 	// Create artefact with no CodeCommit ancestor
 	artefact := &blackboard.Artefact{
-		ID:              "orphan-id",
-		LogicalID:       "orphan-logical",
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "TestResult",
-		Payload:         "test",
-		SourceArtefacts: []string{}, // No parents
-		ProducedByRole:  "tester",
-		Metadata:        "{}",
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "TestResult",
+			ProducedByRole:  "tester",
+			Metadata:        "{}",
+			ParentHashes:    []string{}, // No parents
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "test",
+		},
 	}
+	hash, err := blackboard.ComputeArtefactHash(artefact)
+	require.NoError(t, err)
+	artefact.ID = hash
 	require.NoError(t, bbClient.CreateArtefact(ctx, artefact))
 
 	// Find ancestor (should return nil, not error)
@@ -221,56 +268,84 @@ func TestSynchronizer_CheckDependencies_Named_AllPresent(t *testing.T) {
 
 	// Create ancestor
 	ancestor := &blackboard.Artefact{
-		ID:              "ancestor-id",
-		LogicalID:       "ancestor-logical",
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "CodeCommit",
-		Payload:         "commit-abc",
-		SourceArtefacts: []string{},
-		ProducedByRole:  "coder",
-		Metadata:        "{}",
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "CodeCommit",
+			ProducedByRole:  "coder",
+			Metadata:        "{}",
+			ParentHashes:    []string{},
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "commit-abc",
+		},
 	}
+	ancestorHash, err := blackboard.ComputeArtefactHash(ancestor)
+	require.NoError(t, err)
+	ancestor.ID = ancestorHash
 	require.NoError(t, bbClient.CreateArtefact(ctx, ancestor))
 
 	// Create all 3 required descendants
 	testResult := &blackboard.Artefact{
-		ID:              "test-id",
-		LogicalID:       "test-logical",
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "TestResult",
-		Payload:         "passed",
-		SourceArtefacts: []string{"ancestor-id"},
-		ProducedByRole:  "tester",
-		Metadata:        "{}",
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "TestResult",
+			ProducedByRole:  "tester",
+			Metadata:        "{}",
+			ParentHashes:    []string{ancestor.ID},
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "passed",
+		},
 	}
+	testHash, err := blackboard.ComputeArtefactHash(testResult)
+	require.NoError(t, err)
+	testResult.ID = testHash
 	require.NoError(t, bbClient.CreateArtefact(ctx, testResult))
 
 	lintResult := &blackboard.Artefact{
-		ID:              "lint-id",
-		LogicalID:       "lint-logical",
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "LintResult",
-		Payload:         "clean",
-		SourceArtefacts: []string{"ancestor-id"},
-		ProducedByRole:  "linter",
-		Metadata:        "{}",
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "LintResult",
+			ProducedByRole:  "linter",
+			Metadata:        "{}",
+			ParentHashes:    []string{ancestor.ID},
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "clean",
+		},
 	}
+	lintHash, err := blackboard.ComputeArtefactHash(lintResult)
+	require.NoError(t, err)
+	lintResult.ID = lintHash
 	require.NoError(t, bbClient.CreateArtefact(ctx, lintResult))
 
 	securityScan := &blackboard.Artefact{
-		ID:              "scan-id",
-		LogicalID:       "scan-logical",
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "SecurityScan",
-		Payload:         "no-vulns",
-		SourceArtefacts: []string{"ancestor-id"},
-		ProducedByRole:  "scanner",
-		Metadata:        "{}",
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "SecurityScan",
+			ProducedByRole:  "scanner",
+			Metadata:        "{}",
+			ParentHashes:    []string{ancestor.ID},
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "no-vulns",
+		},
 	}
+	scanHash, err := blackboard.ComputeArtefactHash(securityScan)
+	require.NoError(t, err)
+	securityScan.ID = scanHash
 	require.NoError(t, bbClient.CreateArtefact(ctx, securityScan))
 
 	// Check dependencies (should be met)
@@ -295,43 +370,64 @@ func TestSynchronizer_CheckDependencies_Named_Partial(t *testing.T) {
 
 	// Create ancestor
 	ancestor := &blackboard.Artefact{
-		ID:              "ancestor-id",
-		LogicalID:       "ancestor-logical",
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "CodeCommit",
-		Payload:         "commit-abc",
-		SourceArtefacts: []string{},
-		ProducedByRole:  "coder",
-		Metadata:        "{}",
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "CodeCommit",
+			ProducedByRole:  "coder",
+			Metadata:        "{}",
+			ParentHashes:    []string{},
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "commit-abc",
+		},
 	}
+	ancestorHash, err := blackboard.ComputeArtefactHash(ancestor)
+	require.NoError(t, err)
+	ancestor.ID = ancestorHash
 	require.NoError(t, bbClient.CreateArtefact(ctx, ancestor))
 
 	// Create only 2 of 3 required descendants
 	testResult := &blackboard.Artefact{
-		ID:              "test-id",
-		LogicalID:       "test-logical",
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "TestResult",
-		Payload:         "passed",
-		SourceArtefacts: []string{"ancestor-id"},
-		ProducedByRole:  "tester",
-		Metadata:        "{}",
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "TestResult",
+			ProducedByRole:  "tester",
+			Metadata:        "{}",
+			ParentHashes:    []string{ancestor.ID},
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "passed",
+		},
 	}
+	testHash, err := blackboard.ComputeArtefactHash(testResult)
+	require.NoError(t, err)
+	testResult.ID = testHash
 	require.NoError(t, bbClient.CreateArtefact(ctx, testResult))
 
 	lintResult := &blackboard.Artefact{
-		ID:              "lint-id",
-		LogicalID:       "lint-logical",
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "LintResult",
-		Payload:         "clean",
-		SourceArtefacts: []string{"ancestor-id"},
-		ProducedByRole:  "linter",
-		Metadata:        "{}",
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "LintResult",
+			ProducedByRole:  "linter",
+			Metadata:        "{}",
+			ParentHashes:    []string{ancestor.ID},
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "clean",
+		},
 	}
+	lintHash, err := blackboard.ComputeArtefactHash(lintResult)
+	require.NoError(t, err)
+	lintResult.ID = lintHash
 	require.NoError(t, bbClient.CreateArtefact(ctx, lintResult))
 
 	// SecurityScan is missing
@@ -356,31 +452,45 @@ func TestSynchronizer_CheckDependencies_ProducerDeclared_CorrectCount(t *testing
 
 	// Create ancestor
 	ancestor := &blackboard.Artefact{
-		ID:              "batch-id",
-		LogicalID:       "batch-logical",
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "DataBatch",
-		Payload:         "batch-123",
-		SourceArtefacts: []string{},
-		ProducedByRole:  "producer",
-		Metadata:        "{}",
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "DataBatch",
+			ProducedByRole:  "producer",
+			Metadata:        "{}",
+			ParentHashes:    []string{},
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "batch-123",
+		},
 	}
+	ancestorHash, err := blackboard.ComputeArtefactHash(ancestor)
+	require.NoError(t, err)
+	ancestor.ID = ancestorHash
 	require.NoError(t, bbClient.CreateArtefact(ctx, ancestor))
 
 	// Create 5 ProcessedRecord artefacts with batch_size=5 metadata
 	for i := 1; i <= 5; i++ {
 		record := &blackboard.Artefact{
-			ID:              blackboard.NewID(),
-			LogicalID:       blackboard.NewID(),
-			Version:         1,
-			StructuralType:  blackboard.StructuralTypeStandard,
-			Type:            "ProcessedRecord",
-			Payload:         "record-data",
-			SourceArtefacts: []string{"batch-id"},
-			ProducedByRole:  "processor",
-			Metadata:        `{"batch_size":"5"}`, // M5.1: Metadata injection
+			Header: blackboard.ArtefactHeader{
+				LogicalThreadID: blackboard.NewID(),
+				Version:         1,
+				StructuralType:  blackboard.StructuralTypeStandard,
+				Type:            "ProcessedRecord",
+				ProducedByRole:  "processor",
+				Metadata:        `{"batch_size":"5"}`, // M5.1: Metadata injection
+				ParentHashes:    []string{ancestor.ID},
+				CreatedAtMs:     time.Now().UnixMilli(),
+			},
+			Payload: blackboard.ArtefactPayload{
+				Content: "record-data",
+			},
 		}
+		hash, err := blackboard.ComputeArtefactHash(record)
+		require.NoError(t, err)
+		record.ID = hash
 		require.NoError(t, bbClient.CreateArtefact(ctx, record))
 	}
 
@@ -404,31 +514,45 @@ func TestSynchronizer_CheckDependencies_ProducerDeclared_PartialCount(t *testing
 
 	// Create ancestor
 	ancestor := &blackboard.Artefact{
-		ID:              "batch-id",
-		LogicalID:       "batch-logical",
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "DataBatch",
-		Payload:         "batch-123",
-		SourceArtefacts: []string{},
-		ProducedByRole:  "producer",
-		Metadata:        "{}",
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "DataBatch",
+			ProducedByRole:  "producer",
+			Metadata:        "{}",
+			ParentHashes:    []string{},
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "batch-123",
+		},
 	}
+	ancestorHash, err := blackboard.ComputeArtefactHash(ancestor)
+	require.NoError(t, err)
+	ancestor.ID = ancestorHash
 	require.NoError(t, bbClient.CreateArtefact(ctx, ancestor))
 
 	// Create only 3 of 5 expected ProcessedRecord artefacts
 	for i := 1; i <= 3; i++ {
 		record := &blackboard.Artefact{
-			ID:              blackboard.NewID(),
-			LogicalID:       blackboard.NewID(),
-			Version:         1,
-			StructuralType:  blackboard.StructuralTypeStandard,
-			Type:            "ProcessedRecord",
-			Payload:         "record-data",
-			SourceArtefacts: []string{"batch-id"},
-			ProducedByRole:  "processor",
-			Metadata:        `{"batch_size":"5"}`, // Expects 5 total
+			Header: blackboard.ArtefactHeader{
+				LogicalThreadID: blackboard.NewID(),
+				Version:         1,
+				StructuralType:  blackboard.StructuralTypeStandard,
+				Type:            "ProcessedRecord",
+				ProducedByRole:  "processor",
+				Metadata:        `{"batch_size":"5"}`, // Expects 5 total
+				ParentHashes:    []string{ancestor.ID},
+				CreatedAtMs:     time.Now().UnixMilli(),
+			},
+			Payload: blackboard.ArtefactPayload{
+				Content: "record-data",
+			},
 		}
+		hash, err := blackboard.ComputeArtefactHash(record)
+		require.NoError(t, err)
+		record.ID = hash
 		require.NoError(t, bbClient.CreateArtefact(ctx, record))
 	}
 
@@ -448,7 +572,9 @@ func TestSynchronizer_GetExpectedCount_Valid(t *testing.T) {
 	sync, _, _ := setupTestSynchronizer(t, config)
 
 	artefact := &blackboard.Artefact{
-		Metadata: `{"batch_size":"10"}`,
+		Header: blackboard.ArtefactHeader{
+			Metadata: `{"batch_size":"10"}`,
+		},
 	}
 
 	count, err := sync.getExpectedCountFromMetadata(artefact, "batch_size")
@@ -466,7 +592,9 @@ func TestSynchronizer_GetExpectedCount_MissingKey(t *testing.T) {
 	sync, _, _ := setupTestSynchronizer(t, config)
 
 	artefact := &blackboard.Artefact{
-		Metadata: `{"other_key":"value"}`, // Missing batch_size
+		Header: blackboard.ArtefactHeader{
+			Metadata: `{"other_key":"value"}`, // Missing batch_size
+		},
 	}
 
 	_, err := sync.getExpectedCountFromMetadata(artefact, "batch_size")
@@ -484,7 +612,9 @@ func TestSynchronizer_GetExpectedCount_InvalidInteger(t *testing.T) {
 	sync, _, _ := setupTestSynchronizer(t, config)
 
 	artefact := &blackboard.Artefact{
-		Metadata: `{"batch_size":"not-a-number"}`,
+		Header: blackboard.ArtefactHeader{
+			Metadata: `{"batch_size":"not-a-number"}`,
+		},
 	}
 
 	_, err := sync.getExpectedCountFromMetadata(artefact, "batch_size")
@@ -511,7 +641,11 @@ func TestSynchronizer_GetExpectedCount_NegativeValue(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			artefact := &blackboard.Artefact{Metadata: tt.metadata}
+			artefact := &blackboard.Artefact{
+				Header: blackboard.ArtefactHeader{
+					Metadata: tt.metadata,
+				},
+			}
 			_, err := sync.getExpectedCountFromMetadata(artefact, "batch_size")
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), "must be positive")
@@ -529,7 +663,9 @@ func TestSynchronizer_GetExpectedCount_MalformedJSON(t *testing.T) {
 	sync, _, _ := setupTestSynchronizer(t, config)
 
 	artefact := &blackboard.Artefact{
-		Metadata: `{invalid json}`,
+		Header: blackboard.ArtefactHeader{
+			Metadata: `{invalid json}`,
+		},
 	}
 
 	_, err := sync.getExpectedCountFromMetadata(artefact, "batch_size")

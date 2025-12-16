@@ -148,7 +148,7 @@ func runAnswer(cmd *cobra.Command, args []string) error {
 		QuestionText     string `json:"question_text"`
 		TargetArtefactID string `json:"target_artefact_id"`
 	}
-	if err := json.Unmarshal([]byte(questionArtefact.Payload), &payload); err != nil {
+	if err := json.Unmarshal([]byte(questionArtefact.Payload.Content), &payload); err != nil {
 		return printer.Error(
 			"invalid question payload",
 			fmt.Sprintf("Failed to parse Question payload: %v", err),
@@ -171,15 +171,15 @@ func runAnswer(cmd *cobra.Command, args []string) error {
 
 	// Phase 8: Create new artefact version with answer
 	// Construct V2-compatible artefact to compute hash
-	v2Artefact := &blackboard.VerifiableArtefact{
+	newArtefact := &blackboard.Artefact{
 		Header: blackboard.ArtefactHeader{
 			ParentHashes:    []string{targetArtefact.ID, questionArtefact.ID}, // Link both
-			LogicalThreadID: targetArtefact.LogicalID,                         // Same logical thread
-			Version:         targetArtefact.Version + 1,                       // Incremented version
+			LogicalThreadID: targetArtefact.Header.LogicalThreadID,            // Same logical thread
+			Version:         targetArtefact.Header.Version + 1,                // Incremented version
 			CreatedAtMs:     now(),
 			ProducedByRole:  "user", // Human-produced
-			StructuralType:  targetArtefact.StructuralType,
-			Type:            targetArtefact.Type,
+			StructuralType:  targetArtefact.Header.StructuralType,
+			Type:            targetArtefact.Header.Type,
 			ClaimID:         "", // User answer, no claim
 		},
 		Payload: blackboard.ArtefactPayload{
@@ -187,34 +187,20 @@ func runAnswer(cmd *cobra.Command, args []string) error {
 		},
 	}
 
-	hash, err := blackboard.ComputeArtefactHash(v2Artefact)
+	hash, err := blackboard.ComputeArtefactHash(newArtefact)
 	if err != nil {
 		return fmt.Errorf("failed to compute hash: %w", err)
 	}
-	v2Artefact.ID = hash
-
-	// Convert to V1 for client.CreateArtefact
-	newArtefact := &blackboard.Artefact{
-		ID:              v2Artefact.ID,
-		LogicalID:       v2Artefact.Header.LogicalThreadID,
-		Version:         v2Artefact.Header.Version,
-		StructuralType:  v2Artefact.Header.StructuralType,
-		Type:            v2Artefact.Header.Type,
-		Payload:         v2Artefact.Payload.Content,
-		SourceArtefacts: v2Artefact.Header.ParentHashes,
-		ProducedByRole:  v2Artefact.Header.ProducedByRole,
-		CreatedAtMs:     v2Artefact.Header.CreatedAtMs,
-		ClaimID:         v2Artefact.Header.ClaimID,
-	}
+	newArtefact.ID = hash
 
 	if err := bbClient.CreateArtefact(ctx, newArtefact); err != nil {
 		return fmt.Errorf("failed to create answer artefact: %w", err)
 	}
 
 	// Phase 9: Display success message
-	fmt.Printf("✓ Answer created: %s v%d\n", shortenID(newArtefact.ID), newArtefact.Version)
+	fmt.Printf("✓ Answer created: %s v%d\n", shortenID(newArtefact.ID), newArtefact.Header.Version)
 	fmt.Printf("  Answered question: %s\n", shortenID(questionID))
-	fmt.Printf("  Original artefact: %s v%d\n", shortenID(targetArtefact.ID), targetArtefact.Version)
+	fmt.Printf("  Original artefact: %s v%d\n", shortenID(targetArtefact.ID), targetArtefact.Header.Version)
 
 	// Phase 10: Chain to holt questions if requested
 	if answerThenQuestions {

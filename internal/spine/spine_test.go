@@ -23,19 +23,26 @@ func TestResolveSpine(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Helper to create artefact
-	createArtefact := func(id, structType, payload string, sources []string) *blackboard.Artefact {
+	// Helper to create artefact with proper hash ID
+	createArtefact := func(structType, payload string, sources []string) *blackboard.Artefact {
 		art := &blackboard.Artefact{
-			ID:              id,
-			LogicalID:       id,
-			Version:         1,
-			StructuralType:  blackboard.StructuralType(structType),
-			Type:            "TestType",
-			ProducedByRole:  "test",
-			Payload:         payload,
-			SourceArtefacts: sources,
+			Header: blackboard.ArtefactHeader{
+				LogicalThreadID: blackboard.NewID(),
+				Version:         1,
+				StructuralType:  blackboard.StructuralType(structType),
+				Type:            "TestType",
+				ProducedByRole:  "test",
+				ParentHashes:    sources,
+				CreatedAtMs:     1234567890,
+			},
+			Payload: blackboard.ArtefactPayload{
+				Content: payload,
+			},
 		}
-		err := bbClient.CreateArtefact(ctx, art)
+		hash, err := blackboard.ComputeArtefactHash(art)
+		require.NoError(t, err)
+		art.ID = hash
+		err = bbClient.CreateArtefact(ctx, art)
 		require.NoError(t, err)
 		return art
 	}
@@ -44,12 +51,12 @@ func TestResolveSpine(t *testing.T) {
 	t.Run("ArtefactIsManifest", func(t *testing.T) {
 		cache := make(map[string]*SpineInfo)
 		manifestPayload := `{"config_hash": "hash1", "git_commit": "commit1"}`
-		manifest := createArtefact("manifest-1", string(blackboard.StructuralTypeSystemManifest), manifestPayload, nil)
+		manifest := createArtefact(string(blackboard.StructuralTypeSystemManifest), manifestPayload, nil)
 
 		info, err := ResolveSpine(ctx, bbClient, manifest, cache)
 		require.NoError(t, err)
 		assert.False(t, info.IsDetached)
-		assert.Equal(t, "manifest-1", info.ManifestID)
+		assert.Equal(t, manifest.ID, info.ManifestID)
 		assert.Equal(t, "hash1", info.ConfigHash)
 		assert.Equal(t, "commit1", info.GitCommit)
 	})
@@ -58,16 +65,16 @@ func TestResolveSpine(t *testing.T) {
 	t.Run("ParentIsManifest", func(t *testing.T) {
 		cache := make(map[string]*SpineInfo)
 		manifestPayload := `{"config_hash": "hash2", "git_commit": "commit2"}`
-		manifest := createArtefact("manifest-2", string(blackboard.StructuralTypeSystemManifest), manifestPayload, nil)
-		
-		child := createArtefact("child-1", string(blackboard.StructuralTypeStandard), "data", []string{manifest.ID})
+		manifest := createArtefact(string(blackboard.StructuralTypeSystemManifest), manifestPayload, nil)
+
+		child := createArtefact(string(blackboard.StructuralTypeStandard), "data", []string{manifest.ID})
 
 		info, err := ResolveSpine(ctx, bbClient, child, cache)
 		require.NoError(t, err)
 		assert.False(t, info.IsDetached)
-		assert.Equal(t, "manifest-2", info.ManifestID)
+		assert.Equal(t, manifest.ID, info.ManifestID)
 		assert.Equal(t, "hash2", info.ConfigHash)
-		
+
 		// Verify caching
 		assert.Contains(t, cache, manifest.ID)
 	})
@@ -75,8 +82,8 @@ func TestResolveSpine(t *testing.T) {
 	// Scenario 3: Detached (no manifest parent)
 	t.Run("Detached", func(t *testing.T) {
 		cache := make(map[string]*SpineInfo)
-		parent := createArtefact("parent-1", string(blackboard.StructuralTypeStandard), "data", nil)
-		child := createArtefact("child-detached", string(blackboard.StructuralTypeStandard), "data", []string{parent.ID})
+		parent := createArtefact(string(blackboard.StructuralTypeStandard), "data", nil)
+		child := createArtefact(string(blackboard.StructuralTypeStandard), "data", []string{parent.ID})
 
 		info, err := ResolveSpine(ctx, bbClient, child, cache)
 		require.NoError(t, err)
@@ -86,17 +93,22 @@ func TestResolveSpine(t *testing.T) {
 	// Scenario 4: Cache hit
 	t.Run("CacheHit", func(t *testing.T) {
 		cache := make(map[string]*SpineInfo)
-		// Pre-populate cache
-		cache["cached-manifest"] = &SpineInfo{
-			ManifestID: "cached-manifest",
+
+		// Create a real manifest first to get its hash ID
+		manifestPayload := `{"config_hash": "cached-hash", "git_commit": "cached-commit"}`
+		cachedManifest := createArtefact(string(blackboard.StructuralTypeSystemManifest), manifestPayload, nil)
+
+		// Pre-populate cache with the manifest's hash ID
+		cache[cachedManifest.ID] = &SpineInfo{
+			ManifestID: cachedManifest.ID,
 			ConfigHash: "cached-hash",
 			GitCommit:  "cached-commit",
 			IsDetached: false,
 		}
 
-		child := createArtefact("child-cached", string(blackboard.StructuralTypeStandard), "data", []string{"cached-manifest"})
+		child := createArtefact(string(blackboard.StructuralTypeStandard), "data", []string{cachedManifest.ID})
 
-		// Should resolve from cache without fetching artefact (which doesn't exist in DB)
+		// Should resolve from cache
 		info, err := ResolveSpine(ctx, bbClient, child, cache)
 		require.NoError(t, err)
 		assert.Equal(t, "cached-hash", info.ConfigHash)

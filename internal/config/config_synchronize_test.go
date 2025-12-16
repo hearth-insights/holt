@@ -53,7 +53,7 @@ func TestAgent_Validate_Synchronize(t *testing.T) {
 				Synchronize: &SynchronizeConfig{
 					AncestorType: "Workflow",
 					WaitFor: []WaitCondition{
-						{Type: "StepComplete"},                                    // Named
+						{Type: "StepComplete"}, // Named
 						{Type: "BatchResult", CountFromMetadata: "expected_count"}, // Producer-Declared
 					},
 				},

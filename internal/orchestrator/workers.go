@@ -324,14 +324,18 @@ func (wm *WorkerManager) handleWorkerExit(ctx context.Context, worker *WorkerSta
 		// Create Failure artefact
 		failurePayload := fmt.Sprintf("Worker container exited with code %d\n\nLogs:\n%s", exitCode, logs)
 		failure := &blackboard.Artefact{
-			ID:              uuid.New().String(),
-			LogicalID:       uuid.New().String(),
-			Version:         1,
-			StructuralType:  blackboard.StructuralTypeFailure,
-			Type:            "WorkerFailure",
-			Payload:         failurePayload,
-			SourceArtefacts: []string{},
-			ProducedByRole:  worker.Role,
+			ID: uuid.New().String(),
+			Header: blackboard.ArtefactHeader{
+				LogicalThreadID: uuid.New().String(),
+				Version:         1,
+				StructuralType:  blackboard.StructuralTypeFailure,
+				Type:            "WorkerFailure",
+				ProducedByRole:  worker.Role,
+				ParentHashes:    []string{},
+			},
+			Payload: blackboard.ArtefactPayload{
+				Content: failurePayload,
+			},
 		}
 
 		if err := bbClient.CreateArtefact(ctx, failure); err != nil {
@@ -365,14 +369,18 @@ func (wm *WorkerManager) handleWorkerError(ctx context.Context, worker *WorkerSt
 	// Create Failure artefact
 	failurePayload := fmt.Sprintf("Worker container monitoring error: %v", err)
 	failure := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeFailure,
-		Type:            "WorkerError",
-		Payload:         failurePayload,
-		SourceArtefacts: []string{},
-		ProducedByRole:  worker.Role,
+		ID: uuid.New().String(),
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: uuid.New().String(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeFailure,
+			Type:            "WorkerError",
+			ProducedByRole:  worker.Role,
+			ParentHashes:    []string{},
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: failurePayload,
+		},
 	}
 
 	if createErr := bbClient.CreateArtefact(ctx, failure); createErr != nil {

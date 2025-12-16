@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hearth-insights/holt/pkg/blackboard"
 	"github.com/google/uuid"
+	"github.com/hearth-insights/holt/pkg/blackboard"
 )
 
 // TestPrepareToolInput verifies the tool input JSON structure
@@ -35,14 +35,24 @@ func TestPrepareToolInput(t *testing.T) {
 	}
 
 	targetArtefact := &blackboard.Artefact{
-		ID:              "art-123",
-		LogicalID:       "log-456",
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "GoalDefined",
-		Payload:         "Implement user login",
-		SourceArtefacts: []string{}, // No sources = root artefact
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: "log-456",
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "GoalDefined",
+			ParentHashes:    []string{}, // No sources = root artefact
+			CreatedAtMs:     1234567890,
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "Implement user login",
+		},
 	}
+	// Manually set ID to a valid hash for testing, or use Compute (which requires matching hash)
+	hash, err := blackboard.ComputeArtefactHash(targetArtefact)
+	if err != nil {
+		t.Fatalf("ComputeHash failed: %v", err)
+	}
+	targetArtefact.ID = hash
 
 	jsonStr, err := engine.prepareToolInput(context.Background(), claim, targetArtefact)
 	if err != nil {
@@ -66,12 +76,17 @@ func TestPrepareToolInput(t *testing.T) {
 		t.Fatalf("target_artefact is not an object")
 	}
 
-	if targetArt["id"] != "art-123" {
-		t.Errorf("Expected target_artefact.id='art-123', got %v", targetArt["id"])
+	if targetArt["id"] != targetArtefact.ID {
+		t.Errorf("Expected target_artefact.id='%s', got %v", targetArtefact.ID, targetArt["id"])
 	}
 
-	if targetArt["type"] != "GoalDefined" {
-		t.Errorf("Expected target_artefact.type='GoalDefined', got %v", targetArt["type"])
+	header, ok := targetArt["header"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("target_artefact.header is not an object")
+	}
+
+	if header["type"] != "GoalDefined" {
+		t.Errorf("Expected target_artefact.header.type='GoalDefined', got %v", header["type"])
 	}
 
 	// Verify context_chain is empty array

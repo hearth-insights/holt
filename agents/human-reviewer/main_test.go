@@ -47,7 +47,7 @@ func TestRun_Approve(t *testing.T) {
 		},
 	}
 	inputJSON, _ := json.Marshal(input)
-	
+
 	// Simulate user typing "y"
 	stdin := strings.NewReader(string(inputJSON) + "y\n")
 	var stdout, stderr bytes.Buffer
@@ -74,7 +74,7 @@ func TestRun_RejectWithFeedback(t *testing.T) {
 		},
 	}
 	inputJSON, _ := json.Marshal(input)
-	
+
 	// Simulate user typing "n" then "bad code"
 	stdin := strings.NewReader(string(inputJSON) + "n\nbad code\n")
 	var stdout, stderr bytes.Buffer
@@ -90,7 +90,7 @@ func TestRun_RejectWithFeedback(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "Review", output.StructuralType)
 	assert.Equal(t, "Rejected by human reviewer", output.Summary)
-	
+
 	var payload ReviewPayload
 	err = json.Unmarshal([]byte(output.ArtefactPayload), &payload)
 	assert.NoError(t, err)
@@ -106,11 +106,11 @@ func TestRun_Timeout(t *testing.T) {
 		},
 	}
 	inputJSON, _ := json.Marshal(input)
-	
+
 	// Use a pipe to simulate blocking input
 	r, w := io.Pipe()
 	defer w.Close()
-	
+
 	// Write input JSON then keep pipe open but silent to simulate waiting for user input
 	go func() {
 		w.Write(inputJSON)

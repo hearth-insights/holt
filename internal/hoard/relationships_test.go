@@ -24,24 +24,32 @@ func TestResolveRelationships(t *testing.T) {
 
 		// 1. Create Upstream Claim (Produced By)
 		upstreamClaim := &blackboard.Claim{
-			ID:         "claim-upstream",
-			ArtefactID: "art-parent",
-			Status:     blackboard.ClaimStatusComplete,
+			ID:                    "claim-upstream",
+			ArtefactID:            "art-parent",
+			Status:                blackboard.ClaimStatusComplete,
 			GrantedExclusiveAgent: "upstream-agent",
 		}
 		require.NoError(t, bbClient.CreateClaim(ctx, upstreamClaim))
 
-		// 2. Create Artefact (linked to upstream claim)
+		// 2. Create Artefact (linked to upstream claim) with proper hash ID
 		artefact := &blackboard.Artefact{
-			ID:             "art-target",
-			LogicalID:      "log-target",
-			Version:        1,
-			StructuralType: blackboard.StructuralTypeStandard,
-			Type:           "GoalDefined",
-			ProducedByRole: "upstream-agent",
-			Payload:        "goal",
-			ClaimID:        upstreamClaim.ID, // Link to upstream
+			Header: blackboard.ArtefactHeader{
+				LogicalThreadID: blackboard.NewID(),
+				Version:         1,
+				StructuralType:  blackboard.StructuralTypeStandard,
+				Type:            "GoalDefined",
+				ProducedByRole:  "upstream-agent",
+				ParentHashes:    []string{},
+				ClaimID:         upstreamClaim.ID, // Link to upstream
+				CreatedAtMs:     1234567890,
+			},
+			Payload: blackboard.ArtefactPayload{
+				Content: "goal",
+			},
 		}
+		hash, err := blackboard.ComputeArtefactHash(artefact)
+		require.NoError(t, err)
+		artefact.ID = hash
 		require.NoError(t, bbClient.CreateArtefact(ctx, artefact))
 
 		// 3. Create Downstream Claim (Consumed By)
@@ -82,16 +90,24 @@ func TestResolveRelationships(t *testing.T) {
 		defer bbClient.Close()
 		ctx := context.Background()
 
-		// Create Artefact with no claims
+		// Create Artefact with no claims and proper hash ID
 		artefact := &blackboard.Artefact{
-			ID:             "art-orphan",
-			LogicalID:      "log-orphan",
-			Version:        1,
-			StructuralType: blackboard.StructuralTypeStandard,
-			Type:           "GoalDefined",
-			ProducedByRole: "user",
-			Payload:        "goal",
+			Header: blackboard.ArtefactHeader{
+				LogicalThreadID: blackboard.NewID(),
+				Version:         1,
+				StructuralType:  blackboard.StructuralTypeStandard,
+				Type:            "GoalDefined",
+				ProducedByRole:  "user",
+				ParentHashes:    []string{},
+				CreatedAtMs:     1234567890,
+			},
+			Payload: blackboard.ArtefactPayload{
+				Content: "goal",
+			},
 		}
+		hash, err := blackboard.ComputeArtefactHash(artefact)
+		require.NoError(t, err)
+		artefact.ID = hash
 		require.NoError(t, bbClient.CreateArtefact(ctx, artefact))
 
 		// Resolve

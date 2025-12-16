@@ -47,13 +47,18 @@ func TestStaticBiddingSerialization(t *testing.T) {
 	claimID := blackboard.NewID()
 
 	artefact := &blackboard.Artefact{
-		ID:             artefactID,
-		LogicalID:      blackboard.NewID(),
-		Version:        1,
-		StructuralType: blackboard.StructuralTypeStandard,
-		Type:           "GoalDefined",
-		ProducedByRole: "user",
-		Payload:        "test",
+		ID: artefactID,
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "GoalDefined",
+			ProducedByRole:  "user",
+			ParentHashes:    []string{},
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "test",
+		},
 	}
 	err = bbClient.CreateArtefact(ctx, artefact)
 	require.NoError(t, err)
@@ -76,7 +81,7 @@ func TestStaticBiddingSerialization(t *testing.T) {
 	// The key is holt:{instance}:claim:{claim_id}:bids
 	// Field is agent name
 	key := blackboard.ClaimBidsKey("test-instance", claimID)
-	
+
 	// Read raw value from Redis
 	val := mr.HGet(key, "test-agent")
 	require.NotEmpty(t, val, "Bid should be in Redis")
@@ -86,7 +91,7 @@ func TestStaticBiddingSerialization(t *testing.T) {
 	// Attempt to unmarshal as Orchestrator would
 	var bid blackboard.Bid
 	err = json.Unmarshal([]byte(val), &bid)
-	
+
 	// Assert it is valid JSON and has correct values
 	assert.NoError(t, err, "Should be valid JSON")
 	assert.Equal(t, blackboard.BidTypeExclusive, bid.BidType)

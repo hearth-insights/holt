@@ -127,9 +127,9 @@ services:
 	t.Log("Step 6: Waiting for v1 Review (should reject)...")
 	review1 := env.WaitForArtefactByType("Review")
 	require.NotNil(t, review1)
-	require.NotEqual(t, "{}", review1.Payload, "Expected rejection (non-empty payload)")
-	require.Contains(t, review1.Payload, "needs tests", "Expected specific feedback")
-	t.Logf("✓ v1 Review received with feedback: %s", review1.Payload)
+	require.NotEqual(t, "{}", review1.Payload.Content, "Expected rejection (non-empty payload)")
+	require.Contains(t, review1.Payload.Content, "needs tests", "Expected specific feedback")
+	t.Logf("✓ v1 Review received with feedback: %s", review1.Payload.Content)
 
 	// Step 7: Wait for CodeCommit v2 (result of feedback loop)
 	t.Log("Step 7: Waiting for CodeCommit v2 (after rework)...")

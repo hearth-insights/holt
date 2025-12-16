@@ -17,22 +17,22 @@ import (
 
 // Input contract from pup (stdin)
 type Input struct {
-	ClaimType       string      `json:"claim_type"`
-	TargetArtefact  Artefact    `json:"target_artefact"`
-	ContextChain    []Artefact  `json:"context_chain"`
+	ClaimType         string     `json:"claim_type"`
+	TargetArtefact    Artefact   `json:"target_artefact"`
+	ContextChain      []Artefact `json:"context_chain"`
 	AdditionalContext []Artefact `json:"additional_context"`
 }
 
 // Artefact represents a blackboard artefact
 type Artefact struct {
-	ID             string   `json:"id"`
-	LogicalID      string   `json:"logical_id"`
-	Version        int      `json:"version"`
-	StructuralType string   `json:"structural_type"`
-	Type           string   `json:"type"`
-	Payload        string   `json:"payload"`
+	ID              string   `json:"id"`
+	LogicalID       string   `json:"logical_id"`
+	Version         int      `json:"version"`
+	StructuralType  string   `json:"structural_type"`
+	Type            string   `json:"type"`
+	Payload         string   `json:"payload"`
 	SourceArtefacts []string `json:"source_artefacts"`
-	ProducedByRole string   `json:"produced_by_role"`
+	ProducedByRole  string   `json:"produced_by_role"`
 }
 
 // Output contract to pup (FD 3)
@@ -74,7 +74,7 @@ func Run(stdin io.Reader, stdout, stderr io.Writer, getEnv func(string) string) 
 	// Read input from stdin
 	// Use a buffered reader for both JSON and user input to avoid losing data due to buffering
 	reader := bufio.NewReader(stdin)
-	
+
 	var input Input
 	decoder := json.NewDecoder(reader)
 	if err := decoder.Decode(&input); err != nil {

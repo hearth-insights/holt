@@ -10,8 +10,8 @@ import "time"
 // 2. SET to holt:{instance}:security:lockdown (circuit breaker state)
 // 3. PUBLISH to holt:{instance}:security:alerts (real-time notification)
 type SecurityAlert struct {
-	Type             string `json:"type"`              // "hash_mismatch", "orphan_block", "timestamp_drift", "security_override"
-	TimestampMs      int64  `json:"timestamp_ms"`      // Unix milliseconds
+	Type               string `json:"type"`                          // "hash_mismatch", "orphan_block", "timestamp_drift", "security_override"
+	TimestampMs        int64  `json:"timestamp_ms"`                  // Unix milliseconds
 	OrchestratorAction string `json:"orchestrator_action,omitempty"` // "global_lockdown", "rejected", etc.
 
 	// Hash mismatch fields
@@ -20,14 +20,14 @@ type SecurityAlert struct {
 	HashActual        string `json:"hash_actual,omitempty"`
 
 	// Orphan block fields
-	ArtefactID       string `json:"artefact_id,omitempty"`
+	ArtefactID        string `json:"artefact_id,omitempty"`
 	MissingParentHash string `json:"missing_parent_hash,omitempty"` // Note: Field name differs from JSON tag for backward compat
 
 	// Timestamp drift fields
-	ArtefactTimestampMs      int64 `json:"artefact_timestamp_ms,omitempty"`
+	ArtefactTimestampMs     int64 `json:"artefact_timestamp_ms,omitempty"`
 	OrchestratorTimestampMs int64 `json:"orchestrator_timestamp_ms,omitempty"`
-	DriftMs                  int64 `json:"drift_ms,omitempty"`
-	ThresholdMs              int64 `json:"threshold_ms,omitempty"`
+	DriftMs                 int64 `json:"drift_ms,omitempty"`
+	ThresholdMs             int64 `json:"threshold_ms,omitempty"`
 
 	// Security override fields (unlock)
 	Action   string `json:"action,omitempty"`   // "lockdown_cleared"
@@ -48,24 +48,24 @@ type SecurityAlert struct {
 
 // Alert type constants for easy use
 const (
-	AlertTypeHashMismatch      = "hash_mismatch"
-	AlertTypeOrphanBlock       = "orphan_block"
-	AlertTypeTimestampDrift    = "timestamp_drift"
-	AlertTypeSecurityOverride  = "security_override"
+	AlertTypeHashMismatch         = "hash_mismatch"
+	AlertTypeOrphanBlock          = "orphan_block"
+	AlertTypeTimestampDrift       = "timestamp_drift"
+	AlertTypeSecurityOverride     = "security_override"
 	AlertTypeUnauthorizedTopology = "unauthorized_topology" // M4.6 Security Addendum
 )
 
 // NewHashMismatchAlert creates a hash mismatch security alert.
 func NewHashMismatchAlert(artefactID, expected, actual, agentRole, claimID string) *SecurityAlert {
 	return &SecurityAlert{
-		Type:                AlertTypeHashMismatch,
-		TimestampMs:         time.Now().UnixMilli(),
-		OrchestratorAction:  "global_lockdown",
-		ArtefactIDClaimed:   artefactID,
-		HashExpected:        expected,
-		HashActual:          actual,
-		AgentRole:           agentRole,
-		ClaimID:             claimID,
+		Type:               AlertTypeHashMismatch,
+		TimestampMs:        time.Now().UnixMilli(),
+		OrchestratorAction: "global_lockdown",
+		ArtefactIDClaimed:  artefactID,
+		HashExpected:       expected,
+		HashActual:         actual,
+		AgentRole:          agentRole,
+		ClaimID:            claimID,
 	}
 }
 
@@ -85,15 +85,15 @@ func NewOrphanBlockAlert(artefactID, missingParent, agentRole, claimID string) *
 // NewTimestampDriftAlert creates a timestamp drift security alert.
 func NewTimestampDriftAlert(artefactID string, artefactTs, orchTs, drift, threshold int64, agentRole string) *SecurityAlert {
 	return &SecurityAlert{
-		Type:                     AlertTypeTimestampDrift,
-		TimestampMs:              time.Now().UnixMilli(),
-		OrchestratorAction:       "rejected",
-		ArtefactID:               artefactID,
-		ArtefactTimestampMs:      artefactTs,
-		OrchestratorTimestampMs:  orchTs,
-		DriftMs:                  drift,
-		ThresholdMs:              threshold,
-		AgentRole:                agentRole,
+		Type:                    AlertTypeTimestampDrift,
+		TimestampMs:             time.Now().UnixMilli(),
+		OrchestratorAction:      "rejected",
+		ArtefactID:              artefactID,
+		ArtefactTimestampMs:     artefactTs,
+		OrchestratorTimestampMs: orchTs,
+		DriftMs:                 drift,
+		ThresholdMs:             threshold,
+		AgentRole:               agentRole,
 	}
 }
 

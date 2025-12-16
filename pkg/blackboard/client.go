@@ -72,31 +72,42 @@ func (c *Client) RedisClient() *redis.Client {
 //
 // CRITICAL: Lua script failures are FATAL. If this method returns an error,
 // the caller MUST panic/exit immediately (partial artefact creation is unacceptable).
+// CreateArtefact writes an artefact to Redis and publishes an event.
+// M5.1: Uses atomic Lua script to ensure reverse index consistency.
+//
+// Validates the artefact before writing. Returns error if validation fails or Redis operation fails.
+// Publishes full artefact JSON to holt:{instance}:artefact_events after successful write.
+//
+// The artefact is stored as a Redis hash at holt:{instance}:artefact:{id}.
+// This method is idempotent - writing the same artefact twice is safe.
+//
+// CRITICAL: Lua script failures are FATAL. If this method returns an error,
+// the caller MUST panic/exit immediately (partial artefact creation is unacceptable).
 func (c *Client) CreateArtefact(ctx context.Context, a *Artefact) error {
 	// M3.9: Auto-populate CreatedAtMs if not set
-	if a.CreatedAtMs == 0 {
-		a.CreatedAtMs = time.Now().UnixMilli()
+	if a.Header.CreatedAtMs == 0 {
+		a.Header.CreatedAtMs = time.Now().UnixMilli()
 	}
 
 	// M5.1: Ensure metadata is valid JSON (default to empty object)
-	if a.Metadata == "" {
-		a.Metadata = "{}"
+	if a.Header.Metadata == "" {
+		a.Header.Metadata = "{}"
 	}
-	log.Printf("[DEBUG_UNIQUE_ID_8888] Client creating artefact %s with metadata: %s", a.ID, a.Metadata)
+	log.Printf("[DEBUG] Client creating artefact %s with metadata: %s", a.ID, a.Header.Metadata)
 
 	// Validate artefact
 	if err := a.Validate(); err != nil {
 		return fmt.Errorf("invalid artefact: %w", err)
 	}
 
-	// Encode source artefacts as JSON
-	sourceArtefactsJSON, err := json.Marshal(a.SourceArtefacts)
+	// Encode source artefacts as JSON (Header.ParentHashes)
+	sourceArtefactsJSON, err := json.Marshal(a.Header.ParentHashes)
 	if err != nil {
-		return fmt.Errorf("failed to marshal source_artefacts: %w", err)
+		return fmt.Errorf("failed to marshal parent_hashes (source_artefacts): %w", err)
 	}
 
 	// Encode context_for_roles as JSON
-	contextForRolesJSON, err := json.Marshal(a.ContextForRoles)
+	contextForRolesJSON, err := json.Marshal(a.Header.ContextForRoles)
 	if err != nil {
 		return fmt.Errorf("failed to marshal context_for_roles: %w", err)
 	}
@@ -112,21 +123,21 @@ func (c *Client) CreateArtefact(ctx context.Context, a *Artefact) error {
 	_, err = script.Run(ctx, c.rdb,
 		[]string{
 			ArtefactKey(c.instanceName, a.ID),
-			ThreadKey(c.instanceName, a.LogicalID),
+			ThreadKey(c.instanceName, a.Header.LogicalThreadID),
 			ArtefactEventsChannel(c.instanceName),
 		},
 		a.ID,
-		a.LogicalID,
-		a.Version,
-		string(a.StructuralType),
-		a.Type,
-		a.Payload,
+		a.Header.LogicalThreadID,
+		a.Header.Version,
+		string(a.Header.StructuralType),
+		a.Header.Type,
+		a.Payload.Content,
 		string(sourceArtefactsJSON),
-		a.ProducedByRole,
-		a.CreatedAtMs,
+		a.Header.ProducedByRole,
+		a.Header.CreatedAtMs,
 		string(contextForRolesJSON),
-		a.ClaimID,
-		a.Metadata,
+		a.Header.ClaimID,
+		a.Header.Metadata,
 		string(artefactJSON),
 	).Result()
 
@@ -1060,19 +1071,30 @@ func (c *Client) CreateOrVersionKnowledge(ctx context.Context, knowledgeName, kn
 	}
 
 	// Create the Knowledge artefact
-	artefactID := uuid.New().String()
+	// Use V2 structure with Header and Payload
 	knowledge := &Artefact{
-		ID:              artefactID,
-		LogicalID:       logicalID,
-		Version:         version,
-		StructuralType:  StructuralTypeKnowledge,
-		Type:            knowledgeName, // The knowledge_name becomes the Type field
-		Payload:         knowledgePayload,
-		SourceArtefacts: []string{}, // Knowledge artefacts have no sources
-		ProducedByRole:  producedByRole,
-		ContextForRoles: contextForRoles,
-		CreatedAtMs:     time.Now().UnixMilli(),
+		Header: ArtefactHeader{
+			LogicalThreadID: logicalID,
+			Version:         version,
+			StructuralType:  StructuralTypeKnowledge,
+			Type:            knowledgeName, // The knowledge_name becomes the Type field
+			ParentHashes:    []string{},    // Knowledge artefacts have no sources
+			ProducedByRole:  producedByRole,
+			ContextForRoles: contextForRoles,
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: ArtefactPayload{
+			Content: knowledgePayload,
+		},
 	}
+
+	// Compute content-based ID (V2)
+	hashID, err := ComputeArtefactHash(knowledge)
+	if err != nil {
+		return nil, fmt.Errorf("failed to compute knowledge artefact hash: %w", err)
+	}
+	knowledge.ID = hashID
+	artefactID := knowledge.ID // Fix: define artefactID for subsequent use
 
 	// Write the artefact to Redis (without publishing an event - Knowledge is passive)
 	if err := knowledge.Validate(); err != nil {
@@ -1368,98 +1390,6 @@ func (c *Client) PublishSecurityAlert(ctx context.Context, alert *SecurityAlert)
 	}
 
 	return nil
-}
-
-// WriteVerifiableArtefact writes a VerifiableArtefact to Redis.
-// M4.6: This is used for V2 hash-based artefacts during testing and eventual migration.
-// Similar to CreateArtefact but for the VerifiableArtefact type.
-//
-// Stores the artefact as a Redis Hash (HSET) to be compatible with existing GetArtefact (HGETALL) calls.
-func (c *Client) WriteVerifiableArtefact(ctx context.Context, a *VerifiableArtefact) error {
-	// Validate artefact structure
-	if err := a.Validate(); err != nil {
-		return fmt.Errorf("invalid verifiable artefact: %w", err)
-	}
-
-	// Convert V2 VerifiableArtefact to V1 Artefact for backwards compatibility with HGETALL
-	// This ensures GetArtefact works for both V1 (UUID) and V2 (Hash) artefacts
-	v1Artefact := &Artefact{
-		ID:              a.ID,
-		LogicalID:       a.Header.LogicalThreadID,
-		Version:         a.Header.Version,
-		StructuralType:  a.Header.StructuralType,
-		Type:            a.Header.Type,
-		Payload:         a.Payload.Content,
-		SourceArtefacts: a.Header.ParentHashes,
-		ProducedByRole:  a.Header.ProducedByRole,
-		CreatedAtMs:     a.Header.CreatedAtMs,
-		ClaimID:         a.Header.ClaimID,
-		ContextForRoles: a.Header.ContextForRoles,
-		Metadata:        a.Header.Metadata, // M5.1: Preserve metadata
-	}
-
-	// Convert to Redis hash
-	hash, err := ArtefactToHash(v1Artefact)
-	if err != nil {
-		return fmt.Errorf("failed to serialize verifiable artefact to hash: %w", err)
-	}
-
-	// Write to Redis using hash ID as key (HSET)
-	key := ArtefactKey(c.instanceName, a.ID)
-	if err := c.rdb.HSet(ctx, key, hash).Err(); err != nil {
-		return fmt.Errorf("failed to write verifiable artefact to Redis: %w", err)
-	}
-
-	// Note: We don't publish to artefact_events channel here because this is test-only.
-	// When V2 is fully implemented, the pup will write and publish.
-
-	return nil
-}
-
-// GetVerifiableArtefact retrieves a V2 VerifiableArtefact by its hash ID.
-// Returns (nil, redis.Nil) if the artefact doesn't exist.
-// Use IsNotFound() to check for not-found errors.
-// M4.6 Phase 4: Used by CLI verify command for independent hash verification.
-func (c *Client) GetVerifiableArtefact(ctx context.Context, hashID string) (*VerifiableArtefact, error) {
-	key := ArtefactKey(c.instanceName, hashID)
-
-	// Read hash from Redis (HGETALL)
-	hashData, err := c.rdb.HGetAll(ctx, key).Result()
-	if err != nil {
-		return nil, fmt.Errorf("failed to read verifiable artefact from Redis: %w", err)
-	}
-
-	// Check if key exists
-	if len(hashData) == 0 {
-		return nil, redis.Nil
-	}
-
-	// Convert Hash to V1 Artefact first (reusing existing deserialization logic)
-	v1Artefact, err := HashToArtefact(hashData)
-	if err != nil {
-		return nil, fmt.Errorf("failed to deserialize verifiable artefact from hash: %w", err)
-	}
-
-	// Convert V1 Artefact to V2 VerifiableArtefact structure
-	v2Artefact := &VerifiableArtefact{
-		ID: v1Artefact.ID,
-		Header: ArtefactHeader{
-			ParentHashes:    v1Artefact.SourceArtefacts,
-			LogicalThreadID: v1Artefact.LogicalID,
-			Version:         v1Artefact.Version,
-			CreatedAtMs:     v1Artefact.CreatedAtMs,
-			ProducedByRole:  v1Artefact.ProducedByRole,
-			StructuralType:  v1Artefact.StructuralType,
-			Type:            v1Artefact.Type,
-			ContextForRoles: v1Artefact.ContextForRoles,
-			ClaimID:         v1Artefact.ClaimID,
-		},
-		Payload: ArtefactPayload{
-			Content: v1Artefact.Payload,
-		},
-	}
-
-	return v2Artefact, nil
 }
 
 // ScanKeys scans for Redis keys matching the given pattern.

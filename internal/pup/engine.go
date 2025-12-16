@@ -260,14 +260,14 @@ func (e *Engine) determineBidType(ctx context.Context, claim *blackboard.Claim, 
 		if len(e.config.BiddingStrategy.TargetTypes) > 0 {
 			match := false
 			for _, t := range e.config.BiddingStrategy.TargetTypes {
-				if t == targetArtefact.Type {
+				if t == targetArtefact.Header.Type {
 					match = true
 					break
 				}
 			}
 			if !match {
 				log.Printf("[DEBUG] Target artefact type '%s' not in target_types %v, ignoring",
-					targetArtefact.Type, e.config.BiddingStrategy.TargetTypes)
+					targetArtefact.Header.Type, e.config.BiddingStrategy.TargetTypes)
 				return blackboard.BidTypeIgnore, nil
 			}
 		}
@@ -475,7 +475,7 @@ func (e *Engine) createBiddingFailureArtefact(ctx context.Context, claim *blackb
 	// Create V2 VerifiableArtefact
 	logicalThreadID := blackboard.NewID()
 
-	v2Artefact := &blackboard.VerifiableArtefact{
+	v2Artefact := &blackboard.Artefact{
 		Header: blackboard.ArtefactHeader{
 			ParentHashes:    []string{claim.ArtefactID},
 			LogicalThreadID: logicalThreadID,
@@ -500,24 +500,12 @@ func (e *Engine) createBiddingFailureArtefact(ctx context.Context, claim *blackb
 	v2Artefact.ID = hash
 
 	// Write to blackboard
-	if err := e.bbClient.WriteVerifiableArtefact(ctx, v2Artefact); err != nil {
+	if err := e.bbClient.CreateArtefact(ctx, v2Artefact); err != nil {
 		log.Printf("[ERROR] Failed to create bidding Failure artefact: %v", err)
 		return
 	}
 
-	// Create V1 wrapper for event publishing/thread tracking
-	artefact := &blackboard.Artefact{
-		ID:              v2Artefact.ID,
-		LogicalID:       v2Artefact.Header.LogicalThreadID,
-		Version:         v2Artefact.Header.Version,
-		StructuralType:  v2Artefact.Header.StructuralType,
-		Type:            v2Artefact.Header.Type,
-		Payload:         v2Artefact.Payload.Content,
-		SourceArtefacts: v2Artefact.Header.ParentHashes,
-		ProducedByRole:  v2Artefact.Header.ProducedByRole,
-		CreatedAtMs:     v2Artefact.Header.CreatedAtMs,
-		ClaimID:         v2Artefact.Header.ClaimID,
-	}
+	log.Printf("[INFO] Created bidding Failure artefact: id=%s", v2Artefact.ID)
 
 	// Add to thread tracking
 	if err := e.bbClient.AddVersionToThread(ctx, logicalThreadID, v2Artefact.ID, 1); err != nil {
@@ -525,12 +513,12 @@ func (e *Engine) createBiddingFailureArtefact(ctx context.Context, claim *blackb
 	}
 
 	// Publish event
-	artefactJSON, _ := json.Marshal(artefact)
+	artefactJSON, _ := json.Marshal(v2Artefact)
 	channel := fmt.Sprintf("holt:%s:artefact_events", e.config.InstanceName)
 	if err := e.bbClient.PublishRaw(ctx, channel, string(artefactJSON)); err != nil {
 		log.Printf("[ERROR] Failed to publish bidding failure artefact event: %v", err)
 		return
 	}
 
-	log.Printf("[INFO] Bidding Failure artefact created: artefact_id=%s type=%s", artefact.ID, artefact.Type)
+	log.Printf("[INFO] Bidding Failure artefact created: artefact_id=%s type=%s", v2Artefact.ID, v2Artefact.Header.Type)
 }

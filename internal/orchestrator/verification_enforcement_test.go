@@ -41,16 +41,16 @@ func TestVerifyArtefact_ReviewClaimEnforcement(t *testing.T) {
 	engine := &Engine{
 		client: &blackboard.Client{}, // We can't easily mock the struct, so we'll use a different approach
 	}
-	
+
 	// Since Engine uses a concrete *blackboard.Client, we can't inject our MockClient.
 	// Instead, we should use the existing setupVerificationTestEngine from verification_test.go
 	// which uses miniredis.
-	
+
 	ctx := context.Background()
 	engine, client := setupVerificationTestEngine(t, "test-verify-review-enforcement", 300000)
 
 	// 1. Create a parent artefact
-	parentArtefact := &blackboard.VerifiableArtefact{
+	parentArtefact := &blackboard.Artefact{
 		Header: blackboard.ArtefactHeader{
 			ParentHashes:    []string{},
 			LogicalThreadID: "thread-123",
@@ -64,7 +64,7 @@ func TestVerifyArtefact_ReviewClaimEnforcement(t *testing.T) {
 	}
 	parentHash, _ := blackboard.ComputeArtefactHash(parentArtefact)
 	parentArtefact.ID = parentHash
-	client.WriteVerifiableArtefact(ctx, parentArtefact)
+	client.CreateArtefact(ctx, parentArtefact)
 
 	// 2. Create a REVIEW claim
 	claimID := "claim-review-123"
@@ -78,7 +78,7 @@ func TestVerifyArtefact_ReviewClaimEnforcement(t *testing.T) {
 	require.NoError(t, err)
 
 	// 3. Create a STANDARD artefact (Violation!)
-	violationArtefact := &blackboard.VerifiableArtefact{
+	violationArtefact := &blackboard.Artefact{
 		Header: blackboard.ArtefactHeader{
 			ParentHashes:    []string{parentHash},
 			LogicalThreadID: "thread-123",
@@ -100,7 +100,7 @@ func TestVerifyArtefact_ReviewClaimEnforcement(t *testing.T) {
 	assert.Contains(t, err.Error(), "topology violation: agent granted review claim must produce Review artefact")
 
 	// 4. Create a REVIEW artefact (Success)
-	validArtefact := &blackboard.VerifiableArtefact{
+	validArtefact := &blackboard.Artefact{
 		Header: blackboard.ArtefactHeader{
 			ParentHashes:    []string{parentHash},
 			LogicalThreadID: "thread-123",

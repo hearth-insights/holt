@@ -36,23 +36,23 @@ func (fc *FilterCriteria) matchesFilter(art *blackboard.Artefact) bool {
 	// Time filtering
 	// Note: If created_at_ms is 0 (old data without timestamps), include it
 	// This ensures historical replay works with pre-M3.9 data
-	if fc.SinceTimestampMs > 0 && art.CreatedAtMs > 0 && art.CreatedAtMs < fc.SinceTimestampMs {
+	if fc.SinceTimestampMs > 0 && art.Header.CreatedAtMs > 0 && art.Header.CreatedAtMs < fc.SinceTimestampMs {
 		return false
 	}
-	if fc.UntilTimestampMs > 0 && art.CreatedAtMs > 0 && art.CreatedAtMs > fc.UntilTimestampMs {
+	if fc.UntilTimestampMs > 0 && art.Header.CreatedAtMs > 0 && art.Header.CreatedAtMs > fc.UntilTimestampMs {
 		return false
 	}
 
 	// Type filtering - glob pattern matching
 	if fc.TypeGlob != "" {
-		matched, err := filepath.Match(fc.TypeGlob, art.Type)
+		matched, err := filepath.Match(fc.TypeGlob, art.Header.Type)
 		if err != nil || !matched {
 			return false
 		}
 	}
 
 	// Agent filtering - exact match on produced_by_role
-	if fc.AgentRole != "" && art.ProducedByRole != fc.AgentRole {
+	if fc.AgentRole != "" && art.Header.ProducedByRole != fc.AgentRole {
 		return false
 	}
 
@@ -194,7 +194,7 @@ func displayHistoricalArtefacts(ctx context.Context, client *blackboard.Client, 
 		artefactsByID[artefactID] = artefact
 
 		// Track if we have old data without timestamps
-		if artefact.CreatedAtMs == 0 {
+		if artefact.Header.CreatedAtMs == 0 {
 			hasArtefactsWithoutTimestamps = true
 		}
 
@@ -205,7 +205,7 @@ func displayHistoricalArtefacts(ctx context.Context, client *blackboard.Client, 
 
 		// Add artefact event (will be filtered by formatter for Review/reworked artefacts)
 		allEvents = append(allEvents, historicalEvent{
-			timestampMs: artefact.CreatedAtMs,
+			timestampMs: artefact.Header.CreatedAtMs,
 			artefact:    artefact,
 		})
 	}
@@ -293,7 +293,7 @@ func displayHistoricalArtefacts(ctx context.Context, client *blackboard.Client, 
 		for _, primaryClaim := range claims {
 
 			// Timestamp for claim events - use artefact creation time
-			claimTimestampMs := artefact.CreatedAtMs
+			claimTimestampMs := artefact.Header.CreatedAtMs
 
 			// Add claim created event
 			allEvents = append(allEvents, historicalEvent{
@@ -410,12 +410,12 @@ func displayHistoricalArtefacts(ctx context.Context, client *blackboard.Client, 
 						// Find the latest review timestamp to place these events after
 						latestReviewTs := claimTimestampMs
 						for _, reviewArtefact := range artefactsByID {
-							if reviewArtefact.StructuralType != blackboard.StructuralTypeReview {
+							if reviewArtefact.Header.StructuralType != blackboard.StructuralTypeReview {
 								continue
 							}
-							for _, sourceID := range reviewArtefact.SourceArtefacts {
-								if sourceID == artefact.ID && reviewArtefact.CreatedAtMs > latestReviewTs {
-									latestReviewTs = reviewArtefact.CreatedAtMs
+							for _, sourceID := range reviewArtefact.Header.ParentHashes {
+								if sourceID == artefact.ID && reviewArtefact.Header.CreatedAtMs > latestReviewTs {
+									latestReviewTs = reviewArtefact.Header.CreatedAtMs
 								}
 							}
 						}
@@ -425,7 +425,7 @@ func displayHistoricalArtefacts(ctx context.Context, client *blackboard.Client, 
 							Data: map[string]interface{}{
 								"target_agent_role": otherClaim.GrantedExclusiveAgent,
 								"feedback_claim_id": otherClaim.ID,
-								"iteration":         artefact.Version,
+								"iteration":         artefact.Header.Version,
 							},
 						}
 						// Feedback assignment comes 1ms after the last review
@@ -472,13 +472,13 @@ func displayHistoricalArtefacts(ctx context.Context, client *blackboard.Client, 
 		// Reconstruct review_approved/review_rejected events from Review artefacts
 		// Do this ONCE per artefact (outside claim loop to avoid duplicates)
 		for _, reviewArtefact := range artefactsByID {
-			if reviewArtefact.StructuralType != blackboard.StructuralTypeReview {
+			if reviewArtefact.Header.StructuralType != blackboard.StructuralTypeReview {
 				continue
 			}
 
 			// Check if this review is for the current artefact
 			isForThisArtefact := false
-			for _, sourceID := range reviewArtefact.SourceArtefacts {
+			for _, sourceID := range reviewArtefact.Header.ParentHashes {
 				if sourceID == artefact.ID {
 					isForThisArtefact = true
 					break
@@ -495,7 +495,7 @@ func displayHistoricalArtefacts(ctx context.Context, client *blackboard.Client, 
 			eventType := "review_rejected" // Default to rejected unless proven empty
 
 			var jsonData interface{}
-			if err := json.Unmarshal([]byte(reviewArtefact.Payload), &jsonData); err == nil {
+			if err := json.Unmarshal([]byte(reviewArtefact.Payload.Content), &jsonData); err == nil {
 				switch v := jsonData.(type) {
 				case map[string]interface{}:
 					if len(v) == 0 {
@@ -511,14 +511,14 @@ func displayHistoricalArtefacts(ctx context.Context, client *blackboard.Client, 
 			workflowEvent := &blackboard.WorkflowEvent{
 				Event: eventType,
 				Data: map[string]interface{}{
-					"reviewer_role":        reviewArtefact.ProducedByRole,
+					"reviewer_role":        reviewArtefact.Header.ProducedByRole,
 					"original_artefact_id": artefact.ID,
 					"review_artefact_id":   reviewArtefact.ID,
 				},
 			}
 			// Use review artefact's actual creation time
 			allEvents = append(allEvents, historicalEvent{
-				timestampMs:   reviewArtefact.CreatedAtMs,
+				timestampMs:   reviewArtefact.Header.CreatedAtMs,
 				workflowEvent: workflowEvent,
 			})
 		}
@@ -527,19 +527,19 @@ func displayHistoricalArtefacts(ctx context.Context, client *blackboard.Client, 
 	// Phase 5: Reconstruct artefact_reworked events for reworked artefacts (version > 1)
 	// These should appear BEFORE the reworked artefact itself
 	for _, artefact := range artefactsByID {
-		if artefact.Version > 1 && filters.matchesFilter(artefact) {
+		if artefact.Header.Version > 1 && filters.matchesFilter(artefact) {
 			workflowEvent := &blackboard.WorkflowEvent{
 				Event: "artefact_reworked",
 				Data: map[string]interface{}{
-					"produced_by_role": artefact.ProducedByRole,
-					"artefact_type":    artefact.Type,
+					"produced_by_role": artefact.Header.ProducedByRole,
+					"artefact_type":    artefact.Header.Type,
 					"new_artefact_id":  artefact.ID,
-					"new_version":      artefact.Version,
+					"new_version":      artefact.Header.Version,
 				},
 			}
 			// Place rework event 1ms before the artefact creation
 			allEvents = append(allEvents, historicalEvent{
-				timestampMs:   artefact.CreatedAtMs - 1,
+				timestampMs:   artefact.Header.CreatedAtMs - 1,
 				workflowEvent: workflowEvent,
 			})
 		}
@@ -613,7 +613,7 @@ func streamWithSubscriptions(ctx context.Context, client *blackboard.Client, for
 			}
 
 			// Check for Terminal artefact if exitOnCompletion is enabled
-			if exitOnCompletion && artefact.StructuralType == blackboard.StructuralTypeTerminal {
+			if exitOnCompletion && artefact.Header.StructuralType == blackboard.StructuralTypeTerminal {
 				return nil // Clean exit
 			}
 
@@ -690,38 +690,38 @@ type defaultFormatter struct {
 
 func (f *defaultFormatter) FormatArtefact(artefact *blackboard.Artefact) error {
 	// Filter out Review artefacts - they're shown via review_approved/review_rejected events
-	if artefact.StructuralType == blackboard.StructuralTypeReview {
+	if artefact.Header.StructuralType == blackboard.StructuralTypeReview {
 		return nil
 	}
 
 	// Filter out reworked artefacts (version > 1) - they're shown via artefact_reworked events
-	if artefact.Version > 1 {
+	if artefact.Header.Version > 1 {
 		return nil
 	}
 
 	// Use artefact's creation timestamp, fallback to current time for live events
-	timestamp := formatTimestampMs(artefact.CreatedAtMs)
+	timestamp := formatTimestampMs(artefact.Header.CreatedAtMs)
 
 	// Special handling for Terminal artefacts - indicate workflow completion
-	if artefact.StructuralType == blackboard.StructuralTypeTerminal {
+	if artefact.Header.StructuralType == blackboard.StructuralTypeTerminal {
 		_, err := fmt.Fprintf(f.writer, "[%s] ✨ Artefact created: by=%s, type=%s, id=%s\n",
-			timestamp, artefact.ProducedByRole, artefact.Type, shortID(artefact.ID))
+			timestamp, artefact.Header.ProducedByRole, artefact.Header.Type, shortID(artefact.ID))
 		if err != nil {
 			return err
 		}
 		_, err = fmt.Fprintf(f.writer, "[%s] 🎉 Workflow completed: Terminal artefact created (type=%s, id=%s)\n",
-			timestamp, artefact.Type, shortID(artefact.ID))
+			timestamp, artefact.Header.Type, shortID(artefact.ID))
 		return err
 	}
 
 	_, err := fmt.Fprintf(f.writer, "[%s] ✨ Artefact created: by=%s, type=%s, id=%s",
-		timestamp, artefact.ProducedByRole, artefact.Type, shortID(artefact.ID))
+		timestamp, artefact.Header.ProducedByRole, artefact.Header.Type, shortID(artefact.ID))
 	if err != nil {
 		return err
 	}
 
 	// M4.7: For GoalDefined artefacts, resolve and display spine info
-	if artefact.Type == "GoalDefined" && f.client != nil {
+	if artefact.Header.Type == "GoalDefined" && f.client != nil {
 		// Create a temporary context for the lookup
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
@@ -867,7 +867,7 @@ type jsonlFormatter struct {
 
 func (f *jsonlFormatter) FormatArtefact(artefact *blackboard.Artefact) error {
 	// Use artefact's creation timestamp, fallback to current time for live events
-	timestampMs := artefact.CreatedAtMs
+	timestampMs := artefact.Header.CreatedAtMs
 	if timestampMs == 0 {
 		timestampMs = time.Now().UnixMilli()
 	}
@@ -882,14 +882,14 @@ func (f *jsonlFormatter) FormatArtefact(artefact *blackboard.Artefact) error {
 	}
 
 	// Add workflow_completed event for Terminal artefacts
-	if artefact.StructuralType == blackboard.StructuralTypeTerminal {
+	if artefact.Header.StructuralType == blackboard.StructuralTypeTerminal {
 		completionOutput := map[string]interface{}{
 			"timestamp": time.UnixMilli(timestampMs).UTC().Format(time.RFC3339),
 			"event":     "workflow_completed",
 			"data": map[string]interface{}{
 				"artefact_id":   artefact.ID,
-				"artefact_type": artefact.Type,
-				"produced_by":   artefact.ProducedByRole,
+				"artefact_type": artefact.Header.Type,
+				"produced_by":   artefact.Header.ProducedByRole,
 			},
 		}
 		return f.writeJSON(completionOutput)

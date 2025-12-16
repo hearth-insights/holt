@@ -132,11 +132,11 @@ func (e *Engine) reconstructPhaseState(ctx context.Context, claim *blackboard.Cl
 	}
 
 	e.logEvent("claim_recovered", map[string]interface{}{
-		"claim_id":        claim.ID,
-		"phase":           phase,
-		"granted_agents":  grantedAgents,
-		"received_count":  len(receivedArtefacts),
-		"retriggered":     claim.ArtefactExpected && !hasReceivedAllArtefacts(phaseState),
+		"claim_id":       claim.ID,
+		"phase":          phase,
+		"granted_agents": grantedAgents,
+		"received_count": len(receivedArtefacts),
+		"retriggered":    claim.ArtefactExpected && !hasReceivedAllArtefacts(phaseState),
 	})
 
 	log.Printf("[Orchestrator] Recovered claim %s (phase: %s, granted: %v, received: %d/%d)",
