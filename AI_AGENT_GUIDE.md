@@ -23,7 +23,7 @@ To supplement the core context, select from the lists below based on your specif
 ### **Topic: Independent Holt Deployment (No Source Code)**
 - **`docs/independent-holt-clan-creation/`** - Complete guide for users who want to create Holt configurations and agents WITHOUT the full source code
   - `README.md` - Overview and getting started
-  - `agent_interface.md` - The pup contract (stdin/stdout, logging)
+  - `agent_interface.md` - The pup contract (stdin/stdout, logging, **bidding types**)
   - `agent_definition.md` - How to define agents in holt.yml
   - `best_practices.md` - Agent design patterns and anti-patterns
   - `cli_reference.md` - Complete CLI command reference
@@ -75,6 +75,10 @@ To supplement the core context, select from the lists below based on your specif
   - → `docs/tutorials/simple-agent.md`
   - → `docs/guides/logging.md` (Crucial for output handling)
   - → `docs/reference/cli.md`
+  - → `docs/independent-holt-clan-creation/agent_interface.md` (for Bidding Types)
+
+- **Goal: "Understand how the Orchestrator grants claims (Grant Order)."**
+  - → `docs/reference/architecture.md` (Section: Phased Execution)
 
 - **Goal: "Design a new feature."**
   - → `ROADMAP.md` (to understand current phase goals)
