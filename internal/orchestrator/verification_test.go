@@ -55,6 +55,7 @@ func TestVerifyArtefact_Success(t *testing.T) {
 			StructuralType:  blackboard.StructuralTypeStandard,
 			Type:            "TestArtefact",
 			ClaimID:         "", // Root has no claim
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: "test payload content",
@@ -90,6 +91,7 @@ func TestVerifyArtefact_OrphanBlock(t *testing.T) {
 			ProducedByRole:  "test-agent",
 			StructuralType:  blackboard.StructuralTypeStandard,
 			Type:            "TestArtefact",
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: "test payload",
@@ -132,6 +134,7 @@ func TestVerifyArtefact_TimestampDrift_Future(t *testing.T) {
 			ProducedByRole:  "user", // User role to pass topology check (Stage 3) if it reached it
 			StructuralType:  blackboard.StructuralTypeStandard,
 			Type:            "TestArtefact",
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: "test payload",
@@ -173,6 +176,7 @@ func TestVerifyArtefact_TimestampDrift_Past(t *testing.T) {
 			ProducedByRole:  "user", // User role to pass topology check
 			StructuralType:  blackboard.StructuralTypeStandard,
 			Type:            "TestArtefact",
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: "test payload",
@@ -214,6 +218,7 @@ func TestVerifyArtefact_HashMismatch(t *testing.T) {
 			ProducedByRole:  "user", // User role avoids need for ClaimID
 			StructuralType:  blackboard.StructuralTypeStandard,
 			Type:            "TestArtefact",
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: "test payload content",
@@ -250,6 +255,7 @@ func TestVerifyArtefact_ValidParentChain(t *testing.T) {
 			ProducedByRole:  "user",
 			StructuralType:  blackboard.StructuralTypeStandard,
 			Type:            "TestArtefact",
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: "parent payload",
@@ -287,6 +293,7 @@ func TestVerifyArtefact_ValidParentChain(t *testing.T) {
 			StructuralType:  blackboard.StructuralTypeStandard,
 			Type:            "TestArtefact",
 			ClaimID:         claimID, // Valid claim reference
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: "child payload",
@@ -368,6 +375,7 @@ func TestProcessArtefact_RejectsTamperedArtefact(t *testing.T) {
 			ProducedByRole:  "user",
 			StructuralType:  blackboard.StructuralTypeStandard,
 			Type:            "GoalDefined",
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{Content: "parent"},
 	}
@@ -397,6 +405,7 @@ func TestProcessArtefact_RejectsTamperedArtefact(t *testing.T) {
 			StructuralType:  blackboard.StructuralTypeStandard,
 			Type:            "MaliciousCode",
 			ClaimID:         claim.ID, // Valid ClaimID to pass topology check
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: "legitimate content",
@@ -461,6 +470,7 @@ func TestProcessArtefact_RejectsOrphanBlock(t *testing.T) {
 			// Note: Technically this should fail topology because claim check comes after parent check?
 			// Actually: Parent check (Stage 1) comes FIRST.
 			// So missing ClaimID won't matter yet. It should fail on parent check.
+			Metadata: "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: "test content",

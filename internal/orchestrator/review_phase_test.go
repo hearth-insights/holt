@@ -25,6 +25,7 @@ func TestGrantReviewPhase(t *testing.T) {
 			ProducedByRole:  "Coder",
 			ParentHashes:    []string{},
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: "code",
@@ -83,6 +84,7 @@ func TestCheckReviewPhaseCompletion(t *testing.T) {
 			ProducedByRole:  "Coder",
 			ParentHashes:    []string{},
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: "code",
@@ -129,6 +131,7 @@ func TestCheckReviewPhaseCompletion(t *testing.T) {
 			ProducedByRole:  "Reviewer",
 			ParentHashes:    []string{claim.ArtefactID},
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: "LGTM",
@@ -177,6 +180,7 @@ func TestCheckReviewPhaseCompletion(t *testing.T) {
 			ProducedByRole:  "Reviewer",
 			ParentHashes:    []string{claim.ArtefactID},
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: `{"issue": "fix this"}`,
@@ -237,6 +241,7 @@ func TestCheckReviewPhaseCompletion_GetArtefactError(t *testing.T) {
 			ProducedByRole:  "Reviewer",
 			ParentHashes:    []string{claim.ArtefactID},
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: "{}",

@@ -181,6 +181,7 @@ func runAnswer(cmd *cobra.Command, args []string) error {
 			StructuralType:  targetArtefact.Header.StructuralType,
 			Type:            targetArtefact.Header.Type,
 			ClaimID:         "", // User answer, no claim
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: answerText, // Clarified text replaces old payload

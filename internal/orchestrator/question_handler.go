@@ -216,6 +216,7 @@ func (e *Engine) terminateQuestionIterationLimit(ctx context.Context, claim *bla
 			ProducedByRole:  "orchestrator",
 			ParentHashes:    []string{artefact.ID, questionArtefact.ID},
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: failurePayload,
@@ -262,6 +263,7 @@ func (e *Engine) createTargetNotFoundFailure(ctx context.Context, questionArtefa
 			ProducedByRole:  "orchestrator",
 			ParentHashes:    []string{questionArtefact.ID},
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: failurePayload,

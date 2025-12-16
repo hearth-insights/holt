@@ -33,6 +33,7 @@ func TestResolveArtefactID(t *testing.T) {
 			ProducedByRole:  "test-agent",
 			ParentHashes:    []string{},
 			CreatedAtMs:     1234567890,
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: "test-content",
@@ -69,6 +70,7 @@ func TestResolveArtefactID(t *testing.T) {
 				ProducedByRole:  "test-agent",
 				ParentHashes:    []string{},
 				CreatedAtMs:     1234567891,
+				Metadata:        "{}",
 			},
 			Payload: blackboard.ArtefactPayload{
 				Content: "second-content",

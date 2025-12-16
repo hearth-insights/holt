@@ -95,6 +95,7 @@ services:
 		StructuralType:  blackboard.StructuralTypeStandard,
 		Type:            "GoalDefined",
 		ClaimID:         "",
+		Metadata:        "{}",
 	}, "Build a REST API")
 
 	t.Logf("✓ GoalDefined created: %s", goalArtefact.ID)
@@ -184,6 +185,7 @@ services:
 		StructuralType:  blackboard.StructuralTypeStandard,
 		Type:            "GoalDefined",
 		ClaimID:         "",
+		Metadata:        "{}",
 	}, clarifiedGoal)
 
 	t.Logf("✓ Clarified goal created: %s v%d", answerArtefact.ID, answerArtefact.Header.Version)
@@ -279,6 +281,7 @@ services:
 		StructuralType:  blackboard.StructuralTypeStandard,
 		Type:            "GoalDefined",
 		ClaimID:         "",
+		Metadata:        "{}",
 	}, "Build API v2")
 
 	t.Logf("✓ Created artefact at version 2: %s", targetArtefact.ID)

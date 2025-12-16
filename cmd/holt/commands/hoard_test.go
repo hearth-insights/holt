@@ -62,6 +62,7 @@ func TestHoardCommand_Integration(t *testing.T) {
 					Type:            "GoalDefined",
 					ProducedByRole:  "test-agent",
 					ParentHashes:    []string{},
+					Metadata:        "{}",
 				},
 				Payload: blackboard.ArtefactPayload{
 					Content: "hello-from-holt.txt",
@@ -76,6 +77,7 @@ func TestHoardCommand_Integration(t *testing.T) {
 					Type:            "CodeCommit",
 					ProducedByRole:  "test-agent",
 					ParentHashes:    []string{id1},
+					Metadata:        "{}",
 				},
 				Payload: blackboard.ArtefactPayload{
 					Content: "a3f5b8c91d2e4f7a9b1c3d5e6f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6",
@@ -116,6 +118,7 @@ func TestHoardCommand_Integration(t *testing.T) {
 				Type:            "GoalDefined",
 				ProducedByRole:  "test-agent",
 				ParentHashes:    []string{},
+				Metadata:        "{}",
 			},
 			Payload: blackboard.ArtefactPayload{
 				Content: "hello-from-holt.txt",
@@ -191,6 +194,7 @@ func TestHoardCommand_Integration(t *testing.T) {
 					Type:            "CodeCommit",
 					ProducedByRole:  "test-agent",
 					ParentHashes:    []string{id1},
+					Metadata:        "{}",
 				},
 				Payload: blackboard.ArtefactPayload{
 					Content: "abc123",
@@ -243,6 +247,7 @@ func TestHoardCommand_Integration(t *testing.T) {
 				Type:            "Valid",
 				ProducedByRole:  "test-agent",
 				ParentHashes:    []string{},
+				Metadata:        "{}",
 			},
 			Payload: blackboard.ArtefactPayload{
 				Content: "valid",
@@ -303,6 +308,7 @@ func TestHoardCommand_OutputValidation(t *testing.T) {
 				Type:            "Test",
 				ProducedByRole:  "test-agent",
 				ParentHashes:    []string{},
+				Metadata:        "{}",
 			},
 			Payload: blackboard.ArtefactPayload{
 				Content: "test",

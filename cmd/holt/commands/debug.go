@@ -958,6 +958,7 @@ func (d *Debugger) cmdForage(args []string) {
 			StructuralType:  blackboard.StructuralTypeStandard,
 			Type:            "GoalDefined",
 			ClaimID:         "", // Root artefact
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: goal,

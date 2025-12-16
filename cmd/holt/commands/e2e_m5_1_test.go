@@ -127,6 +127,7 @@ services:
 		Version:         2, // V2+ continuation of workflow
 		Type:            "CodeCommit",
 		CreatedAtMs:     time.Now().UnixMilli(),
+		Metadata:        "{}",
 	}, "commit-abc123")
 	t.Logf("✓ CodeCommit created: %s", codeCommit.ID)
 
@@ -142,6 +143,7 @@ services:
 		Version:         2, // V2+ continuation
 		Type:            "TestResult",
 		CreatedAtMs:     time.Now().UnixMilli(),
+		Metadata:        "{}",
 	}, "tests-passed")
 	t.Logf("✓ TestResult created: %s", testResult.ID)
 
@@ -151,6 +153,7 @@ services:
 		Version:         2, // V2+ continuation
 		Type:            "LintResult",
 		CreatedAtMs:     time.Now().UnixMilli(),
+		Metadata:        "{}",
 	}, "lint-clean")
 	t.Logf("✓ LintResult created: %s", lintResult.ID)
 
@@ -172,6 +175,7 @@ services:
 		Version:         2, // V2+ continuation
 		Type:            "SecurityScan",
 		CreatedAtMs:     time.Now().UnixMilli(),
+		Metadata:        "{}",
 	}, "no-vulnerabilities")
 	t.Logf("✓ SecurityScan created: %s", securityScan.ID)
 
@@ -292,6 +296,7 @@ services:
 		Version:         2, // V2+ continuation
 		Type:            "DataBatch",
 		CreatedAtMs:     time.Now().UnixMilli(),
+		Metadata:        "{}",
 	}, "batch-123")
 	t.Logf("✓ DataBatch created: %s", dataBatch.ID)
 
@@ -422,6 +427,7 @@ services:
 		Version:         2, // V2+ continuation
 		Type:            "CodeCommit",
 		CreatedAtMs:     time.Now().UnixMilli(),
+		Metadata:        "{}",
 	}, "commit-xyz")
 	t.Logf("✓ CodeCommit created: %s", codeCommit.ID)
 
@@ -434,6 +440,7 @@ services:
 		Version:         2, // V2+ continuation
 		Type:            "TestResult",
 		CreatedAtMs:     time.Now().UnixMilli(),
+		Metadata:        "{}",
 	}, "passed")
 
 	// Create second artefact immediately (race condition)
@@ -443,6 +450,7 @@ services:
 		Version:         2, // V2+ continuation
 		Type:            "LintResult",
 		CreatedAtMs:     time.Now().UnixMilli(),
+		Metadata:        "{}",
 	}, "clean")
 
 	t.Logf("✓ Both prerequisites created (race): TestResult=%s, LintResult=%s", testResult.ID, lintResult.ID)
@@ -540,6 +548,7 @@ services:
 		Version:         1,
 		Type:            "CodeCommit",
 		CreatedAtMs:     time.Now().UnixMilli(),
+		Metadata:        "{}",
 	}, "commit-recursive")
 	t.Logf("✓ CodeCommit: %s", codeCommit.ID)
 
@@ -550,6 +559,7 @@ services:
 		Version:         2, // M4.7: Version>1 to bypass root manifest validation
 		Type:            "BuildResult",
 		CreatedAtMs:     time.Now().UnixMilli(),
+		Metadata:        "{}",
 	}, "build-ok")
 	t.Logf("✓ BuildResult: %s", buildResult.ID)
 
@@ -560,6 +570,7 @@ services:
 		Version:         2, // M4.7: Version>1 to bypass root manifest validation
 		Type:            "TestResult",
 		CreatedAtMs:     time.Now().UnixMilli(),
+		Metadata:        "{}",
 	}, "tests-passed")
 	t.Logf("✓ TestResult (grandchild): %s", testResult.ID)
 
@@ -576,6 +587,7 @@ services:
 		Version:         2, // M4.7: Version>1 to bypass root manifest validation
 		Type:            "LintResult",
 		CreatedAtMs:     time.Now().UnixMilli(),
+		Metadata:        "{}",
 	}, "lint-clean")
 	t.Logf("✓ LintResult: %s", lintResult.ID)
 
@@ -666,6 +678,7 @@ services:
 		Version:         1,
 		Type:            "CodeCommit",
 		CreatedAtMs:     time.Now().UnixMilli(),
+		Metadata:        "{}",
 	}, "commit-depth-test")
 	t.Logf("✓ CodeCommit: %s", codeCommit.ID)
 
@@ -676,6 +689,7 @@ services:
 		Version:         2, // M4.7: Version>1 to bypass root manifest validation
 		Type:            "BuildResult",
 		CreatedAtMs:     time.Now().UnixMilli(),
+		Metadata:        "{}",
 	}, "build-ok")
 	t.Logf("✓ BuildResult: %s", buildResult.ID)
 
@@ -686,6 +700,7 @@ services:
 		Version:         2, // M4.7: Version>1 to bypass root manifest validation
 		Type:            "TestResult",
 		CreatedAtMs:     time.Now().UnixMilli(),
+		Metadata:        "{}",
 	}, "tests-passed")
 	t.Logf("✓ TestResult (grandchild): %s", testResult.ID)
 
@@ -696,6 +711,7 @@ services:
 		Version:         2, // M4.7: Version>1 to bypass root manifest validation
 		Type:            "LintResult",
 		CreatedAtMs:     time.Now().UnixMilli(),
+		Metadata:        "{}",
 	}, "lint-clean")
 	t.Logf("✓ LintResult: %s", lintResult.ID)
 

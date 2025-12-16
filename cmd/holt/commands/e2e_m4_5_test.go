@@ -103,6 +103,7 @@ services:
 		StructuralType:  blackboard.StructuralTypeStandard,
 		Type:            "DesignSpecDraft",
 		ClaimID:         "",
+		Metadata:        "{}",
 	}, "# Design Proposal\nThis is a test design draft.")
 
 	t.Logf("✓ DesignSpecDraft created: %s", draftArtefact.ID)
@@ -286,6 +287,7 @@ services:
 		StructuralType:  blackboard.StructuralTypeStandard,
 		Type:            "ChangeSet",
 		ClaimID:         "",
+		Metadata:        "{}",
 	}, string(payloadJSON))
 
 	t.Logf("✓ ChangeSet created: %s", changeSetArtefact.ID)

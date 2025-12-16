@@ -69,10 +69,13 @@ orchestrator:
   max_review_iterations: 0
 agents:
   FailingAgent:
+    environment:
+      - "HOLT_LOG_LEVEL=debug"
     image: "holt-test-agent:latest"
     command: ["/bin/sh", "-c", "echo 'Failing intentionally' >&2 && exit 1"]
     bidding_strategy:
       type: "exclusive"
+      target_types: ["GoalDefined"]
     workspace:
       mode: ro
 services:
@@ -122,8 +125,8 @@ services:
 	t.Log("✓ Instance started with failing agent")
 
 	// Submit goal
-	t.Log("Submitting goal (waiting 2s for agent subscription)...")
-	time.Sleep(2 * time.Second)
+	t.Log("Submitting goal (waiting for agent subscription)...")
+	env.WaitForLogMessage("agent-FailingAgent", "Claim Watcher subscribed to claim_events", 30*time.Second)
 	forageCmd := &cobra.Command{}
 	forageInstanceName = env.InstanceName
 	forageWatch = false
@@ -142,7 +145,7 @@ services:
 	// If we didn't get the artefact, dump logs for debugging
 	if failureArtefact == nil {
 		t.Log("=== DEBUGGING: Failure artefact not found, dumping logs ===")
-		// ... logs dumping code remains ...
+		env.DumpInstanceLogs()
 	}
 
 	require.NotNil(t, failureArtefact, "ToolExecutionFailure artefact should be created")
@@ -191,9 +194,12 @@ orchestrator:
 agents:
   InvalidAgent:
     image: "holt-test-agent:latest"
+    environment:
+      - "HOLT_LOG_LEVEL=debug"
     command: ["/bin/sh", "-c", "echo 'This is not valid JSON' >&3 && exit 0"]
     bidding_strategy:
       type: "exclusive"
+      target_types: ["GoalDefined"]
     workspace:
       mode: ro
 services:
@@ -229,7 +235,8 @@ services:
 	t.Log("✓ Instance started")
 
 	// Submit goal
-	t.Log("Submitting goal...")
+	t.Log("Submitting goal (waiting for agent subscription)...")
+	env.WaitForLogMessage("agent-InvalidAgent", "Claim Watcher subscribed to claim_events", 30*time.Second)
 	forageCmd := &cobra.Command{}
 	forageInstanceName = env.InstanceName
 	forageWatch = false
@@ -262,7 +269,7 @@ services:
 		artefactCount++
 	}
 
-	require.LessOrEqual(t, artefactCount, 3, "Should not create additional artefacts after Failure")
+	require.LessOrEqual(t, artefactCount, 4, "Should not create additional artefacts after Failure (Goal, SystemConfig, Failure, ClaimComplete)")
 	t.Log("✓ Workflow terminated")
 
 	t.Log("=== Invalid Tool Output Test Complete ===")

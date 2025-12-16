@@ -194,6 +194,7 @@ func TestPerformance_ContextAssembly(t *testing.T) {
 				ParentHashes:    []string{},
 				ProducedByRole:  "test-agent", // M3.7: Required field
 				CreatedAtMs:     time.Now().UnixMilli(),
+				Metadata:        "{}",
 			},
 			Payload: blackboard.ArtefactPayload{
 				Content: fmt.Sprintf("content-level-%d", i),

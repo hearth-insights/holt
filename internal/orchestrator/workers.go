@@ -332,6 +332,7 @@ func (wm *WorkerManager) handleWorkerExit(ctx context.Context, worker *WorkerSta
 				Type:            "WorkerFailure",
 				ProducedByRole:  worker.Role,
 				ParentHashes:    []string{},
+				Metadata:        "{}",
 			},
 			Payload: blackboard.ArtefactPayload{
 				Content: failurePayload,
@@ -377,6 +378,7 @@ func (wm *WorkerManager) handleWorkerError(ctx context.Context, worker *WorkerSt
 			Type:            "WorkerError",
 			ProducedByRole:  worker.Role,
 			ParentHashes:    []string{},
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: failurePayload,

@@ -28,6 +28,7 @@ func TestHandleQuestionArtefact_Success(t *testing.T) {
 			ProducedByRole:  "Coder",
 			ParentHashes:    []string{},
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: "code",
@@ -64,6 +65,7 @@ func TestHandleQuestionArtefact_Success(t *testing.T) {
 			ProducedByRole:  "Reviewer",
 			ParentHashes:    []string{targetArtefact.ID},
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: string(payloadJSON),
@@ -114,6 +116,7 @@ func TestHandleQuestionArtefact_InvalidJSON(t *testing.T) {
 			ProducedByRole:  "Reviewer",
 			ParentHashes:    []string{},
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: "not valid json {{{",
@@ -153,6 +156,7 @@ func TestHandleQuestionArtefact_MissingTargetID(t *testing.T) {
 			ProducedByRole:  "Reviewer",
 			ParentHashes:    []string{},
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: string(payloadJSON),
@@ -194,6 +198,7 @@ func TestHandleQuestionArtefact_TargetNotFound(t *testing.T) {
 			ProducedByRole:  "Reviewer",
 			ParentHashes:    []string{nonExistentID},
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: string(payloadJSON),
@@ -228,6 +233,7 @@ func TestHandleQuestionArtefact_IterationLimitExceeded(t *testing.T) {
 			ProducedByRole:  "Coder",
 			ParentHashes:    []string{},
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: "Build an API v3",
@@ -264,6 +270,7 @@ func TestHandleQuestionArtefact_IterationLimitExceeded(t *testing.T) {
 			ProducedByRole:  "Reviewer",
 			ParentHashes:    []string{targetArtefact.ID},
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: string(payloadJSON),
@@ -305,6 +312,7 @@ func TestHandleQuestionArtefact_UserRole(t *testing.T) {
 			ProducedByRole:  "user", // User role
 			ParentHashes:    []string{},
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: "Build an API",
@@ -341,6 +349,7 @@ func TestHandleQuestionArtefact_UserRole(t *testing.T) {
 			ProducedByRole:  "Coder",
 			ParentHashes:    []string{targetArtefact.ID},
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: string(payloadJSON),
@@ -395,6 +404,7 @@ func TestFindClaimByProducedArtefact(t *testing.T) {
 			ProducedByRole:  "user",
 			ParentHashes:    []string{},
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: "Build feature",
@@ -425,6 +435,7 @@ func TestFindClaimByProducedArtefact(t *testing.T) {
 			ProducedByRole:  "Coder",
 			ParentHashes:    []string{rootArtefact.ID}, // Derived from root
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: `{"question_text": "test", "target_artefact_id": "x"}`,

@@ -105,6 +105,28 @@ The orchestrator has special logic for handling agents configured in `mode: cont
 5.  **Lifecycle Monitoring**: The orchestrator monitors the worker container. When the container exits, it inspects the exit code.
 6.  **Cleanup & Failure Handling**: If the exit code is 0, the process is complete. If non-zero, the orchestrator creates a `Failure` artefact containing the worker's logs and terminates the original claim. In both cases, the orchestrator removes the exited worker container.
 
+### **3.6. Question & Answer Flow (M4.1)**
+
+The Orchestrator supports a "Check Engine Light" pattern where agents can signal ambiguity by producing a `Question` artefact.
+
+1.  **Question Detection**: The orchestrator monitors for artefacts with `structural_type: Question`.
+2.  **Claim Termination**: Upon detecting a question, the agent's current claim is immediately **terminated** (status: `terminated`, reason: "Agent asked clarification").
+3.  **Assignments**: The orchestrator creates a new claim with status `pending_assignment`, directly assigned to the role that produced the *target* artefact being questioned.
+4.  **Human Feedback**: If the target role is "user", the claim waits indefinitely for human input via the CLI (`holt answer`).
+5.  **Resolution**: When a new version of the questioned artefact is produced (linking to the Question ID), the feedback claim is marked complete, and the workflow resumes with the clarified requirements.
+
+### **3.7. Atomic Artefact Creation (M5.1)**
+
+To support safe concurrency in complex fan-in/fan-out workflows, the Orchestrator **MUST** enforce strict atomicity when creating artefacts.
+
+1.  **Lua Script Requirement**: All artefact creation (by Orchestrator, CLI, or Pups) MUST be performed via a shared Redis Lua script.
+2.  **Atomic Operations**: The script atomically:
+    *   Creates the Artefact Hash.
+    *   Updates the `thread` ZSET.
+    *   Updates the **Reverse Index** (`holt:{inst}:index:children:{parent_id}`) for graph traversal.
+    *   Publishes the event.
+3.  **Metadata Handling**: The Orchestrator must support the `metadata` field in the Artefact schema, used by synchronizer agents to declare batch sizes (e.g., `{"batch_size": "5"}`).
+
 ## **4. State Persistence & Resilience (M3.5)**
 
 *   **Continuous Persistence**: All significant state changes (phase transitions, grants, queueing) are immediately written to the corresponding `Claim` hash in Redis. The in-memory state is only a cache.

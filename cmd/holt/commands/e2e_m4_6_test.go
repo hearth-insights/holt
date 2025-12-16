@@ -71,6 +71,7 @@ services:
 				ProducedByRole:  "test-agent",
 				StructuralType:  blackboard.StructuralTypeStandard,
 				Type:            "TestArtefact",
+				Metadata:        "{}",
 			},
 			Payload: blackboard.ArtefactPayload{
 				Content: "Test payload content for M4.6 verification",
@@ -121,6 +122,7 @@ services:
 				ProducedByRole:  "malicious-agent",
 				StructuralType:  blackboard.StructuralTypeStandard,
 				Type:            "TamperedArtefact",
+				Metadata:        "{}",
 			},
 			Payload: blackboard.ArtefactPayload{
 				Content: "Original content",
@@ -159,6 +161,7 @@ services:
 				ProducedByRole:  "test-agent",
 				StructuralType:  blackboard.StructuralTypeStandard,
 				Type:            "OrphanArtefact",
+				Metadata:        "{}",
 			},
 			Payload: blackboard.ArtefactPayload{
 				Content: "Content with invalid parent",
@@ -193,6 +196,7 @@ services:
 				ProducedByRole:  "time-traveling-agent",
 				StructuralType:  blackboard.StructuralTypeStandard,
 				Type:            "FutureArtefact",
+				Metadata:        "{}",
 			},
 			Payload: blackboard.ArtefactPayload{
 				Content: "Content from the future",
@@ -219,6 +223,7 @@ services:
 				ProducedByRole:  "ancient-agent",
 				StructuralType:  blackboard.StructuralTypeStandard,
 				Type:            "PastArtefact",
+				Metadata:        "{}",
 			},
 			Payload: blackboard.ArtefactPayload{
 				Content: "Content from the past",

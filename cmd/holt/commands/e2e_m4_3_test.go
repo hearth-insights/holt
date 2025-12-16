@@ -148,6 +148,7 @@ services:
 		StructuralType:  blackboard.StructuralTypeStandard,
 		Type:            "GoalDefined",
 		ClaimID:         "",
+		Metadata:        "{}",
 	}, "Build SDK wrapper library")
 
 	t.Log("✓ Created GoalDefined artefact")

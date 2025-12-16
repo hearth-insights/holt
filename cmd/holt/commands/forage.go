@@ -230,6 +230,7 @@ func runForage(cmd *cobra.Command, args []string) error {
 				StructuralType:  blackboard.StructuralTypeStandard,
 				Type:            "GoalDefined",
 				ClaimID:         "", // Root artefact has no claim
+				Metadata:        "{}",
 			},
 			Payload: blackboard.ArtefactPayload{
 				Content: forageGoal,
@@ -263,6 +264,7 @@ func runForage(cmd *cobra.Command, args []string) error {
 			StructuralType:  blackboard.StructuralTypeStandard,
 			Type:            "GoalDefined",
 			ClaimID:         "", // Root artefact has no claim
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: forageGoal,

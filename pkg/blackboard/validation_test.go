@@ -74,6 +74,7 @@ func TestVerifiableArtefactValidation_ValidRoot(t *testing.T) {
 			ProducedByRole:  "user",
 			StructuralType:  StructuralTypeStandard,
 			Type:            "GoalDefined",
+			Metadata:        "{}",
 		},
 		Payload: ArtefactPayload{
 			Content: "test goal",
@@ -96,6 +97,7 @@ func TestVerifiableArtefactValidation_EmptyLogicalThreadID(t *testing.T) {
 			ProducedByRole:  "user",
 			StructuralType:  StructuralTypeStandard,
 			Type:            "GoalDefined",
+			Metadata:        "{}",
 		},
 		Payload: ArtefactPayload{
 			Content: "test",
@@ -118,6 +120,7 @@ func TestVerifiableArtefactValidation_InvalidHash(t *testing.T) {
 			ProducedByRole:  "user",
 			StructuralType:  StructuralTypeStandard,
 			Type:            "GoalDefined",
+			Metadata:        "{}",
 		},
 		Payload: ArtefactPayload{
 			Content: "test",
@@ -141,6 +144,7 @@ func TestVerifiableArtefactValidation_OversizePayload(t *testing.T) {
 			ProducedByRole:  "user",
 			StructuralType:  StructuralTypeStandard,
 			Type:            "GoalDefined",
+			Metadata:        "{}",
 		},
 		Payload: ArtefactPayload{
 			Content: strings.Repeat("A", 2*MaxPayloadSize), // 2MB - too large

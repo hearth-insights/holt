@@ -27,7 +27,8 @@ func EnsureBaseImage(t *testing.T) {
 		start := time.Now()
 
 		projectRoot := GetProjectRoot()
-		dockerfile := filepath.Join(projectRoot, "testing", "docker", "Dockerfile.base")
+		// Use relative path for Dockerfile to avoid issues with absolute paths on some systems
+		dockerfile := "testing/docker/Dockerfile.base"
 
 		cmd := exec.Command("docker", "build",
 			"-t", "holt-test-base-agent:latest",
@@ -104,7 +105,9 @@ func EnsureTestAgentImage(t *testing.T) {
 		start := time.Now()
 
 		projectRoot := GetProjectRoot()
-		dockerfile := filepath.Join(projectRoot, "testing", "docker", "Dockerfile.test-agent")
+
+		// Use relative path for Dockerfile
+		dockerfile := "testing/docker/Dockerfile.test-agent"
 
 		cmd := exec.Command("docker", "build",
 			"-t", "holt-test-agent:latest",

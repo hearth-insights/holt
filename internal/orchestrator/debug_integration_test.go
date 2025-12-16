@@ -349,6 +349,7 @@ func TestDebugProtocol_BasicPauseResume(t *testing.T) {
 			ParentHashes:    []string{},
 			ProducedByRole:  "test-agent",
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: "test-payload",
@@ -453,6 +454,7 @@ func TestDebugProtocol_ReviewConsensusReached(t *testing.T) {
 			ParentHashes:    []string{},
 			ProducedByRole:  "user",
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: "work-payload",
@@ -491,6 +493,7 @@ func TestDebugProtocol_ReviewConsensusReached(t *testing.T) {
 			ParentHashes:    []string{artefact.ID},
 			ProducedByRole:  "reviewer",
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: "{}",
@@ -580,6 +583,7 @@ func TestDebugProtocol_ManualReview(t *testing.T) {
 			ParentHashes:    []string{},
 			ProducedByRole:  "developer",
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: "code-payload",
@@ -691,6 +695,7 @@ func TestDebugProtocol_SessionExpiration(t *testing.T) {
 			ParentHashes:    []string{},
 			ProducedByRole:  "agent",
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: "payload",
