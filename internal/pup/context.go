@@ -6,6 +6,7 @@ import (
 	"log"
 	"path/filepath"
 
+	"github.com/hearth-insights/holt/internal/debug"
 	"github.com/hearth-insights/holt/pkg/blackboard"
 )
 
@@ -55,7 +56,7 @@ func (e *Engine) assembleContext(ctx context.Context, targetArtefact *blackboard
 		depth++
 		currentLevelSize := len(queue)
 
-		log.Printf("[DEBUG] BFS level %d: processing %d artefacts", depth, currentLevelSize)
+		debug.Log("BFS level %d: processing %d artefacts", depth, currentLevelSize)
 
 		// Process all artefacts at current level
 		for i := 0; i < currentLevelSize; i++ {
@@ -96,7 +97,7 @@ func (e *Engine) assembleContext(ctx context.Context, targetArtefact *blackboard
 					if err != nil {
 						log.Printf("[WARN] Failed to fetch V1 artefact %s: %v", v1ID, err)
 					} else if v1Artefact != nil {
-						log.Printf("[DEBUG] Merging links from V1 (id=%s) into V%d (id=%s)",
+						debug.Log("Merging links from V1 (id=%s) into V%d (id=%s)",
 							v1Artefact.ID, latestArtefact.Header.Version, latestArtefact.ID)
 
 						// Merge V1 sources into latest sources (avoiding duplicates)
@@ -117,14 +118,14 @@ func (e *Engine) assembleContext(ctx context.Context, targetArtefact *blackboard
 
 			// De-duplicate by logical_id (keep first occurrence in BFS order)
 			if seenLogicalIDs[latestArtefact.Header.LogicalThreadID] {
-				log.Printf("[DEBUG] De-duplication: logical_id=%s already in context, skipping",
+				debug.Log("De-duplication: logical_id=%s already in context, skipping",
 					latestArtefact.Header.LogicalThreadID)
 				continue
 			}
 
 			seenLogicalIDs[latestArtefact.Header.LogicalThreadID] = true
 			contextMap[latestArtefact.Header.LogicalThreadID] = latestArtefact
-			log.Printf("[DEBUG] Added to context: logical_id=%s version=%d type=%s",
+			debug.Log("Added to context: logical_id=%s version=%d type=%s",
 				latestArtefact.Header.LogicalThreadID, latestArtefact.Header.Version, latestArtefact.Header.Type)
 
 			// Add source artefacts to queue for next level
@@ -139,13 +140,13 @@ func (e *Engine) assembleContext(ctx context.Context, targetArtefact *blackboard
 
 	// Filter to Standard and Answer artefacts only
 	filtered := filterContextArtefacts(contextMap)
-	log.Printf("[DEBUG] Context filtering: total=%d filtered_to=%d",
+	debug.Log("Context filtering: total=%d filtered_to=%d",
 		len(contextMap), len(filtered))
 
 	// Sort chronologically (oldest → newest)
 	sortedContext := sortContextChronologically(filtered)
 
-	log.Printf("[DEBUG] Context assembly complete: total=%d depth=%d",
+	debug.Log("Context assembly complete: total=%d depth=%d",
 		len(sortedContext), depth)
 
 	return sortedContext, nil
@@ -163,20 +164,20 @@ func (e *Engine) getLatestVersionForContext(ctx context.Context, discoveredArtef
 
 	// Thread tracking returned empty (no thread exists)
 	if latestID == "" {
-		log.Printf("[DEBUG] No thread tracking for logical_id=%s, using discovered version %d",
+		debug.Log("No thread tracking for logical_id=%s, using discovered version %d",
 			discoveredArtefact.Header.LogicalThreadID, discoveredArtefact.Header.Version)
 		return discoveredArtefact, nil
 	}
 
 	// Thread tracking returned same or older version - use discovered
 	if latestVersion <= discoveredArtefact.Header.Version {
-		log.Printf("[DEBUG] Thread has version %d, discovered version %d, using discovered",
+		debug.Log("Thread has version %d, discovered version %d, using discovered",
 			latestVersion, discoveredArtefact.Header.Version)
 		return discoveredArtefact, nil
 	}
 
 	// Thread tracking found a newer version - fetch it
-	log.Printf("[DEBUG] Found latest version: logical_id=%s version=%d (discovered was %d)",
+	debug.Log("Found latest version: logical_id=%s version=%d (discovered was %d)",
 		discoveredArtefact.Header.LogicalThreadID, latestVersion, discoveredArtefact.Header.Version)
 
 	latestArtefact, err := e.bbClient.GetArtefact(ctx, latestID)
@@ -204,7 +205,7 @@ func filterContextArtefacts(contextMap map[string]*blackboard.Artefact) []*black
 			artefact.Header.StructuralType == blackboard.StructuralTypeReview {
 			filtered = append(filtered, artefact)
 		} else {
-			log.Printf("[DEBUG] Filtered out artefact: logical_id=%s type=%s structural_type=%s",
+			debug.Log("Filtered out artefact: logical_id=%s type=%s structural_type=%s",
 				artefact.Header.LogicalThreadID, artefact.Header.Type, artefact.Header.StructuralType)
 		}
 	}
@@ -283,11 +284,11 @@ func (e *Engine) loadKnowledgeForAgent(ctx context.Context, contextChain []*blac
 	}
 
 	if len(knowledgeIDs) == 0 {
-		log.Printf("[DEBUG] M4.3: No Knowledge artefacts found in thread_context")
+		debug.Log("M4.3: No Knowledge artefacts found in thread_context")
 		return false, nil, nil, nil
 	}
 
-	log.Printf("[DEBUG] M4.3: Found %d Knowledge artefact IDs", len(knowledgeIDs))
+	debug.Log("M4.3: Found %d Knowledge artefact IDs", len(knowledgeIDs))
 
 	// Load all Knowledge artefacts
 	allKnowledge := make([]*blackboard.Artefact, 0, len(knowledgeIDs))
@@ -304,7 +305,7 @@ func (e *Engine) loadKnowledgeForAgent(ctx context.Context, contextChain []*blac
 		allKnowledge = append(allKnowledge, knowledge)
 	}
 
-	log.Printf("[DEBUG] M4.3: Loaded %d Knowledge artefacts", len(allKnowledge))
+	debug.Log("M4.3: Loaded %d Knowledge artefacts", len(allKnowledge))
 
 	// Filter by role matching and implement "latest version wins" merge strategy
 	filtered, err := e.filterAndMergeKnowledge(allKnowledge)
@@ -313,7 +314,7 @@ func (e *Engine) loadKnowledgeForAgent(ctx context.Context, contextChain []*blac
 	}
 
 	if len(filtered) == 0 {
-		log.Printf("[DEBUG] M4.3: No Knowledge artefacts matched agent role %s", e.config.AgentName)
+		debug.Log("M4.3: No Knowledge artefacts matched agent role %s", e.config.AgentName)
 		return false, nil, nil, nil
 	}
 
@@ -344,10 +345,10 @@ func (e *Engine) filterAndMergeKnowledge(allKnowledge []*blackboard.Artefact) ([
 	for _, knowledge := range allKnowledge {
 		if e.matchesRole(knowledge.Header.ContextForRoles) {
 			roleMatched = append(roleMatched, knowledge)
-			log.Printf("[DEBUG] M4.3: Knowledge '%s' (v%d) matched role %s",
+			debug.Log("M4.3: Knowledge '%s' (v%d) matched role %s",
 				knowledge.Header.Type, knowledge.Header.Version, e.config.AgentName)
 		} else {
-			log.Printf("[DEBUG] M4.3: Knowledge '%s' (v%d) did not match role %s (target_roles=%v)",
+			debug.Log("M4.3: Knowledge '%s' (v%d) did not match role %s (target_roles=%v)",
 				knowledge.Header.Type, knowledge.Header.Version, e.config.AgentName, knowledge.Header.ContextForRoles)
 		}
 	}
@@ -367,7 +368,7 @@ func (e *Engine) filterAndMergeKnowledge(allKnowledge []*blackboard.Artefact) ([
 			// Either first time seeing this knowledge, or this is a newer version
 			knowledgeMap[knowledgeName] = knowledge
 			if exists {
-				log.Printf("[DEBUG] M4.3: Latest version wins: '%s' v%d replaced v%d",
+				debug.Log("M4.3: Latest version wins: '%s' v%d replaced v%d",
 					knowledgeName, knowledge.Header.Version, existing.Header.Version)
 			}
 		}

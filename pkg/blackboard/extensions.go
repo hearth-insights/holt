@@ -3,18 +3,26 @@ package blackboard
 import (
 	"context"
 	"fmt"
-	"log"
 	"sort"
+
+	"github.com/hearth-insights/holt/internal/debug"
 )
 
-// ScanClaims retrieves all claim IDs that match the instance.
+// ScanClaims retrieves all claim IDs for the current instance.
 // M5.1: Enables agents to discover existing claims on startup (cold start recovery).
-// Returns array of claim IDs.
+//
+// This is used by synchronizers and controller-mode agents to process claims that were
+// created before the agent started (e.g., after a restart). The scan happens AFTER
+// subscription to ensure no claims are missed in the gap.
+//
+// Returns:
+//   - Array of claim IDs (sorted alphabetically)
+//   - error if scan fails
 func (c *Client) ScanClaims(ctx context.Context) ([]string, error) {
 	// Build scan pattern: holt:{instance}:claim:*
 	// Note: We need to avoid matching :bids suffix
 	pattern := fmt.Sprintf("holt:%s:claim:*", c.instanceName)
-	log.Printf("[Blackboard] DEBUG: ScanClaims using pattern: %s", pattern)
+	debug.Log("ScanClaims using pattern: %s", pattern)
 
 	var claimIDs []string
 	iter := c.rdb.Scan(ctx, 0, pattern, 0).Iterator()

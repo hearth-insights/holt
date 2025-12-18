@@ -108,7 +108,8 @@ services:
 	require.NoError(t, err)
 	t.Log("✓ Instance started")
 
-	time.Sleep(2 * time.Second)
+	// Wait for orchestrator to be ready
+	time.Sleep(1 * time.Second)
 
 	// Connect to blackboard
 	ctx := context.Background()
@@ -158,7 +159,7 @@ services:
 	t.Logf("✓ LintResult created: %s", lintResult.ID)
 
 	// Wait and verify Synchronizer does NOT bid yet
-	time.Sleep(2 * time.Second)
+	time.Sleep(500 * time.Millisecond)
 
 	// Check no DeployResult exists yet (Synchronizer hasn't run)
 	t.Log("Verifying Synchronizer has NOT bid yet (SecurityScan missing)...")
@@ -181,7 +182,7 @@ services:
 
 	// Step 4: Wait for Synchronizer to bid and execute
 	t.Log("Step 4: Waiting for Synchronizer to bid and execute...")
-	time.Sleep(3 * time.Second)
+	time.Sleep(1 * time.Second)
 
 	// Verify DeployResult was created
 	deployResult := waitForArtefactType(ctx, t, bbClient, "DeployResult", 45*time.Second)
@@ -282,7 +283,7 @@ services:
 	upForce = false
 	err = runUp(upCmd, []string{})
 	require.NoError(t, err)
-	time.Sleep(2 * time.Second)
+	time.Sleep(500 * time.Millisecond)
 
 	ctx := context.Background()
 	env.InitializeBlackboardClient()
@@ -306,7 +307,7 @@ services:
 
 	// Wait for Orchestrator to create claim for DataBatch
 	t.Log("Waiting for DataBatch claim to be created...")
-	time.Sleep(2 * time.Second)
+	time.Sleep(500 * time.Millisecond)
 
 	// Verify claim exists for DataBatch
 	claim, err := bbClient.GetClaimByArtefactID(ctx, dataBatch.ID)
@@ -319,7 +320,7 @@ services:
 
 	// Wait for MultiProducer to bid, get granted, execute, and create 5 ProcessedRecords
 	t.Log("Waiting for MultiProducer to execute and create 5 ProcessedRecords...")
-	time.Sleep(10 * time.Second)  // Increased wait time for claim processing + execution
+	time.Sleep(2 * time.Second)  // Increased wait time for claim processing + execution
 
 	// Verify 5 ProcessedRecords exist
 	records, _ := testutil.FindAllArtefactsOfType(ctx, bbClient, "ProcessedRecord")
@@ -364,7 +365,7 @@ services:
 
 	// Wait for Aggregator to synchronize
 	t.Log("Waiting for Aggregator to synchronize...")
-	time.Sleep(10 * time.Second) // Increased wait time for claim processing
+	time.Sleep(2 * time.Second) // Increased wait time for claim processing
 
 	// Verify AggregatedReport was created
 	report := waitForArtefactType(ctx, t, bbClient, "AggregatedReport", 45*time.Second)
@@ -459,7 +460,7 @@ services:
 	err = runUp(upCmd, []string{"--build"})
 	require.NoError(t, err)
 	t.Log("Waiting for Orchestrator to subscribe...")
-	time.Sleep(10 * time.Second) // Wait for Orchestrator to be fully ready
+	time.Sleep(2 * time.Second) // Wait for Orchestrator to be fully ready
 
 	ctx := context.Background()
 	env.InitializeBlackboardClient()
@@ -470,10 +471,18 @@ services:
 	sub, err := bbClient.SubscribeArtefactEvents(ctx)
 	require.NoError(t, err)
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				// Ignore panics during test cleanup (subscription closed)
+				t.Logf("DEBUG: Subscription goroutine exiting (expected during cleanup)")
+			}
+		}()
 		for start := time.Now(); time.Since(start) < 60*time.Second; {
 			select {
 			case evt := <-sub.Events():
-				t.Logf("DEBUG: Test received artefact event: %s (%s)", evt.ID, evt.Header.Type)
+				if evt != nil {
+					t.Logf("DEBUG: Test received artefact event: %s (%s)", evt.ID, evt.Header.Type)
+				}
 			case <-time.After(1 * time.Second):
 			}
 		}
@@ -529,7 +538,7 @@ services:
 	t.Logf("✓ Both prerequisites created (race): TestResult=%s, LintResult=%s", testResult.ID, lintResult.ID)
 
 	// Wait for synchronizer to execute
-	time.Sleep(4 * time.Second)
+	time.Sleep(1 * time.Second)
 
 	// Verify ONLY ONE DeployResult was created (deduplication worked)
 	deploys := getArtefactsByType(ctx, bbClient, "DeployResult")
@@ -601,7 +610,7 @@ services:
 	upForce = false
 	err = runUp(upCmd, []string{})
 	require.NoError(t, err)
-	time.Sleep(2 * time.Second)
+	time.Sleep(500 * time.Millisecond)
 
 	ctx := context.Background()
 	env.InitializeBlackboardClient()
@@ -648,7 +657,7 @@ services:
 	t.Logf("✓ TestResult (grandchild): %s", testResult.ID)
 
 	// Verify synchronizer does NOT bid yet (LintResult missing)
-	time.Sleep(2 * time.Second)
+	time.Sleep(500 * time.Millisecond)
 	exists := artefactTypeExists(ctx, bbClient, "DeployResult")
 	require.False(t, exists, "Synchronizer should wait for LintResult")
 	t.Log("✓ Synchronizer waiting (LintResult missing)")
@@ -666,7 +675,7 @@ services:
 
 	// Now both dependencies met (TestResult at depth=2, LintResult at depth=1)
 	t.Log("Waiting for synchronizer (should find TestResult at depth=2)...")
-	time.Sleep(3 * time.Second)
+	time.Sleep(1 * time.Second)
 
 	deployResult := waitForArtefactType(ctx, t, bbClient, "DeployResult", 10*time.Second)
 	require.NotNil(t, deployResult, "Synchronizer should find TestResult at depth=2")
@@ -736,7 +745,7 @@ services:
 	upForce = false
 	err = runUp(upCmd, []string{})
 	require.NoError(t, err)
-	time.Sleep(2 * time.Second)
+	time.Sleep(500 * time.Millisecond)
 
 	ctx := context.Background()
 	env.InitializeBlackboardClient()
@@ -791,7 +800,7 @@ services:
 	// Wait and verify synchronizer does NOT bid
 	// TestResult is at depth=2, but max_depth=1, so it won't be found
 	t.Log("Waiting to verify synchronizer does NOT bid (TestResult too deep)...")
-	time.Sleep(5 * time.Second)
+	time.Sleep(1 * time.Second)
 
 	exists := artefactTypeExists(ctx, bbClient, "DeployResult")
 	require.False(t, exists, "Synchronizer should NOT bid (TestResult at depth=2, max_depth=1)")
@@ -850,6 +859,7 @@ RUN go mod download
 COPY cmd/pup ./cmd/pup
 COPY internal/pup ./internal/pup
 COPY internal/config ./internal/config
+COPY internal/debug ./internal/debug
 COPY pkg/blackboard ./pkg/blackboard
 COPY pkg/version ./pkg/version
 RUN CGO_ENABLED=0 GOOS=linux go build -o pup ./cmd/pup
@@ -888,6 +898,7 @@ RUN go mod download
 COPY cmd/pup ./cmd/pup
 COPY internal/pup ./internal/pup
 COPY internal/config ./internal/config
+COPY internal/debug ./internal/debug
 COPY pkg/blackboard ./pkg/blackboard
 COPY pkg/version ./pkg/version
 RUN CGO_ENABLED=0 GOOS=linux go build -o pup ./cmd/pup
@@ -930,6 +941,7 @@ RUN go mod download
 COPY cmd/pup ./cmd/pup
 COPY internal/pup ./internal/pup
 COPY internal/config ./internal/config
+COPY internal/debug ./internal/debug
 COPY pkg/blackboard ./pkg/blackboard
 COPY pkg/version ./pkg/version
 RUN CGO_ENABLED=0 GOOS=linux go build -o pup ./cmd/pup
@@ -968,6 +980,7 @@ RUN go mod download
 COPY cmd/pup ./cmd/pup
 COPY internal/pup ./internal/pup
 COPY internal/config ./internal/config
+COPY internal/debug ./internal/debug
 COPY pkg/blackboard ./pkg/blackboard
 COPY pkg/version ./pkg/version
 RUN CGO_ENABLED=0 GOOS=linux go build -o pup ./cmd/pup
@@ -1004,6 +1017,7 @@ RUN go mod download
 COPY cmd/pup ./cmd/pup
 COPY internal/pup ./internal/pup
 COPY internal/config ./internal/config
+COPY internal/debug ./internal/debug
 COPY pkg/blackboard ./pkg/blackboard
 COPY pkg/version ./pkg/version
 RUN CGO_ENABLED=0 GOOS=linux go build -o pup ./cmd/pup

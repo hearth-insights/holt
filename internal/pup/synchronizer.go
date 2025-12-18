@@ -47,9 +47,9 @@ func NewSynchronizer(cfg *SynchronizeConfig, bbClient *blackboard.Client, agentR
 // Parameters:
 //   - ctx: Context
 //   - claim: The claim to evaluate
-//   - acquireLock: If true, attempts to acquire the lock. If false, just checks lock status.
-func (s *Synchronizer) shouldBidOnClaim(ctx context.Context, claim *blackboard.Claim, acquireLock bool) (Decision, error) {
-	log.Printf("[Synchronizer] Evaluating claim %s (acquireLock=%v)", claim.ID, acquireLock)
+//   - tryAcquireLock: If true, attempts to acquire the lock. If false, just checks lock status.
+func (s *Synchronizer) shouldBidOnClaim(ctx context.Context, claim *blackboard.Claim, tryAcquireLock bool) (Decision, error) {
+	log.Printf("[Synchronizer] Evaluating claim %s (tryAcquireLock=%v)", claim.ID, tryAcquireLock)
 
 	// Load target artefact
 	log.Printf("[Synchronizer] Loading target artefact %s...", claim.ArtefactID)
@@ -103,8 +103,8 @@ func (s *Synchronizer) shouldBidOnClaim(ctx context.Context, claim *blackboard.C
 	log.Printf("[Synchronizer] All dependencies met for ancestor %s", ancestor.ID)
 
 	// Step 4: Handle deduplication lock
-	if acquireLock {
-		// Acquire lock destructively
+	if tryAcquireLock {
+		// Destructive: Acquire lock for bidding
 		lockAcquired, err := s.bbClient.AcquireSyncLock(ctx, ancestor.ID, s.agentRole)
 		if err != nil {
 			return DecisionIgnore, fmt.Errorf("failed to acquire sync lock: %w", err)
@@ -115,7 +115,7 @@ func (s *Synchronizer) shouldBidOnClaim(ctx context.Context, claim *blackboard.C
 		}
 		log.Printf("[Synchronizer] Lock acquired for ancestor %s, ready to bid", ancestor.ID)
 	} else {
-		// Just check if lock is held (peek)
+		// Non-destructive: Check if lock exists (peek mode)
 		isLocked, err := s.bbClient.CheckSyncLock(ctx, ancestor.ID, s.agentRole)
 		if err != nil {
 			return DecisionIgnore, fmt.Errorf("failed to check sync lock: %w", err)

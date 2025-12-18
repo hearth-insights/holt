@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/hearth-insights/holt/internal/config"
+	"github.com/hearth-insights/holt/internal/debug"
 	"github.com/hearth-insights/holt/pkg/blackboard"
 )
 
@@ -65,11 +66,11 @@ func NewHealthServer(bbClient *blackboard.Client, port int) *HealthServer {
 func (hs *HealthServer) Start() error {
 	// Start server in background goroutine
 	go func() {
-		log.Printf("[DEBUG] Health server starting on %s", hs.server.Addr)
+		debug.Log("Health server starting on %s", hs.server.Addr)
 		if err := hs.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Printf("[ERROR] Health server error: %v", err)
 		}
-		log.Printf("[DEBUG] Health server stopped")
+		debug.Log("Health server stopped")
 	}()
 
 	return nil
@@ -83,7 +84,7 @@ func (hs *HealthServer) Start() error {
 //
 // Returns an error if shutdown fails or times out.
 func (hs *HealthServer) Shutdown(ctx context.Context) error {
-	log.Printf("[DEBUG] Shutting down health server...")
+	debug.Log("Shutting down health server...")
 	return hs.server.Shutdown(ctx)
 }
 

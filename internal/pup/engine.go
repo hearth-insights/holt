@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hearth-insights/holt/internal/debug"
 	"github.com/hearth-insights/holt/pkg/blackboard"
 )
 
@@ -107,9 +108,9 @@ func (e *Engine) Start(ctx context.Context) error {
 // The goroutine runs until the context is cancelled, then exits cleanly.
 func (e *Engine) claimWatcher(ctx context.Context, workQueue chan *blackboard.Claim) {
 	defer e.wg.Done()
-	defer log.Printf("[DEBUG] Claim Watcher exited cleanly")
+	defer debug.Log("Claim Watcher exited cleanly")
 
-	log.Printf("[DEBUG] Claim Watcher starting")
+	debug.Log("Claim Watcher starting")
 
 	// Subscribe to claim events
 	claimSub, err := e.bbClient.SubscribeClaimEvents(ctx)
@@ -139,7 +140,7 @@ func (e *Engine) claimWatcher(ctx context.Context, workQueue chan *blackboard.Cl
 		select {
 		case <-ctx.Done():
 			// Context cancelled - shutdown requested
-			log.Printf("[DEBUG] Claim Watcher received shutdown signal")
+			debug.Log("Claim Watcher received shutdown signal")
 			return
 
 		case claim, ok := <-claimSub.Events():
@@ -184,12 +185,12 @@ func (e *Engine) handleClaimEvent(ctx context.Context, claim *blackboard.Claim, 
 			log.Printf("[INFO] Feedback claim %s is assigned to this agent, pushing to work queue", claim.ID)
 			select {
 			case workQueue <- claim:
-				log.Printf("[DEBUG] Feedback claim %s successfully queued for execution", claim.ID)
+				debug.Log("Feedback claim %s successfully queued for execution", claim.ID)
 			case <-ctx.Done():
-				log.Printf("[DEBUG] Context cancelled while queuing feedback claim %s", claim.ID)
+				debug.Log("Context cancelled while queuing feedback claim %s", claim.ID)
 			}
 		} else {
-			log.Printf("[DEBUG] Feedback claim %s assigned to %s, ignoring (we are %s)",
+			debug.Log("Feedback claim %s assigned to %s, ignoring (we are %s)",
 				claim.ID, claim.GrantedExclusiveAgent, e.config.AgentName)
 		}
 		return // No bidding for pending_assignment claims
@@ -223,8 +224,8 @@ func (e *Engine) handleClaimEvent(ctx context.Context, claim *blackboard.Claim, 
 		bidType = blackboard.BidTypeIgnore
 	}
 
-	log.Printf("[DEBUG] determineBidType returned: %s", bidType)
-	log.Printf("[DEBUG] Submitting bid for claim_id=%s: agent=%s type=%s", claim.ID, e.config.AgentName, bidType)
+	debug.Log("determineBidType returned: %s", bidType)
+	debug.Log("Submitting bid for claim_id=%s: agent=%s type=%s", claim.ID, e.config.AgentName, bidType)
 
 	err = e.bbClient.SetBid(ctx, claim.ID, e.config.AgentName, bidType)
 	if err != nil {
@@ -286,7 +287,7 @@ func (e *Engine) determineBidType(ctx context.Context, claim *blackboard.Claim, 
 				}
 			}
 			if !match {
-				log.Printf("[DEBUG] Target artefact type '%s' not in target_types %v, ignoring",
+				debug.Log("Target artefact type '%s' not in target_types %v, ignoring",
 					targetArtefact.Header.Type, e.config.BiddingStrategy.TargetTypes)
 				return blackboard.BidTypeIgnore, nil
 			}
@@ -295,7 +296,7 @@ func (e *Engine) determineBidType(ctx context.Context, claim *blackboard.Claim, 
 	}
 
 	// A bid script is defined, execute it dynamically.
-	log.Printf("[DEBUG] Executing bid script: %v", e.config.BidScript)
+	debug.Log("Executing bid script: %v", e.config.BidScript)
 
 	// Prepare the command
 	cmd := exec.CommandContext(ctx, e.config.BidScript[0], e.config.BidScript[1:]...)
@@ -333,7 +334,7 @@ func (e *Engine) determineBidType(ctx context.Context, claim *blackboard.Claim, 
 			fmt.Sprintf("bid script returned invalid bid type '%s'", bidTypeStr), err)
 	}
 
-	log.Printf("[DEBUG] Bid script returned: %s", bidType)
+	debug.Log("Bid script returned: %s", bidType)
 	return bidType, nil
 }
 
@@ -414,7 +415,7 @@ func (e *Engine) handleGrantNotification(ctx context.Context, msgPayload string,
 	if !isGranted {
 		log.Printf("[WARN] Grant notification for claim %s not granted to this agent (name: %s)",
 			grant.ClaimID, e.config.AgentName)
-		log.Printf("[DEBUG] Claim grants - review: %v, parallel: %v, exclusive: %s",
+		debug.Log("Claim grants - review: %v, parallel: %v, exclusive: %s",
 			claim.GrantedReviewAgents, claim.GrantedParallelAgents, claim.GrantedExclusiveAgent)
 		return
 	}
@@ -424,9 +425,9 @@ func (e *Engine) handleGrantNotification(ctx context.Context, msgPayload string,
 	// Push claim to work queue (buffered channel, may block briefly if queue full)
 	select {
 	case workQueue <- claim:
-		log.Printf("[DEBUG] Claim %s successfully queued for execution", claim.ID)
+		debug.Log("Claim %s successfully queued for execution", claim.ID)
 	case <-ctx.Done():
-		log.Printf("[DEBUG] Context cancelled while queuing claim %s", claim.ID)
+		debug.Log("Context cancelled while queuing claim %s", claim.ID)
 		return
 	}
 }
@@ -441,21 +442,21 @@ func (e *Engine) handleGrantNotification(ctx context.Context, msgPayload string,
 // Work execution never crashes - all errors create Failure artefacts and continue processing.
 func (e *Engine) workExecutor(ctx context.Context, workQueue chan *blackboard.Claim) {
 	defer e.wg.Done()
-	defer log.Printf("[DEBUG] Work Executor exited cleanly")
+	defer debug.Log("Work Executor exited cleanly")
 
-	log.Printf("[DEBUG] Work Executor starting")
+	debug.Log("Work Executor starting")
 
 	for {
 		select {
 		case <-ctx.Done():
 			// Context cancelled - shutdown requested
-			log.Printf("[DEBUG] Work Executor received shutdown signal")
+			debug.Log("Work Executor received shutdown signal")
 			return
 
 		case claim, ok := <-workQueue:
 			if !ok {
 				// Work queue closed - no more work will arrive
-				log.Printf("[DEBUG] Work queue closed, Work Executor shutting down")
+				debug.Log("Work queue closed, Work Executor shutting down")
 				return
 			}
 

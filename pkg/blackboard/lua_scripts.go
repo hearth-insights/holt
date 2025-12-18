@@ -93,7 +93,6 @@ if source_artefacts and type(source_artefacts) == 'table' and next(source_artefa
     for _, parent_id in ipairs(source_artefacts) do
         -- Build reverse index key for this parent
         local children_key = 'holt:' .. instance_name .. ':index:children:' .. parent_id
-        redis.log(redis.LOG_NOTICE, "DEBUG: SADD checking children_key=" .. children_key .. " value=" .. artefact_id)
         redis.call('SADD', children_key, artefact_id)
     end
 end

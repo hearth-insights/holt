@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/hearth-insights/holt/internal/debug"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -93,7 +94,7 @@ func (c *Client) CreateArtefact(ctx context.Context, a *Artefact) error {
 	if a.Header.Metadata == "" {
 		a.Header.Metadata = "{}"
 	}
-	log.Printf("[DEBUG] Client creating artefact %s with metadata: %s", a.ID, a.Header.Metadata)
+	debug.Log("Client creating artefact %s with metadata: %s", a.ID, a.Header.Metadata)
 
 	// Validate artefact
 	if err := a.Validate(); err != nil {
@@ -238,7 +239,7 @@ func (c *Client) CreateClaim(ctx context.Context, claim *Claim) error {
 
 	// Write to Redis
 	key := ClaimKey(c.instanceName, claim.ID)
-	log.Printf("[Blackboard] DEBUG: CreateClaim writing to key: %s", key)
+	debug.Log("CreateClaim writing to key: %s", key)
 	if err := c.rdb.HSet(ctx, key, hash).Err(); err != nil {
 		return fmt.Errorf("failed to write claim to Redis: %w", err)
 	}
@@ -367,7 +368,7 @@ func (c *Client) SetBid(ctx context.Context, claimID string, agentName string, b
 
 	// Write bid to Redis
 	key := ClaimBidsKey(c.instanceName, claimID)
-	log.Printf("[Blackboard] SetBid writing to key: '%s' agent: '%s'", key, agentName)
+	debug.Log("SetBid writing to key: '%s' agent: '%s'", key, agentName)
 	if err := c.rdb.HSet(ctx, key, agentName, string(bidJSON)).Err(); err != nil {
 		return fmt.Errorf("failed to write bid to Redis: %w", err)
 	}
@@ -391,10 +392,7 @@ func (c *Client) SetBid(ctx context.Context, claimID string, agentName string, b
 // Expects JSON-encoded bids in Redis. Fails if data is not valid JSON.
 func (c *Client) GetAllBids(ctx context.Context, claimID string) (map[string]Bid, error) {
 	key := ClaimBidsKey(c.instanceName, claimID)
-	// log.Printf("[Blackboard] GetAllBids reading from key: '%s'", key) // Too verbose for poll loop? Maybe once?
-	// I'll log it if empty? No, Orchestrator polls frequently.
-	// I'll log it anyway, test is short.
-	log.Printf("[Blackboard] GetAllBids reading from key: '%s'", key)
+	debug.Log("GetAllBids reading from key: '%s'", key)
 
 	// Read all bids from Redis
 	rawBids, err := c.rdb.HGetAll(ctx, key).Result()
@@ -600,7 +598,7 @@ func (c *Client) SubscribeArtefactEvents(ctx context.Context) (*Subscription, er
 		defer close(errorsChan)
 		defer pubsub.Close()
 
-		log.Printf("[Blackboard] Subscribing to channel: '%s'", channel)
+		debug.Log("Subscribing to channel: '%s'", channel)
 
 		// Receive channel from pubsub
 		ch := pubsub.Channel()
@@ -613,7 +611,7 @@ func (c *Client) SubscribeArtefactEvents(ctx context.Context) (*Subscription, er
 				if !ok {
 					return
 				}
-				// log.Printf("[Blackboard] Raw message received on %s: %s", msg.Channel, msg.Payload) // Verbose!
+				debug.Log("Raw message received on %s: %s", msg.Channel, msg.Payload)
 				var artefact Artefact
 				if err := json.Unmarshal([]byte(msg.Payload), &artefact); err != nil {
 					log.Printf("[Blackboard] Failed to unmarshal artefact event: %v (payload: %s)", err, msg.Payload)
@@ -624,7 +622,7 @@ func (c *Client) SubscribeArtefactEvents(ctx context.Context) (*Subscription, er
 					}
 					continue
 				}
-				log.Printf("[Blackboard] Dispatching event for artefact %s", artefact.ID)
+				debug.Log("Dispatching event for artefact %s", artefact.ID)
 				select {
 				case eventsChan <- &artefact:
 				default:
@@ -1181,12 +1179,12 @@ func (c *Client) GetDescendants(ctx context.Context, ancestorID string, maxDepth
 
 		// Get children from reverse index
 		childrenKey := ChildrenIndexKey(c.instanceName, nodeID)
-		log.Printf("[Blackboard] GetDescendants querying children key: '%s'", childrenKey)
+		debug.Log("GetDescendants querying children key: '%s'", childrenKey)
 		childIDs, err := c.rdb.SMembers(ctx, childrenKey).Result()
 		if err != nil {
 			return fmt.Errorf("failed to get children of %s: %w", nodeID, err)
 		}
-		log.Printf("[Blackboard] GetDescendants found %d children for %s", len(childIDs), nodeID)
+		debug.Log("GetDescendants found %d children for %s", len(childIDs), nodeID)
 
 		for _, childID := range childIDs {
 			// Skip if already visited (cycle detection)
@@ -1259,7 +1257,12 @@ func (c *Client) AcquireSyncLock(ctx context.Context, ancestorID, agentRole stri
 }
 
 // CheckSyncLock checks if a synchronization deduplication lock is currently held.
-// M5.1: Non-destructive check used by triggers to peek at lock status.
+// M5.1: Non-destructive check used by synchronizers to peek at lock status without acquiring it.
+//
+// Returns:
+//   - true if the lock is held
+//   - false if the lock is not held
+//   - error if the check fails
 func (c *Client) CheckSyncLock(ctx context.Context, ancestorID, agentRole string) (bool, error) {
 	// Hash agent role for lock key
 	hash := sha256.Sum256([]byte(agentRole))
@@ -1552,9 +1555,9 @@ func (c *Client) keepAlive(ctx context.Context, pubsub *redis.PubSub) {
 		case <-ticker.C:
 			// Send PING and log result for debugging
 			if err := pubsub.Ping(ctx); err != nil {
-				log.Printf("DEBUG: KeepAlive PING failed: %v", err)
+				debug.Log("KeepAlive PING failed: %v", err)
 			} else {
-				// log.Printf("DEBUG: KeepAlive PING success") // Uncomment for very verbose logging
+				debug.Log("KeepAlive PING success")
 			}
 		}
 	}

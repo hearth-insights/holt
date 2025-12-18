@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hearth-insights/holt/internal/debug"
 	"github.com/hearth-insights/holt/pkg/blackboard"
 )
 
@@ -163,7 +164,7 @@ func (e *Engine) prepareToolInput(ctx context.Context, claim *blackboard.Claim, 
 		return "", fmt.Errorf("failed to assemble context: %w", err)
 	}
 
-	log.Printf("[DEBUG] Prepared context chain: %d artefacts", len(contextChain))
+	debug.Log("Prepared context chain: %d artefacts", len(contextChain))
 
 	// M4.3: Load Knowledge artefacts for this agent
 	contextIsDeclared, knowledgeBase, loadedKnowledge, err := e.loadKnowledgeForAgent(ctx, contextChain)
@@ -171,7 +172,8 @@ func (e *Engine) prepareToolInput(ctx context.Context, claim *blackboard.Claim, 
 		return "", fmt.Errorf("failed to load knowledge: %w", err)
 	}
 
-	// M5.1: If using synchronization, fetch descendants of the ANCESTOR
+	// M5.1: If using synchronization, fetch ancestor and descendants
+	var ancestorArtefact *blackboard.Artefact
 	var descendantArtefacts []interface{}
 	if e.config.SynchronizeConfig != nil {
 		// 1. Find the common ancestor configuration
@@ -185,6 +187,7 @@ func (e *Engine) prepareToolInput(ctx context.Context, claim *blackboard.Claim, 
 				ancestorType, targetArtefact.ID, err)
 			// Don't fail the job, just pass empty descendants (best effort)
 		} else if ancestor != nil {
+			ancestorArtefact = ancestor
 			log.Printf("[INFO] Found sync ancestor: id=%s type=%s", ancestor.ID, ancestor.Header.Type)
 
 			// 3. Fetch descendants of the ancestor
@@ -197,7 +200,7 @@ func (e *Engine) prepareToolInput(ctx context.Context, claim *blackboard.Claim, 
 			for i, desc := range descendants {
 				descendantArtefacts[i] = desc
 			}
-			log.Printf("[DEBUG] Fetched %d descendants of ancestor %s for synchronization",
+			debug.Log("Fetched %d descendants of ancestor %s for synchronization",
 				len(descendants), ancestor.ID)
 		}
 	}
@@ -215,6 +218,7 @@ func (e *Engine) prepareToolInput(ctx context.Context, claim *blackboard.Claim, 
 		ContextIsDeclared:   contextIsDeclared,
 		KnowledgeBase:       knowledgeBase,
 		LoadedKnowledge:     loadedKnowledge,
+		AncestorArtefact:    ancestorArtefact,    // M5.1
 		DescendantArtefacts: descendantArtefacts, // M5.1
 	}
 
@@ -287,7 +291,7 @@ func (e *Engine) executeToolSubprocess(ctx context.Context, inputJSON string) (i
 
 	// M4.10: Attach FD 3 for result JSON
 	cmd.ExtraFiles = []*os.File{fd3Writer} // FD 3
-	log.Printf("[DEBUG] M4.10: Attached FD 3 for result JSON")
+	debug.Log("M4.10: Attached FD 3 for result JSON")
 
 	// Start process
 	if err := cmd.Start(); err != nil {
@@ -436,7 +440,7 @@ func (e *Engine) createResultArtefact(ctx context.Context, claim *blackboard.Cla
 			return nil, fmt.Errorf("git commit validation failed for hash %s: %w",
 				output.ArtefactPayload, err)
 		}
-		log.Printf("[DEBUG] Git commit validation passed: hash=%s", output.ArtefactPayload)
+		debug.Log("Git commit validation passed: hash=%s", output.ArtefactPayload)
 	}
 
 	// Determine relationship (Derivative vs Rework)
@@ -584,7 +588,7 @@ func (e *Engine) processCheckpoints(ctx context.Context, checkpoints []Checkpoin
 	log.Printf("[INFO] M4.3: Processing %d checkpoints for thread %s", len(checkpoints), threadLogicalID)
 
 	for i, checkpoint := range checkpoints {
-		log.Printf("[DEBUG] M4.3: Processing checkpoint %d: knowledge_name=%s target_roles=%v",
+		debug.Log("M4.3: Processing checkpoint %d: knowledge_name=%s target_roles=%v",
 			i+1, checkpoint.KnowledgeName, checkpoint.TargetRoles)
 
 		// Validate checkpoint
@@ -872,7 +876,7 @@ func (e *Engine) confirmArtefactsInRedis(ctx context.Context, artefacts []*black
 		if err != nil {
 			return fmt.Errorf("artefact %d/%d (id=%s) not found in Redis: %w", i+1, len(artefacts), artefact.ID[:16], err)
 		}
-		log.Printf("[DEBUG] Confirmed artefact %d/%d in Redis: %s (type=%s, structural=%s)",
+		debug.Log("Confirmed artefact %d/%d in Redis: %s (type=%s, structural=%s)",
 			i+1, len(artefacts), artefact.ID[:16], artefact.Header.Type, artefact.Header.StructuralType)
 	}
 
