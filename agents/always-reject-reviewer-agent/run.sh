@@ -8,8 +8,8 @@ set -e  # Exit on any error
 # Read JSON input from stdin (required by pup contract)
 input=$(cat)
 
-# Extract the target artefact version from input JSON
-version=$(echo "$input" | grep -o '"version":[0-9]*' | head -1 | grep -o '[0-9]*')
+# Extract the target artefact version from input JSON (handle V1 and V2)
+version=$(echo "$input" | jq -r '.target_artefact.header.version // .target_artefact.version // 1')
 
 echo "Always-reject reviewer received claim, version: $version - REJECTING" >&2
 

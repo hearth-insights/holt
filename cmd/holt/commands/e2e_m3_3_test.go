@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/hearth-insights/holt/internal/testutil"
+	"github.com/hearth-insights/holt/pkg/blackboard"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )
@@ -38,6 +39,7 @@ agents:
     command: ["/app/run_conditional_reviewer.sh"]
     bidding_strategy:
       type: "review"
+      target_types: ["CodeCommit"]
     workspace:
       mode: ro
   Coder:
@@ -55,6 +57,9 @@ services:
 
 	env := testutil.SetupE2EEnvironment(t, holtYML)
 	defer func() {
+		if t.Failed() {
+			env.DumpInstanceLogs()
+		}
 		downCmd := &cobra.Command{}
 		downInstanceName = env.InstanceName
 		_ = runDown(downCmd, []string{})
@@ -98,24 +103,58 @@ services:
 	t.Logf("✓ GoalDefined artefact created: id=%s", goalArtefact.ID)
 
 	// Step 6: Wait for first Review artefact (v1 rejection)
+	// Step 6: Wait for first Review artefact (v1 rejection)
 	t.Log("Step 6: Waiting for v1 Review (should reject)...")
-	review1 := env.WaitForArtefactByType("Review")
-	require.NotNil(t, review1)
-	require.NotEqual(t, "{}", review1.Payload.Content, "Expected rejection (non-empty payload)")
-	require.Contains(t, review1.Payload.Content, "needs tests", "Expected specific feedback")
-	t.Logf("✓ v1 Review received with feedback: %s", review1.Payload.Content)
+	// Use WaitForArtefactCount to wait for at least 1 review, then filter for rejection
+	// This handles cases where v2 (approval) might continuously appear if loop is fast
+	reviews1, err := env.WaitForArtefactCount("Review", 1, 60*time.Second)
+	require.NoError(t, err)
+
+	var rejection *blackboard.Artefact
+	for _, r := range reviews1 {
+		if r.Payload.Content != "{}" {
+			rejection = r
+			break
+		}
+	}
+	require.NotNil(t, rejection, "Expected rejection review (non-empty payload) not found among %d reviews", len(reviews1))
+	require.Contains(t, rejection.Payload.Content, "needs tests", "Expected specific feedback")
+	t.Logf("✓ v1 Review received with feedback: %s", rejection.Payload.Content)
 
 	// Step 7: Wait for CodeCommit v2 (result of feedback loop)
 	t.Log("Step 7: Waiting for CodeCommit v2 (after rework)...")
-	time.Sleep(30 * time.Second) // Give system time to iterate
+	// Wait for 2 CodeCommit artefacts (v1 + v2)
+	v2Commit, err := env.WaitForArtefactCount("CodeCommit", 2, 90*time.Second)
+	require.NoError(t, err, "Timed out waiting for v2 CodeCommit")
+	require.Len(t, v2Commit, 2)
+	t.Log("✓ CodeCommit v2 created")
 
 	// Step 8: Verify v2 Review (should approve)
+	// Step 8: Verify v2 Review (should approve)
 	t.Log("Step 8: Looking for second Review artefact (should approve v2)...")
-	time.Sleep(20 * time.Second)
+	// Wait for 2 Review artefacts (v1 rejection + v2 approval)
+	reviews, err := env.WaitForArtefactCount("Review", 2, 90*time.Second)
+	require.NoError(t, err, "Timed out waiting for v2 Review")
+	require.GreaterOrEqual(t, len(reviews), 2)
+
+	// Robustly find the approval review
+	var approval *blackboard.Artefact
+	for _, r := range reviews {
+		if r.Payload.Content == "{}" {
+			approval = r
+			break
+		}
+	}
+	// Note: In case of race where v1 is also somehow empty (bug) we check uniqueness by ID if needed,
+	// but here we just need EXISTENCE of an approval.
+	require.NotNil(t, approval, "Expected approval review (empty payload) not found among %d reviews", len(reviews))
+	require.Equal(t, "{}", approval.Payload.Content, "Expected approval (empty payload)")
+	t.Log("✓ v2 Review received (Approved)")
 
 	// Step 9: Verify workflow completion
-	t.Log("Step 9: Verifying workflow eventually completes...")
-	time.Sleep(20 * time.Second)
+	t.Log("Step 9: Verifying workflow completion...")
+	_ = env.WaitForArtefactByType("ClaimComplete")
+	t.Log("✓ Workflow completed")
 
 	t.Log("✓ Single iteration feedback loop test completed")
 	t.Log("Note: This is a basic smoke test. Full validation would check:")
@@ -151,6 +190,7 @@ agents:
     command: ["/app/run_reject_reviewer.sh"]
     bidding_strategy:
       type: "review"
+      target_types: ["CodeCommit"]
     workspace:
       mode: ro
   Coder:
@@ -169,6 +209,9 @@ services:
 
 	env := testutil.SetupE2EEnvironment(t, holtYML)
 	defer func() {
+		if t.Failed() {
+			env.DumpInstanceLogs()
+		}
 		downCmd := &cobra.Command{}
 		downInstanceName = env.InstanceName
 		_ = runDown(downCmd, []string{})
@@ -206,18 +249,31 @@ services:
 	t.Log("✓ Goal submitted")
 
 	// Step 5: Wait for GoalDefined
-	t.Log("Step 5: Waiting for GoalDefined...")
+	// Step 5: Waiting for GoalDefined...
 	goalArtefact := env.WaitForArtefactByType("GoalDefined")
 	require.NotNil(t, goalArtefact)
 	t.Log("✓ GoalDefined created")
 
-	// Step 6: Wait for multiple Review rejections (should see 3: v1, v2, v3)
-	t.Log("Step 6: Waiting for review rejections (expecting 3 rounds)...")
-	time.Sleep(60 * time.Second) // Give plenty of time for iterations
+	// Step 6: Wait for Failure artefact (indicates max iterations reached or config error)
+	// Step 6: Wait for 3 Review artefacts (v1, v2, v3)
+	t.Log("Step 6: Waiting for 3 Review artefacts...")
+	reviews, err := env.WaitForArtefactCount("Review", 3, 45*time.Second)
+	require.NoError(t, err, "Timed out waiting for 3 review iterations")
+	t.Log("✓ 3 Review iterations completed")
 
-	// Step 7: Look for Failure artefact
-	t.Log("Step 7: Looking for Failure artefact (max iterations)...")
-	time.Sleep(20 * time.Second) // Give time to hit max iterations
+	// Step 7: Check for Failure (optional/best effort to avoid flake on termination timing)
+	// We already verified the loop ran fast and produced expected iterations.
+	// Validating termination is secondary for this performance test.
+	failureArtefacts, _ := testutil.FindAllArtefactsOfType(env.Ctx, env.BBClient, "Failure")
+	if len(failureArtefacts) > 0 {
+		t.Log("✓ Failure artefact found")
+	} else {
+		t.Log("⚠ Failure artefact not found immediately (termination might be slow), but loop completed")
+	}
+
+	// Optional: Check how many reviews were created
+	reviews, _ = testutil.FindAllArtefactsOfType(env.Ctx, env.BBClient, "Review")
+	t.Logf("✓ Found %d Review artefacts", len(reviews))
 
 	// Simplified: Just verify the test ran and we got feedback
 	t.Log("✓ Max iterations test completed")

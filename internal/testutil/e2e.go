@@ -252,6 +252,7 @@ func (env *E2EEnvironment) CreateTestManifest(ctx context.Context) string {
 		Type:            "SystemConfig",
 		ProducedByRole:  "orchestrator",
 		CreatedAtMs:     time.Now().UnixMilli(),
+		Metadata:        "{}",
 	}, string(identityJSON))
 
 	env.T.Logf("✓ Test SystemManifest created: %s", manifest.ID[:16]+"...")
@@ -270,6 +271,7 @@ func (env *E2EEnvironment) CreateWorkflowSpine(ctx context.Context, goalPayload 
 		LogicalThreadID: goalThreadID,
 		Version:         1,
 		Type:            "GoalDefined",
+		Metadata:        "{}",
 	}, goalPayload)
 
 	env.T.Logf("✓ Workflow spine created: Manifest → GoalDefined")
@@ -845,7 +847,6 @@ func FindAllArtefactsOfType(ctx context.Context, client *blackboard.Client, arte
 
 		if data["type"] == artefactType {
 			// Debug log
-			fmt.Printf("DEBUG: FindAllArtefactsOfType found %s with metadata raw: '%s'\n", data["id"], data["metadata"])
 
 			artefact := &blackboard.Artefact{
 				ID: data["id"],
@@ -934,6 +935,35 @@ func WaitForArtefactWithContext(ctx context.Context, client *blackboard.Client, 
 	}
 
 	return nil, fmt.Errorf("artefact of type '%s' with relatedArtefactID='%s' in thread_context not found within %v", artefactType, relatedArtefactID, timeout)
+}
+
+// WaitForArtefactCount polls until at least 'count' artefacts of a specific type exist.
+// This is useful for testing multi-iteration loops (e.g. waiting for the 3rd review rejection).
+func (env *E2EEnvironment) WaitForArtefactCount(artefactType string, count int, timeout time.Duration) ([]*blackboard.Artefact, error) {
+	deadline := time.Now().Add(timeout)
+	lastCount := 0
+
+	for time.Now().Before(deadline) {
+		// Fail fast if global lockdown
+		if err := checkLockdown(env.Ctx, env.BBClient); err != nil {
+			return nil, err
+		}
+
+		artefacts, err := FindAllArtefactsOfType(env.Ctx, env.BBClient, artefactType)
+		if err != nil {
+			return nil, err // Return error immediately if scanning fails
+		}
+
+		lastCount = len(artefacts)
+		if lastCount >= count {
+			env.T.Logf("✓ Found %d/%d required artefacts of type '%s'", lastCount, count, artefactType)
+			return artefacts, nil
+		}
+
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	return nil, fmt.Errorf("found only %d artefacts of type '%s' within %v (required: %d)", lastCount, artefactType, timeout, count)
 }
 
 // DumpInstanceLogs retrieves and logs all container logs for an instance.

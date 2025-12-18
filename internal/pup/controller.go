@@ -31,6 +31,28 @@ func RunControllerMode(ctx context.Context, config *Config, bbClient *blackboard
 
 	log.Printf("[Controller] Subscribed to claim events")
 
+	// M5.1: Claim-only bidding (artefact subscriptions removed for simplification)
+	// The orchestrator creates claims for all artefacts
+
+	// M5.1: Scan for existing claims (Cold Start Recovery)
+	// MUST be done AFTER subscription to ensure no events are missed in the gap.
+	// Duplicates (scanning a claim we also get an event for) are fine as processClaim is idempotent.
+	existingClaims, err := bbClient.ScanClaims(ctx)
+	if err != nil {
+		log.Printf("[Controller] Failed to scan existing claims: %v", err)
+	} else {
+		log.Printf("[Controller] Found %d existing claims, processing...", len(existingClaims))
+		for _, claimID := range existingClaims {
+			claim, err := bbClient.GetClaim(ctx, claimID)
+			if err != nil {
+				log.Printf("[Controller] Failed to load existing claim %s: %v", claimID, err)
+				continue
+			}
+			// Process claim (fire-and-forget to avoid blocking loop entry)
+			go processClaim(ctx, config, bbClient, synchronizer, claim)
+		}
+	}
+
 	// Bidding loop (never executes work)
 	for {
 		select {
@@ -43,62 +65,10 @@ func RunControllerMode(ctx context.Context, config *Config, bbClient *blackboard
 				log.Printf("[Controller] Claim events channel closed")
 				return nil
 			}
+			processClaim(ctx, config, bbClient, synchronizer, claim)
 
-			// M5.1: Use synchronizer logic if configured
-			var shouldBid bool
-			var bid blackboard.BidType
-
-			if synchronizer != nil {
-				// Synchronizer mode: Evaluate fan-in conditions
-				ready, err := synchronizer.shouldBidOnClaim(ctx, claim)
-				if err != nil {
-					log.Printf("[Controller] Synchronizer error: %v", err)
-					// On error, skip bid (don't submit 'ignore' to avoid blocking)
-					continue
-				}
-				shouldBid = ready
-				bid = blackboard.BidTypeExclusive // Synchronizers always bid exclusive
-			} else {
-				// Traditional bidding logic (M4.8)
-				shouldBid = true // Always bid (unless filtered)
-				bid = config.BiddingStrategy.Type
-
-				// Fetch target artefact for filtering
-				targetArtefact, err := bbClient.GetArtefact(ctx, claim.ArtefactID)
-				if err != nil {
-					log.Printf("[Controller] Failed to fetch artefact %s: %v", claim.ArtefactID, err)
-					// If we can't check type, we can't safely bid our strategy.
-					// Submit 'ignore' to avoid blocking consensus.
-					if err := bbClient.SetBid(ctx, claim.ID, config.AgentName, blackboard.BidTypeIgnore); err != nil {
-						log.Printf("[Controller] Failed to submit fallback ignore bid: %v", err)
-					}
-					continue
-				}
-
-				// M4.8: Check target types filtering
-				if len(config.BiddingStrategy.TargetTypes) > 0 {
-					match := false
-					for _, t := range config.BiddingStrategy.TargetTypes {
-						if t == targetArtefact.Header.Type {
-							match = true
-							break
-						}
-					}
-					if !match {
-						bid = blackboard.BidTypeIgnore
-					}
-				}
-			}
-
-			// Submit bid if ready
-			if shouldBid {
-				if err := bbClient.SetBid(ctx, claim.ID, config.AgentName, bid); err != nil {
-					log.Printf("[Controller] Failed to submit bid for claim %s: %v", claim.ID, err)
-					continue
-				}
-
-				log.Printf("[Controller] Submitted bid: claim=%s type=%s status=%s", claim.ID, bid, claim.Status)
-			}
+		// M5.1: Artefact event handling removed - using claim-only bidding
+		// The orchestrator creates claims for all artefacts, eliminating race conditions
 
 		case err, ok := <-subscription.Errors():
 			if !ok {
@@ -107,5 +77,76 @@ func RunControllerMode(ctx context.Context, config *Config, bbClient *blackboard
 			}
 			log.Printf("[Controller] Subscription error: %v", err)
 		}
+	}
+}
+
+// processClaim handles a single claim for bidding
+func processClaim(ctx context.Context, config *Config, bbClient *blackboard.Client, synchronizer *Synchronizer, claim *blackboard.Claim) {
+	// M5.1: Use synchronizer logic if configured
+	var shouldBid bool
+	var bid blackboard.BidType
+
+	if synchronizer != nil {
+		// Synchronizer mode: Evaluate fan-in conditions
+		decision, err := synchronizer.shouldBidOnClaim(ctx, claim, true)
+		if err != nil {
+			log.Printf("[Controller] Synchronizer error: %v", err)
+			return // Skip bid on error
+		}
+
+		switch decision {
+		case DecisionBid:
+			shouldBid = true
+			bid = blackboard.BidTypeExclusive
+		case DecisionIgnore:
+			// M5.1: Explicitly bid IGNORE if irrelevant or error occurred
+			shouldBid = true
+			bid = blackboard.BidTypeIgnore
+			log.Printf("[Controller] Synchronizer decided IGNORE for claim %s", claim.ID)
+		default:
+			// Should never happen - all Decision values handled above
+			log.Printf("[Controller] ERROR: Unexpected synchronizer decision: %v", decision)
+			shouldBid = true
+			bid = blackboard.BidTypeIgnore
+		}
+	} else {
+		// Traditional bidding logic (M4.8)
+		shouldBid = true // Always bid (unless filtered)
+		bid = config.BiddingStrategy.Type
+
+		// Fetch target artefact for filtering
+		targetArtefact, err := bbClient.GetArtefact(ctx, claim.ArtefactID)
+		if err != nil {
+			log.Printf("[Controller] Failed to fetch artefact %s: %v", claim.ArtefactID, err)
+			// Fallback ignore
+			if err := bbClient.SetBid(ctx, claim.ID, config.AgentName, blackboard.BidTypeIgnore); err != nil {
+				log.Printf("[Controller] Failed to submit fallback ignore bid: %v", err)
+			}
+			return
+		}
+
+		// M4.8: Check target types filtering
+		if len(config.BiddingStrategy.TargetTypes) > 0 {
+			match := false
+			for _, t := range config.BiddingStrategy.TargetTypes {
+				if t == targetArtefact.Header.Type {
+					match = true
+					break
+				}
+			}
+			if !match {
+				bid = blackboard.BidTypeIgnore
+			}
+		}
+	}
+
+	// Submit bid if ready
+	if shouldBid {
+		if err := bbClient.SetBid(ctx, claim.ID, config.AgentName, bid); err != nil {
+			log.Printf("[Controller] Failed to submit bid for claim %s: %v", claim.ID, err)
+			return
+		}
+
+		log.Printf("[Controller] Submitted bid: claim=%s type=%s status=%s", claim.ID, bid, claim.Status)
 	}
 }

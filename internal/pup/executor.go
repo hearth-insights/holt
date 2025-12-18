@@ -171,6 +171,37 @@ func (e *Engine) prepareToolInput(ctx context.Context, claim *blackboard.Claim, 
 		return "", fmt.Errorf("failed to load knowledge: %w", err)
 	}
 
+	// M5.1: If using synchronization, fetch descendants of the ANCESTOR
+	var descendantArtefacts []interface{}
+	if e.config.SynchronizeConfig != nil {
+		// 1. Find the common ancestor configuration
+		ancestorType := e.config.SynchronizeConfig.AncestorType
+		maxDepth := e.config.SynchronizeConfig.MaxDepth
+
+		// 2. Find the ancestor artefact
+		ancestor, err := e.findSyncAncestor(ctx, targetArtefact, ancestorType)
+		if err != nil {
+			log.Printf("[WARN] Failed to find sync ancestor (type=%s) for artefact %s: %v",
+				ancestorType, targetArtefact.ID, err)
+			// Don't fail the job, just pass empty descendants (best effort)
+		} else if ancestor != nil {
+			log.Printf("[INFO] Found sync ancestor: id=%s type=%s", ancestor.ID, ancestor.Header.Type)
+
+			// 3. Fetch descendants of the ancestor
+			descendants, err := e.bbClient.GetDescendants(ctx, ancestor.ID, maxDepth)
+			if err != nil {
+				return "", fmt.Errorf("failed to fetch descendants for synchronization: %w", err)
+			}
+
+			descendantArtefacts = make([]interface{}, len(descendants))
+			for i, desc := range descendants {
+				descendantArtefacts[i] = desc
+			}
+			log.Printf("[DEBUG] Fetched %d descendants of ancestor %s for synchronization",
+				len(descendants), ancestor.ID)
+		}
+	}
+
 	// Convert to []interface{} for JSON marshaling
 	contextChainInterface := make([]interface{}, len(contextChain))
 	for i, art := range contextChain {
@@ -178,12 +209,13 @@ func (e *Engine) prepareToolInput(ctx context.Context, claim *blackboard.Claim, 
 	}
 
 	input := &ToolInput{
-		ClaimType:         "exclusive", // M2.4: still hardcoded (Phase 3 will support review/parallel)
-		TargetArtefact:    targetArtefact,
-		ContextChain:      contextChainInterface,
-		ContextIsDeclared: contextIsDeclared,
-		KnowledgeBase:     knowledgeBase,
-		LoadedKnowledge:   loadedKnowledge,
+		ClaimType:           "exclusive", // M2.4: still hardcoded (Phase 3 will support review/parallel)
+		TargetArtefact:      targetArtefact,
+		ContextChain:        contextChainInterface,
+		ContextIsDeclared:   contextIsDeclared,
+		KnowledgeBase:       knowledgeBase,
+		LoadedKnowledge:     loadedKnowledge,
+		DescendantArtefacts: descendantArtefacts, // M5.1
 	}
 
 	jsonBytes, err := json.Marshal(input)
@@ -945,4 +977,59 @@ func (e *Engine) createTerminalArtefact(ctx context.Context, claim *blackboard.C
 	}
 
 	log.Printf("[INFO] Terminal artefact created: artefact_id=%s type=%s", artefact.ID, artefact.Header.Type)
+}
+
+// findSyncAncestor traverses upward to find the first ancestor matching ancestorType.
+// M5.1: Helper for synchronization logic in Executor.
+//
+// Returns:
+//   - Ancestor artefact if found
+//   - nil if not found
+//   - error if traversal fails
+func (e *Engine) findSyncAncestor(ctx context.Context, startArtefact *blackboard.Artefact, ancestorType string) (*blackboard.Artefact, error) {
+	// Check if start artefact itself is the ancestor
+	if startArtefact.Header.Type == ancestorType {
+		return startArtefact, nil
+	}
+
+	visited := make(map[string]bool)
+	queue := []string{startArtefact.ID}
+
+	for len(queue) > 0 {
+		currentID := queue[0]
+		queue = queue[1:]
+
+		if visited[currentID] {
+			continue
+		}
+		visited[currentID] = true
+
+		// Optimisation: If currentID is startArtefact.ID, we already have it
+		var current *blackboard.Artefact
+		var err error
+
+		if currentID == startArtefact.ID {
+			current = startArtefact
+		} else {
+			current, err = e.bbClient.GetArtefact(ctx, currentID)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		// Check if this is the ancestor we're looking for
+		if current.Header.Type == ancestorType {
+			return current, nil
+		}
+
+		// Add parents to queue (traverse upward)
+		queue = append(queue, current.Header.ParentHashes...)
+
+		// Safety check: Don't traverse too deep/wide (prevent infinite loops in malformed graphs)
+		if len(visited) > 1000 {
+			return nil, fmt.Errorf("traversal limit exceeded looking for ancestor type %s", ancestorType)
+		}
+	}
+
+	return nil, nil // Not found
 }

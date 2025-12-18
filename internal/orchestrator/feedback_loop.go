@@ -111,6 +111,7 @@ func (e *Engine) terminateMaxIterations(ctx context.Context, claim *blackboard.C
 			ProducedByRole:  "orchestrator",
 			ParentHashes:    []string{artefact.ID},
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: failurePayload,
@@ -157,6 +158,7 @@ func (e *Engine) terminateMissingAgent(ctx context.Context, claim *blackboard.Cl
 			ProducedByRole:  "orchestrator",
 			ParentHashes:    []string{artefact.ID},
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: failurePayload,

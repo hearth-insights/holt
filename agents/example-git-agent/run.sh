@@ -11,7 +11,8 @@ input=$(cat)
 echo "Git agent received claim, processing..." >&2
 
 # Parse target artefact payload (filename to create)
-filename=$(echo "$input" | jq -r '.target_artefact.payload // empty')
+# Parse target artefact payload (filename to create) - handle V2 .payload.content
+filename=$(echo "$input" | jq -r '.target_artefact.payload.content // .target_artefact.payload // empty')
 
 # Parse claim ID
 claim_id=$(echo "$input" | jq -r '.id // empty')

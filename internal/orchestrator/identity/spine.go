@@ -73,7 +73,7 @@ func (sm *SpineManager) InitializeSpine(ctx context.Context) (string, error) {
 	if err == ErrNoManifest {
 		// First startup - create initial manifest
 		log.Printf("[SpineManager] No existing SystemManifest found - creating initial manifest")
-		return sm.createManifest(ctx, currentIdentity, currentIdentityHash, nil, 1)
+		return sm.createManifest(ctx, currentIdentity, currentIdentityHash, []string{}, 1)
 	}
 	if err != nil {
 		return "", fmt.Errorf("failed to query latest manifest: %w", err)
@@ -137,7 +137,8 @@ func (sm *SpineManager) createManifest(
 			ProducedByRole:  "orchestrator",
 			StructuralType:  blackboard.StructuralTypeSystemManifest,
 			Type:            "SystemConfig",
-			ClaimID:         "", // No claim for system artefacts
+			ClaimID:         "",   // No claim for system artefacts
+			Metadata:        "{}", // M5.1: Must be explicitly set to {} to match Redis default
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: string(payloadBytes),

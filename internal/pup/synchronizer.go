@@ -41,34 +41,51 @@ func NewSynchronizer(cfg *SynchronizeConfig, bbClient *blackboard.Client, agentR
 //  1. Check if target artefact is a potential trigger
 //  2. Find common ancestor of configured type
 //  3. Verify all dependencies are met (fan-in check)
-//  4. Acquire deduplication lock
+//  4. Acquire (or check) deduplication lock
 //  5. Return true to bid
-func (s *Synchronizer) shouldBidOnClaim(ctx context.Context, claim *blackboard.Claim) (bool, error) {
-	log.Printf("[Synchronizer] Evaluating claim %s for synchronization", claim.ID)
+//
+// Parameters:
+//   - ctx: Context
+//   - claim: The claim to evaluate
+//   - acquireLock: If true, attempts to acquire the lock. If false, just checks lock status.
+func (s *Synchronizer) shouldBidOnClaim(ctx context.Context, claim *blackboard.Claim, acquireLock bool) (Decision, error) {
+	log.Printf("[Synchronizer] Evaluating claim %s (acquireLock=%v)", claim.ID, acquireLock)
 
 	// Load target artefact
+	log.Printf("[Synchronizer] Loading target artefact %s...", claim.ArtefactID)
 	targetArtefact, err := s.bbClient.GetArtefact(ctx, claim.ArtefactID)
 	if err != nil {
-		return false, fmt.Errorf("failed to load target artefact: %w", err)
+		log.Printf("[Synchronizer] Failed to load target artefact: %v", err)
+		return DecisionIgnore, fmt.Errorf("failed to load target artefact: %w", err)
 	}
+	log.Printf("[Synchronizer] Loaded target artefact %s (Type: %s)", claim.ArtefactID, targetArtefact.Header.Type)
 
+	// M5.1: Synchronizers only bid on trigger artefacts (wait_for types), not ancestors
+	// The ancestor claim should be handled by other agents (if any)
 	// Step 1: Check if target artefact is a potential trigger
 	if !s.isPotentialTrigger(targetArtefact) {
-		log.Printf("[Synchronizer] Artefact %s (type=%s) is not a potential trigger, ignoring",
-			targetArtefact.ID, targetArtefact.Header.Type)
-		return false, nil
+		// Not a trigger type -> Ignore (includes ancestor type)
+		if targetArtefact.Header.Type == s.config.AncestorType {
+			log.Printf("[Synchronizer] Ignoring ancestor claim for %s (waiting for trigger types: %v)",
+				targetArtefact.ID, s.getTriggerTypes())
+		} else {
+			log.Printf("[Synchronizer] Artefact %s (type=%s) is not a potential trigger, ignoring",
+				targetArtefact.ID, targetArtefact.Header.Type)
+		}
+		return DecisionIgnore, nil
 	}
 
+	// This is a trigger type -> find its ancestor
 	// Step 2: Find common ancestor
 	ancestor, err := s.findCommonAncestor(ctx, targetArtefact)
 	if err != nil {
 		log.Printf("[Synchronizer] Failed to find ancestor: %v", err)
-		return false, nil // Not an error, just not ready
+		return DecisionIgnore, nil // Error finding ancestor -> Ignore (transient error)
 	}
 	if ancestor == nil {
 		log.Printf("[Synchronizer] No ancestor of type '%s' found for artefact %s",
 			s.config.AncestorType, targetArtefact.ID)
-		return false, nil
+		return DecisionIgnore, nil // Trigger valid but no ancestor -> Ignore
 	}
 
 	log.Printf("[Synchronizer] Found ancestor %s (type=%s)", ancestor.ID, ancestor.Header.Type)
@@ -76,28 +93,47 @@ func (s *Synchronizer) shouldBidOnClaim(ctx context.Context, claim *blackboard.C
 	// Step 3: Verify all dependencies (fan-in check)
 	allReady, err := s.checkAllDependenciesMet(ctx, ancestor)
 	if err != nil {
-		return false, fmt.Errorf("failed to check dependencies: %w", err)
+		return DecisionIgnore, fmt.Errorf("failed to check dependencies: %w", err)
 	}
 	if !allReady {
 		log.Printf("[Synchronizer] Not all dependencies met for ancestor %s", ancestor.ID)
-		return false, nil
+		return DecisionIgnore, nil // Not ready -> Ignore (will re-evaluate on next artefact event)
 	}
 
 	log.Printf("[Synchronizer] All dependencies met for ancestor %s", ancestor.ID)
 
-	// Step 4: Acquire deduplication lock
-	lockAcquired, err := s.bbClient.AcquireSyncLock(ctx, ancestor.ID, s.agentRole)
-	if err != nil {
-		return false, fmt.Errorf("failed to acquire sync lock: %w", err)
-	}
-	if !lockAcquired {
-		log.Printf("[Synchronizer] Lock already held for ancestor %s, skipping bid (deduplication)", ancestor.ID)
-		return false, nil
+	// Step 4: Handle deduplication lock
+	if acquireLock {
+		// Acquire lock destructively
+		lockAcquired, err := s.bbClient.AcquireSyncLock(ctx, ancestor.ID, s.agentRole)
+		if err != nil {
+			return DecisionIgnore, fmt.Errorf("failed to acquire sync lock: %w", err)
+		}
+		if !lockAcquired {
+			log.Printf("[Synchronizer] Lock already held for ancestor %s, skipping bid (deduplication)", ancestor.ID)
+			return DecisionIgnore, nil
+		}
+		log.Printf("[Synchronizer] Lock acquired for ancestor %s, ready to bid", ancestor.ID)
+	} else {
+		// Just check if lock is held (peek)
+		isLocked, err := s.bbClient.CheckSyncLock(ctx, ancestor.ID, s.agentRole)
+		if err != nil {
+			return DecisionIgnore, fmt.Errorf("failed to check sync lock: %w", err)
+		}
+		if isLocked {
+			log.Printf("[Synchronizer] Lock already held for ancestor %s, ignoring trigger", ancestor.ID)
+			return DecisionIgnore, nil
+		}
+		log.Printf("[Synchronizer] Lock available for ancestor %s, trigger valid", ancestor.ID)
 	}
 
-	log.Printf("[Synchronizer] Lock acquired for ancestor %s, ready to bid", ancestor.ID)
-	return true, nil
+	return DecisionBid, nil // Ready -> Bid
 }
+
+// EvaluateArtefact REMOVED - M5.1 simplified to claim-only bidding.
+// Synchronizers now evaluate all claims via shouldBidOnClaim() when claim events arrive.
+// This eliminates race conditions and maintains clean orchestrator→agent boundaries.
+// The Orchestrator is responsible for creating claims when artefacts appear.
 
 // isPotentialTrigger checks if target artefact type is in wait_for list.
 // M5.1: Early filter to avoid traversal for irrelevant artefacts.
@@ -108,6 +144,16 @@ func (s *Synchronizer) isPotentialTrigger(artefact *blackboard.Artefact) bool {
 		}
 	}
 	return false
+}
+
+// getTriggerTypes returns a list of trigger types from wait_for conditions.
+// Used for logging purposes.
+func (s *Synchronizer) getTriggerTypes() []string {
+	types := make([]string, len(s.config.WaitFor))
+	for i, condition := range s.config.WaitFor {
+		types[i] = condition.Type
+	}
+	return types
 }
 
 // findCommonAncestor traverses upward to find first ancestor matching ancestor_type.
@@ -161,17 +207,20 @@ func (s *Synchronizer) checkAllDependenciesMet(ctx context.Context, ancestor *bl
 		return false, fmt.Errorf("failed to get descendants: %w", err)
 	}
 
-	log.Printf("[Synchronizer] Found %d descendants of ancestor %s", len(descendants), ancestor.ID)
+	log.Printf("[Synchronizer] checkAllDependenciesMet: Ancestor %s has %d descendants", ancestor.ID, len(descendants))
 
 	// Group descendants by type
 	descendantsByType := make(map[string][]*blackboard.Artefact)
 	for _, desc := range descendants {
+		log.Printf("[Synchronizer] - Descendant: %s (type=%s)", desc.ID, desc.Header.Type)
 		descendantsByType[desc.Header.Type] = append(descendantsByType[desc.Header.Type], desc)
 	}
 
 	// Check each wait condition
 	for _, condition := range s.config.WaitFor {
 		artefactsOfType := descendantsByType[condition.Type]
+		log.Printf("[Synchronizer] Checking condition: Type=%s, CountFromMetadata=%s. Found %d candidates.",
+			condition.Type, condition.CountFromMetadata, len(artefactsOfType))
 
 		if condition.CountFromMetadata != "" {
 			// Producer-Declared pattern: Read expected count from metadata

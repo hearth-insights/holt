@@ -47,11 +47,8 @@ func ComputeArtefactHash(a *Artefact) (string, error) {
 		return "", fmt.Errorf("canonicalization failed: %w", err)
 	}
 
-	// fmt.Printf("DEBUG CANONICAL JSON (%s): %s\n", a.ID, string(canonicalBytes))
-
-	// Step 3: Hash with SHA-256
+	// 4. Compute SHA-256 hash of the canonical JSON
 	hash := sha256.Sum256(canonicalBytes)
-
 	// Step 4: Return lowercase hex-encoded hash (64 characters)
 	return hex.EncodeToString(hash[:]), nil
 }

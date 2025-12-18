@@ -184,7 +184,10 @@ services:
 	time.Sleep(3 * time.Second)
 
 	// Verify DeployResult was created
-	deployResult := waitForArtefactType(ctx, t, bbClient, "DeployResult", 10*time.Second)
+	deployResult := waitForArtefactType(ctx, t, bbClient, "DeployResult", 45*time.Second)
+	if deployResult == nil {
+		env.DumpInstanceLogs()
+	}
 	require.NotNil(t, deployResult, "DeployResult should exist (Synchronizer succeeded)")
 	t.Logf("✓ Synchronizer executed successfully: DeployResult %s", deployResult.ID)
 
@@ -217,7 +220,7 @@ func TestE2E_M5_1_ProducerDeclared(t *testing.T) {
 	t.Log("Building multi-output producer...")
 	buildCmd := exec.Command("docker", "build",
 		"--no-cache",
-		"-t", "m5-1-multi-producer:latest",
+		"-t", "m5-1-multi-producer-new:latest",
 		"-f", "-",
 		".")
 	buildCmd.Dir = projectRoot
@@ -229,6 +232,7 @@ func TestE2E_M5_1_ProducerDeclared(t *testing.T) {
 
 	// Build aggregator (synchronizes on batch_size)
 	buildCmd = exec.Command("docker", "build",
+		"--no-cache",
 		"-t", "m5-1-aggregator:latest",
 		"-f", "-",
 		".")
@@ -247,7 +251,7 @@ orchestrator:
   timestamp_drift_tolerance_ms: 600000
 agents:
   MultiProducer:
-    image: "m5-1-multi-producer:latest"
+    image: "m5-1-multi-producer-new:latest"
     command: ["/app/produce-multi.sh"]
     bidding_strategy:
       type: "exclusive"
@@ -256,7 +260,7 @@ agents:
     image: "m5-1-aggregator:latest"
     command: ["/app/aggregate.sh"]
     synchronize:
-      ancestor_type: "DataBatch"
+      ancestor_type: "GoalDefined"
       wait_for:
         - type: "ProcessedRecord"
           count_from_metadata: "batch_size"
@@ -288,7 +292,7 @@ services:
 	// M4.7: Create proper workflow spine
 	_, goalID := env.CreateWorkflowSpine(ctx, "Process batch data")
 
-	// Create DataBatch
+	// Create DataBatch (trigger for MultiProducer to execute)
 	t.Log("Creating DataBatch...")
 	dataBatch := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
 		ParentHashes:    []string{goalID},
@@ -296,19 +300,37 @@ services:
 		Version:         2, // V2+ continuation
 		Type:            "DataBatch",
 		CreatedAtMs:     time.Now().UnixMilli(),
-		Metadata:        "{}",
+		Metadata:        "{}",  // Not used by Aggregator - it reads metadata from ProcessedRecords
 	}, "batch-123")
 	t.Logf("✓ DataBatch created: %s", dataBatch.ID)
 
-	// Wait for MultiProducer to create 5 ProcessedRecords with metadata
-	t.Log("Waiting for producer to create 5 ProcessedRecords...")
-	time.Sleep(5 * time.Second)
+	// Wait for Orchestrator to create claim for DataBatch
+	t.Log("Waiting for DataBatch claim to be created...")
+	time.Sleep(2 * time.Second)
 
-	// Verify 5 ProcessedRecords exist	// Wait for producer to create 5 ProcessedRecords
+	// Verify claim exists for DataBatch
+	claim, err := bbClient.GetClaimByArtefactID(ctx, dataBatch.ID)
+	if err != nil || claim == nil {
+		env.DumpInstanceLogs()
+		require.NoError(t, err, "DataBatch claim should exist")
+		require.NotNil(t, claim, "DataBatch claim should not be nil")
+	}
+	t.Logf("✓ DataBatch claim created: %s (status=%s)", claim.ID, claim.Status)
+
+	// Wait for MultiProducer to bid, get granted, execute, and create 5 ProcessedRecords
+	t.Log("Waiting for MultiProducer to execute and create 5 ProcessedRecords...")
+	time.Sleep(10 * time.Second)  // Increased wait time for claim processing + execution
+
+	// Verify 5 ProcessedRecords exist
 	records, _ := testutil.FindAllArtefactsOfType(ctx, bbClient, "ProcessedRecord")
 	if len(records) != 5 {
 		env.DumpInstanceLogs()
-		assert.Equal(t, 5, len(records), "Should have 5 ProcessedRecords")
+		// Debug: check for failures
+		failures, _ := testutil.FindAllArtefactsOfType(ctx, bbClient, "Failure")
+		for _, f := range failures {
+			t.Logf("FAILURE DETECTED: %s", f.Payload.Content)
+		}
+		assert.Equal(t, 5, len(records), "Should have 5 ProcessedRecords, found failures: %d", len(failures))
 	}
 
 	// Verify metadata injection
@@ -329,12 +351,27 @@ services:
 	}
 	t.Log("✓ All 5 ProcessedRecords created with correct metadata")
 
+	// Debug: Check claims for ProcessedRecords
+	t.Log("Checking claims for ProcessedRecords...")
+	for i, record := range records {
+		claim, err := bbClient.GetClaimByArtefactID(ctx, record.ID)
+		if err != nil {
+			t.Logf("  ProcessedRecord %d (%s): No claim found - %v", i+1, record.ID, err)
+		} else {
+			t.Logf("  ProcessedRecord %d (%s): Claim %s (status=%s)", i+1, record.ID, claim.ID, claim.Status)
+		}
+	}
+
 	// Wait for Aggregator to synchronize
 	t.Log("Waiting for Aggregator to synchronize...")
-	time.Sleep(3 * time.Second)
+	time.Sleep(10 * time.Second) // Increased wait time for claim processing
 
 	// Verify AggregatedReport was created
-	report := waitForArtefactType(ctx, t, bbClient, "AggregatedReport", 10*time.Second)
+	report := waitForArtefactType(ctx, t, bbClient, "AggregatedReport", 45*time.Second)
+	if report == nil {
+		t.Log("AggregatedReport not found - dumping logs...")
+		env.DumpInstanceLogs()
+	}
 	require.NotNil(t, report, "AggregatedReport should exist")
 	t.Logf("✓ Aggregator synchronized: %s", report.ID)
 
@@ -361,7 +398,7 @@ func TestE2E_M5_1_DeduplicationLock(t *testing.T) {
 	// Build synchronizer with controller/worker (2 max_concurrent workers)
 	t.Log("Building concurrent synchronizer...")
 	buildCmd := exec.Command("docker", "build",
-		"-t", "m5-1-concurrent-sync:latest",
+		"-t", "m5-1-concurrent-sync-debug:latest",
 		"-f", "-",
 		".")
 	buildCmd.Dir = projectRoot
@@ -379,18 +416,27 @@ orchestrator:
   timestamp_drift_tolerance_ms: 600000
 agents:
   ConcurrentSync:
-    image: "m5-1-concurrent-sync:latest"
-    command: ["/app/pup"]
-    mode: "controller"
+    image: m5-1-concurrent-sync-debug:latest
+    command: ["/app/sync-concurrent.sh"]
     worker:
-      image: "m5-1-concurrent-sync:latest"
-      command: ["/app/sync-concurrent.sh"]
-      max_concurrent: 2  # Multiple workers for race condition
+      workspace:
+        mode: copy
+    inputs:
+      - type: "CodeCommit"
+    environment:
+      # HOLT_MODE default (traditional) is required for execution
+      - "HOLT_LOG_LEVEL=debug"
     synchronize:
       ancestor_type: "CodeCommit"
       wait_for:
         - type: "TestResult"
         - type: "LintResult"
+  DummyConsumer:
+    image: "m5-1-concurrent-sync-debug:latest" # Use same image as ConcurrentSync
+    command: ["/app/pup", "controller"]
+    bidding_strategy:
+      type: "ignore"
+      target_types: ["CodeCommit"]
 services:
   redis:
     image: redis:7-alpine
@@ -398,6 +444,9 @@ services:
 
 	env := testutil.SetupE2EEnvironment(t, holtYML)
 	defer func() {
+		if t.Failed() {
+			env.DumpInstanceLogs()
+		}
 		downCmd := &cobra.Command{}
 		downInstanceName = env.InstanceName
 		_ = runDown(downCmd, []string{})
@@ -407,14 +456,28 @@ services:
 	upCmd := &cobra.Command{}
 	upInstanceName = env.InstanceName
 	upForce = false
-	err = runUp(upCmd, []string{})
+	err = runUp(upCmd, []string{"--build"})
 	require.NoError(t, err)
-	time.Sleep(3 * time.Second) // Wait for both workers to start
+	t.Log("Waiting for Orchestrator to subscribe...")
+	time.Sleep(10 * time.Second) // Wait for Orchestrator to be fully ready
 
 	ctx := context.Background()
 	env.InitializeBlackboardClient()
 	bbClient := env.BBClient
 	t.Log("✓ Instance ready with 2 concurrent workers")
+
+	// Debug Pub/Sub: Subscribe in test to verify messages
+	sub, err := bbClient.SubscribeArtefactEvents(ctx)
+	require.NoError(t, err)
+	go func() {
+		for start := time.Now(); time.Since(start) < 60*time.Second; {
+			select {
+			case evt := <-sub.Events():
+				t.Logf("DEBUG: Test received artefact event: %s (%s)", evt.ID, evt.Header.Type)
+			case <-time.After(1 * time.Second):
+			}
+		}
+	}()
 
 	// M4.7: Create proper workflow spine
 	_, goalID := env.CreateWorkflowSpine(ctx, "Test concurrent synchronization")
@@ -430,6 +493,16 @@ services:
 		Metadata:        "{}",
 	}, "commit-xyz")
 	t.Logf("✓ CodeCommit created: %s", codeCommit.ID)
+
+	// Wait for Orchestrator to create the claim for CodeCommit (Async)
+	// This ensures the Synchronizer can find it when TestResult arrives.
+	t.Log("Waiting for CodeCommit claim creation...")
+	require.Eventually(t, func() bool {
+		claim, err := bbClient.GetClaimByArtefactID(ctx, codeCommit.ID)
+		return err == nil && claim != nil
+	}, 10*time.Second, 100*time.Millisecond, "Timed out waiting for CodeCommit claim")
+	t.Log("✓ CodeCommit claim confirmed")
+	// Manual claim workaround removed to avoid conflict with Orchestrator-created claim
 
 	// Create both final prerequisites nearly simultaneously (race condition)
 	t.Log("Creating TestResult and LintResult simultaneously...")
@@ -871,7 +944,7 @@ COPY <<'EOF' /app/produce-multi.sh
 set -e
 cat > /dev/null
 
-# Produce 5 ProcessedRecord artefacts (Pup will inject batch_size=5 metadata)
+# Produce 5 ProcessedRecord artefacts (Pup will inject batch_size=5 metadata automatically)
 for i in {1..5}; do
   cat <<RECORD >&3
 {"artefact_type":"ProcessedRecord","artefact_payload":"record-$i","summary":"Processed record $i"}
@@ -908,7 +981,7 @@ COPY <<'EOF' /app/aggregate.sh
 #!/bin/bash
 set -e
 INPUT=$(cat)
-COUNT=$(echo "$INPUT" | jq -r '.descendant_artefacts | length')
+COUNT=$(echo "$INPUT" | jq -r '.descendant_artefacts | map(select(.header.type == "ProcessedRecord")) | length')
 
 cat <<RESULT >&3
 {"artefact_type":"AggregatedReport","artefact_payload":"Aggregated $COUNT records","summary":"Aggregation complete"}

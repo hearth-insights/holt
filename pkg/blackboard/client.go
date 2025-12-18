@@ -238,6 +238,7 @@ func (c *Client) CreateClaim(ctx context.Context, claim *Claim) error {
 
 	// Write to Redis
 	key := ClaimKey(c.instanceName, claim.ID)
+	log.Printf("[Blackboard] DEBUG: CreateClaim writing to key: %s", key)
 	if err := c.rdb.HSet(ctx, key, hash).Err(); err != nil {
 		return fmt.Errorf("failed to write claim to Redis: %w", err)
 	}
@@ -366,6 +367,7 @@ func (c *Client) SetBid(ctx context.Context, claimID string, agentName string, b
 
 	// Write bid to Redis
 	key := ClaimBidsKey(c.instanceName, claimID)
+	log.Printf("[Blackboard] SetBid writing to key: '%s' agent: '%s'", key, agentName)
 	if err := c.rdb.HSet(ctx, key, agentName, string(bidJSON)).Err(); err != nil {
 		return fmt.Errorf("failed to write bid to Redis: %w", err)
 	}
@@ -389,6 +391,10 @@ func (c *Client) SetBid(ctx context.Context, claimID string, agentName string, b
 // Expects JSON-encoded bids in Redis. Fails if data is not valid JSON.
 func (c *Client) GetAllBids(ctx context.Context, claimID string) (map[string]Bid, error) {
 	key := ClaimBidsKey(c.instanceName, claimID)
+	// log.Printf("[Blackboard] GetAllBids reading from key: '%s'", key) // Too verbose for poll loop? Maybe once?
+	// I'll log it if empty? No, Orchestrator polls frequently.
+	// I'll log it anyway, test is short.
+	log.Printf("[Blackboard] GetAllBids reading from key: '%s'", key)
 
 	// Read all bids from Redis
 	rawBids, err := c.rdb.HGetAll(ctx, key).Result()
@@ -594,6 +600,8 @@ func (c *Client) SubscribeArtefactEvents(ctx context.Context) (*Subscription, er
 		defer close(errorsChan)
 		defer pubsub.Close()
 
+		log.Printf("[Blackboard] Subscribing to channel: '%s'", channel)
+
 		// Receive channel from pubsub
 		ch := pubsub.Channel()
 
@@ -605,24 +613,22 @@ func (c *Client) SubscribeArtefactEvents(ctx context.Context) (*Subscription, er
 				if !ok {
 					return
 				}
-
-				// Unmarshal artefact from JSON
+				// log.Printf("[Blackboard] Raw message received on %s: %s", msg.Channel, msg.Payload) // Verbose!
 				var artefact Artefact
 				if err := json.Unmarshal([]byte(msg.Payload), &artefact); err != nil {
-					// Send error on error channel, skip message
+					log.Printf("[Blackboard] Failed to unmarshal artefact event: %v (payload: %s)", err, msg.Payload)
 					select {
-					case errorsChan <- fmt.Errorf("failed to unmarshal artefact event: %w", err):
-					case <-subCtx.Done():
-						return
+					case errorsChan <- fmt.Errorf("failed to unmarshal event: %w", err):
+					default:
+						// Drop error if channel full
 					}
 					continue
 				}
-
-				// Send artefact on events channel
+				log.Printf("[Blackboard] Dispatching event for artefact %s", artefact.ID)
 				select {
 				case eventsChan <- &artefact:
-				case <-subCtx.Done():
-					return
+				default:
+					log.Printf("[Blackboard] Warning: Event channel full, dropping event for %s", artefact.ID)
 				}
 			}
 		}
@@ -1175,10 +1181,12 @@ func (c *Client) GetDescendants(ctx context.Context, ancestorID string, maxDepth
 
 		// Get children from reverse index
 		childrenKey := ChildrenIndexKey(c.instanceName, nodeID)
+		log.Printf("[Blackboard] GetDescendants querying children key: '%s'", childrenKey)
 		childIDs, err := c.rdb.SMembers(ctx, childrenKey).Result()
 		if err != nil {
 			return fmt.Errorf("failed to get children of %s: %w", nodeID, err)
 		}
+		log.Printf("[Blackboard] GetDescendants found %d children for %s", len(childIDs), nodeID)
 
 		for _, childID := range childIDs {
 			// Skip if already visited (cycle detection)
@@ -1248,6 +1256,27 @@ func (c *Client) AcquireSyncLock(ctx context.Context, ancestorID, agentRole stri
 	}
 
 	return result, nil
+}
+
+// CheckSyncLock checks if a synchronization deduplication lock is currently held.
+// M5.1: Non-destructive check used by triggers to peek at lock status.
+func (c *Client) CheckSyncLock(ctx context.Context, ancestorID, agentRole string) (bool, error) {
+	// Hash agent role for lock key
+	hash := sha256.Sum256([]byte(agentRole))
+	roleHash := hex.EncodeToString(hash[:])[:8]
+
+	lockKey := SyncDedupLockKey(c.instanceName, ancestorID, roleHash)
+
+	// GET key. If exists -> locked.
+	val, err := c.rdb.Get(ctx, lockKey).Result()
+	if err == redis.Nil {
+		return false, nil // Not locked
+	}
+	if err != nil {
+		return false, fmt.Errorf("failed to check sync lock: %w", err)
+	}
+
+	return val == "1", nil
 }
 
 // IsHashMismatchError checks if an error is a HashMismatchError and optionally extracts it.

@@ -14,6 +14,8 @@ import (
 	"github.com/hearth-insights/holt/pkg/blackboard"
 )
 
+var ErrBidDeferred = fmt.Errorf("bid deferred: conditions not met")
+
 // Engine represents the core execution logic of the agent pup.
 // It manages two concurrent goroutines:
 //   - Claim Watcher: Monitors for new claims and evaluates bidding opportunities (M2.2+)
@@ -126,9 +128,13 @@ func (e *Engine) claimWatcher(ctx context.Context, workQueue chan *blackboard.Cl
 	}
 	defer grantSub.Close()
 
+	// M5.1: Synchronizers use claim-only bidding (simplified design)
+	// The Orchestrator creates claims for all artefacts, so synchronizers
+	// can evaluate via claim events without needing artefact subscriptions.
+	// This eliminates race conditions and maintains clean separation of concerns.
 	log.Printf("[INFO] Claim Watcher subscribed to claim_events and %s", agentChannel)
 
-	// Dual-subscription select loop
+	// Main event loop - claim-only subscription
 	for {
 		select {
 		case <-ctx.Done():
@@ -202,6 +208,10 @@ func (e *Engine) handleClaimEvent(ctx context.Context, claim *blackboard.Claim, 
 
 	// Determine bid type dynamically or from static config
 	bidType, err := e.determineBidType(ctx, claim, targetArtefact)
+	if err == ErrBidDeferred {
+		log.Printf("[INFO] Deferring bid for claim %s (waiting for synchronization)", claim.ID)
+		return
+	}
 	if err != nil {
 		log.Printf("[ERROR] Failed to determine bid type for claim %s: %v", claim.ID, err)
 		// M5.1: For synchronizer errors, create failure artefact (fatal configuration error)
@@ -213,6 +223,7 @@ func (e *Engine) handleClaimEvent(ctx context.Context, claim *blackboard.Claim, 
 		bidType = blackboard.BidTypeIgnore
 	}
 
+	log.Printf("[DEBUG] determineBidType returned: %s", bidType)
 	log.Printf("[DEBUG] Submitting bid for claim_id=%s: agent=%s type=%s", claim.ID, e.config.AgentName, bidType)
 
 	err = e.bbClient.SetBid(ctx, claim.ID, e.config.AgentName, bidType)
@@ -239,19 +250,28 @@ func (e *Engine) handleClaimEvent(ctx context.Context, claim *blackboard.Claim, 
 // 3. M2.2: Fall back to static bidding_strategy from config
 func (e *Engine) determineBidType(ctx context.Context, claim *blackboard.Claim, targetArtefact *blackboard.Artefact) (blackboard.BidType, error) {
 	// M5.1: Check synchronizer first (highest priority)
+	// M5.1: Check synchronizer first (highest priority)
+	// M5.1: If synchronizer is active, evaluate synchronization conditions
 	if e.synchronizer != nil {
-		shouldBid, err := e.synchronizer.shouldBidOnClaim(ctx, claim)
+		// M5.1: Synchronizers evaluate claims for trigger types (wait_for), not ancestor type
+		decision, err := e.synchronizer.shouldBidOnClaim(ctx, claim, true)
 		if err != nil {
 			log.Printf("[ERROR] Synchronizer evaluation failed for claim %s: %v", claim.ID, err)
 			// Don't fall through - synchronizer errors should not silently ignore
 			return "", fmt.Errorf("synchronizer evaluation failed: %w", err)
 		}
-		if shouldBid {
+		switch decision {
+		case DecisionBid:
 			log.Printf("[Synchronizer] Conditions met, bidding 'exclusive' on claim %s", claim.ID)
 			return blackboard.BidTypeExclusive, nil
+		case DecisionIgnore:
+			// Ignore this claim (not a trigger, conditions not met, or error occurred)
+			return blackboard.BidTypeIgnore, nil
+		default:
+			// Should never happen - all Decision values handled above
+			log.Printf("[ERROR] Unexpected synchronizer decision: %v", decision)
+			return blackboard.BidTypeIgnore, nil
 		}
-		log.Printf("[Synchronizer] Conditions not met, ignoring claim %s", claim.ID)
-		return blackboard.BidTypeIgnore, nil
 	}
 
 	// M3.6: Check bid script second
