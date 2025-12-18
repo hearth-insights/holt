@@ -108,9 +108,6 @@ services:
 	require.NoError(t, err)
 	t.Log("✓ Instance started")
 
-	// Wait for orchestrator to be ready
-	time.Sleep(1 * time.Second)
-
 	// Connect to blackboard
 	ctx := context.Background()
 	env.InitializeBlackboardClient()
@@ -119,6 +116,11 @@ services:
 
 	// M4.7: Create proper workflow spine (Manifest → Goal)
 	_, goalID := env.CreateWorkflowSpine(ctx, "Build and test the application")
+
+	// Wait for GoalDefined claim to be created (ensures orchestrator is ready)
+	require.True(t, waitForClaimCreated(ctx, bbClient, goalID, 10*time.Second),
+		"Orchestrator should create claim for GoalDefined")
+	t.Log("✓ Orchestrator is ready (GoalDefined claim exists)")
 
 	// Step 1: Create CodeCommit ancestor (as continuation of goal)
 	t.Log("Step 1: Creating CodeCommit ancestor...")
@@ -132,8 +134,10 @@ services:
 	}, "commit-abc123")
 	t.Logf("✓ CodeCommit created: %s", codeCommit.ID)
 
-	// Wait for Producer to claim (should bid on CodeCommit)
-	time.Sleep(1 * time.Second)
+	// Wait for CodeCommit claim to be created and completed (Producer should process it)
+	require.True(t, waitForClaimCreated(ctx, bbClient, codeCommit.ID, 5*time.Second),
+		"Orchestrator should create claim for CodeCommit")
+	t.Log("✓ CodeCommit claim created")
 
 	// Step 2: Create first 2 prerequisites (TestResult, LintResult)
 	t.Log("Step 2: Creating partial prerequisites...")
@@ -158,11 +162,16 @@ services:
 	}, "lint-clean")
 	t.Logf("✓ LintResult created: %s", lintResult.ID)
 
-	// Wait and verify Synchronizer does NOT bid yet
-	time.Sleep(500 * time.Millisecond)
+	// Wait for claims to be created for prerequisites
+	require.True(t, waitForClaimCreated(ctx, bbClient, testResult.ID, 5*time.Second),
+		"TestResult claim should be created")
+	require.True(t, waitForClaimCreated(ctx, bbClient, lintResult.ID, 5*time.Second),
+		"LintResult claim should be created")
 
-	// Check no DeployResult exists yet (Synchronizer hasn't run)
+	// Verify Synchronizer has NOT created DeployResult yet (SecurityScan missing)
+	// Give it a brief moment to ensure it's not racing ahead
 	t.Log("Verifying Synchronizer has NOT bid yet (SecurityScan missing)...")
+	time.Sleep(1 * time.Second) // Brief stabilization period
 	exists := artefactTypeExists(ctx, bbClient, "DeployResult")
 	require.False(t, exists, "Synchronizer should not have run yet (SecurityScan missing)")
 	t.Log("✓ Synchronizer correctly waiting")
@@ -180,12 +189,15 @@ services:
 	}, "no-vulnerabilities")
 	t.Logf("✓ SecurityScan created: %s", securityScan.ID)
 
-	// Step 4: Wait for Synchronizer to bid and execute
-	t.Log("Step 4: Waiting for Synchronizer to bid and execute...")
-	time.Sleep(1 * time.Second)
+	// Wait for SecurityScan claim to be created
+	require.True(t, waitForClaimCreated(ctx, bbClient, securityScan.ID, 5*time.Second),
+		"SecurityScan claim should be created")
+	t.Log("✓ All prerequisite claims created")
 
-	// Verify DeployResult was created
-	deployResult := waitForArtefactType(ctx, t, bbClient, "DeployResult", 45*time.Second)
+	// Step 4: Wait for Synchronizer to bid, win, and execute
+	t.Log("Step 4: Waiting for Synchronizer to bid and execute...")
+	// Synchronizer should now detect all conditions met and bid
+	deployResult := waitForArtefactType(ctx, t, bbClient, "DeployResult", 30*time.Second)
 	if deployResult == nil {
 		env.DumpInstanceLogs()
 	}
@@ -283,15 +295,18 @@ services:
 	upForce = false
 	err = runUp(upCmd, []string{})
 	require.NoError(t, err)
-	time.Sleep(500 * time.Millisecond)
 
 	ctx := context.Background()
 	env.InitializeBlackboardClient()
 	bbClient := env.BBClient
-	t.Log("✓ Instance ready")
 
 	// M4.7: Create proper workflow spine
 	_, goalID := env.CreateWorkflowSpine(ctx, "Process batch data")
+
+	// Wait for orchestrator to be ready
+	require.True(t, waitForClaimCreated(ctx, bbClient, goalID, 10*time.Second),
+		"Orchestrator should create claim for GoalDefined")
+	t.Log("✓ Orchestrator ready")
 
 	// Create DataBatch (trigger for MultiProducer to execute)
 	t.Log("Creating DataBatch...")
@@ -305,34 +320,31 @@ services:
 	}, "batch-123")
 	t.Logf("✓ DataBatch created: %s", dataBatch.ID)
 
-	// Wait for Orchestrator to create claim for DataBatch
-	t.Log("Waiting for DataBatch claim to be created...")
-	time.Sleep(500 * time.Millisecond)
+	// Wait for DataBatch claim to be created
+	require.True(t, waitForClaimCreated(ctx, bbClient, dataBatch.ID, 5*time.Second),
+		"DataBatch claim should be created")
+	t.Log("✓ DataBatch claim created")
 
-	// Verify claim exists for DataBatch
-	claim, err := bbClient.GetClaimByArtefactID(ctx, dataBatch.ID)
-	if err != nil || claim == nil {
-		env.DumpInstanceLogs()
-		require.NoError(t, err, "DataBatch claim should exist")
-		require.NotNil(t, claim, "DataBatch claim should not be nil")
-	}
-	t.Logf("✓ DataBatch claim created: %s (status=%s)", claim.ID, claim.Status)
+	// Wait for DataBatch claim to complete (MultiProducer executes)
+	require.True(t, waitForClaimStatus(ctx, bbClient, dataBatch.ID, blackboard.ClaimStatusComplete, 15*time.Second),
+		"DataBatch claim should be completed by MultiProducer")
+	t.Log("✓ MultiProducer executed")
 
-	// Wait for MultiProducer to bid, get granted, execute, and create 5 ProcessedRecords
-	t.Log("Waiting for MultiProducer to execute and create 5 ProcessedRecords...")
-	time.Sleep(2 * time.Second)  // Increased wait time for claim processing + execution
+	// Wait for 5 ProcessedRecords to be created
+	t.Log("Waiting for 5 ProcessedRecords to be created...")
+	require.True(t, waitForArtefactCount(ctx, bbClient, "ProcessedRecord", 5, 10*time.Second),
+		"Should have 5 ProcessedRecords")
 
-	// Verify 5 ProcessedRecords exist
+	// Get the records
 	records, _ := testutil.FindAllArtefactsOfType(ctx, bbClient, "ProcessedRecord")
 	if len(records) != 5 {
 		env.DumpInstanceLogs()
-		// Debug: check for failures
 		failures, _ := testutil.FindAllArtefactsOfType(ctx, bbClient, "Failure")
 		for _, f := range failures {
 			t.Logf("FAILURE DETECTED: %s", f.Payload.Content)
 		}
-		assert.Equal(t, 5, len(records), "Should have 5 ProcessedRecords, found failures: %d", len(failures))
 	}
+	require.Equal(t, 5, len(records), "Should have exactly 5 ProcessedRecords")
 
 	// Verify metadata injection
 	for i, record := range records {
@@ -352,23 +364,17 @@ services:
 	}
 	t.Log("✓ All 5 ProcessedRecords created with correct metadata")
 
-	// Debug: Check claims for ProcessedRecords
-	t.Log("Checking claims for ProcessedRecords...")
+	// Wait for all ProcessedRecord claims to be created (Aggregator waits for claims)
+	t.Log("Waiting for all ProcessedRecord claims to be created...")
 	for i, record := range records {
-		claim, err := bbClient.GetClaimByArtefactID(ctx, record.ID)
-		if err != nil {
-			t.Logf("  ProcessedRecord %d (%s): No claim found - %v", i+1, record.ID, err)
-		} else {
-			t.Logf("  ProcessedRecord %d (%s): Claim %s (status=%s)", i+1, record.ID, claim.ID, claim.Status)
-		}
+		require.True(t, waitForClaimCreated(ctx, bbClient, record.ID, 5*time.Second),
+			"ProcessedRecord %d claim should be created", i+1)
 	}
+	t.Log("✓ All ProcessedRecord claims created")
 
-	// Wait for Aggregator to synchronize
+	// Wait for Aggregator to synchronize and create report
 	t.Log("Waiting for Aggregator to synchronize...")
-	time.Sleep(2 * time.Second) // Increased wait time for claim processing
-
-	// Verify AggregatedReport was created
-	report := waitForArtefactType(ctx, t, bbClient, "AggregatedReport", 45*time.Second)
+	report := waitForArtefactType(ctx, t, bbClient, "AggregatedReport", 30*time.Second)
 	if report == nil {
 		t.Log("AggregatedReport not found - dumping logs...")
 		env.DumpInstanceLogs()
@@ -459,13 +465,10 @@ services:
 	upForce = false
 	err = runUp(upCmd, []string{"--build"})
 	require.NoError(t, err)
-	t.Log("Waiting for Orchestrator to subscribe...")
-	time.Sleep(2 * time.Second) // Wait for Orchestrator to be fully ready
 
 	ctx := context.Background()
 	env.InitializeBlackboardClient()
 	bbClient := env.BBClient
-	t.Log("✓ Instance ready with 2 concurrent workers")
 
 	// Debug Pub/Sub: Subscribe in test to verify messages
 	sub, err := bbClient.SubscribeArtefactEvents(ctx)
@@ -491,6 +494,11 @@ services:
 	// M4.7: Create proper workflow spine
 	_, goalID := env.CreateWorkflowSpine(ctx, "Test concurrent synchronization")
 
+	// Wait for orchestrator to be ready
+	require.True(t, waitForClaimCreated(ctx, bbClient, goalID, 10*time.Second),
+		"Orchestrator should create claim for GoalDefined")
+	t.Log("✓ Orchestrator ready with 2 concurrent workers")
+
 	// Create ancestor
 	t.Log("Creating CodeCommit...")
 	codeCommit := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
@@ -503,15 +511,10 @@ services:
 	}, "commit-xyz")
 	t.Logf("✓ CodeCommit created: %s", codeCommit.ID)
 
-	// Wait for Orchestrator to create the claim for CodeCommit (Async)
-	// This ensures the Synchronizer can find it when TestResult arrives.
-	t.Log("Waiting for CodeCommit claim creation...")
-	require.Eventually(t, func() bool {
-		claim, err := bbClient.GetClaimByArtefactID(ctx, codeCommit.ID)
-		return err == nil && claim != nil
-	}, 10*time.Second, 100*time.Millisecond, "Timed out waiting for CodeCommit claim")
+	// Wait for CodeCommit claim to be created
+	require.True(t, waitForClaimCreated(ctx, bbClient, codeCommit.ID, 5*time.Second),
+		"CodeCommit claim should be created")
 	t.Log("✓ CodeCommit claim confirmed")
-	// Manual claim workaround removed to avoid conflict with Orchestrator-created claim
 
 	// Create both final prerequisites nearly simultaneously (race condition)
 	t.Log("Creating TestResult and LintResult simultaneously...")
@@ -537,8 +540,15 @@ services:
 
 	t.Logf("✓ Both prerequisites created (race): TestResult=%s, LintResult=%s", testResult.ID, lintResult.ID)
 
-	// Wait for synchronizer to execute
-	time.Sleep(1 * time.Second)
+	// Wait for claims to be created
+	require.True(t, waitForClaimCreated(ctx, bbClient, testResult.ID, 5*time.Second),
+		"TestResult claim should be created")
+	require.True(t, waitForClaimCreated(ctx, bbClient, lintResult.ID, 5*time.Second),
+		"LintResult claim should be created")
+
+	// Wait for synchronizer to execute and create exactly ONE DeployResult
+	require.True(t, waitForArtefactCount(ctx, bbClient, "DeployResult", 1, 30*time.Second),
+		"Should have exactly 1 DeployResult")
 
 	// Verify ONLY ONE DeployResult was created (deduplication worked)
 	deploys := getArtefactsByType(ctx, bbClient, "DeployResult")
@@ -610,7 +620,7 @@ services:
 	upForce = false
 	err = runUp(upCmd, []string{})
 	require.NoError(t, err)
-	time.Sleep(500 * time.Millisecond)
+	// Wait removed - using deterministic polling
 
 	ctx := context.Background()
 	env.InitializeBlackboardClient()
@@ -657,7 +667,7 @@ services:
 	t.Logf("✓ TestResult (grandchild): %s", testResult.ID)
 
 	// Verify synchronizer does NOT bid yet (LintResult missing)
-	time.Sleep(500 * time.Millisecond)
+	// Wait removed - using deterministic polling
 	exists := artefactTypeExists(ctx, bbClient, "DeployResult")
 	require.False(t, exists, "Synchronizer should wait for LintResult")
 	t.Log("✓ Synchronizer waiting (LintResult missing)")
@@ -745,7 +755,7 @@ services:
 	upForce = false
 	err = runUp(upCmd, []string{})
 	require.NoError(t, err)
-	time.Sleep(500 * time.Millisecond)
+	// Wait removed - using deterministic polling
 
 	ctx := context.Background()
 	env.InitializeBlackboardClient()
@@ -809,7 +819,34 @@ services:
 	t.Log("=== Max Depth Limiting E2E Test PASSED ===")
 }
 
-// Helper functions
+// Helper functions for deterministic test conditions
+
+// waitForClaimCreated waits for the orchestrator to create a claim for an artefact.
+// Returns true if claim exists, false if timeout.
+func waitForClaimCreated(ctx context.Context, bbClient *blackboard.Client, artefactID string, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		claim, err := bbClient.GetClaimByArtefactID(ctx, artefactID)
+		if err == nil && claim != nil {
+			return true
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return false
+}
+
+// waitForClaimStatus waits for a claim to reach a specific status.
+func waitForClaimStatus(ctx context.Context, bbClient *blackboard.Client, artefactID string, status blackboard.ClaimStatus, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		claim, err := bbClient.GetClaimByArtefactID(ctx, artefactID)
+		if err == nil && claim != nil && claim.Status == status {
+			return true
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return false
+}
 
 func artefactTypeExists(ctx context.Context, bbClient *blackboard.Client, artefactType string) bool {
 	artefacts := getArtefactsByType(ctx, bbClient, artefactType)
@@ -823,9 +860,22 @@ func waitForArtefactType(ctx context.Context, t *testing.T, bbClient *blackboard
 		if len(artefacts) > 0 {
 			return artefacts[0]
 		}
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(200 * time.Millisecond)
 	}
 	return nil
+}
+
+// waitForArtefactCount waits for a specific number of artefacts of a given type.
+func waitForArtefactCount(ctx context.Context, bbClient *blackboard.Client, artefactType string, count int, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		artefacts := getArtefactsByType(ctx, bbClient, artefactType)
+		if len(artefacts) >= count {
+			return true
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	return false
 }
 
 func getArtefactsByType(ctx context.Context, bbClient *blackboard.Client, artefactType string) []*blackboard.Artefact {
