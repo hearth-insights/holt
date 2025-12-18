@@ -15,6 +15,7 @@ COPY internal/pup ./internal/pup
 COPY pkg/blackboard ./pkg/blackboard
 COPY pkg/version ./pkg/version
 COPY internal/config ./internal/config
+COPY internal/debug ./internal/debug
 
 # Build the pup binary
 RUN CGO_ENABLED=0 GOOS=linux go build -o pup ./cmd/pup
