@@ -22,6 +22,7 @@ func TestTopologyValidation_ValidRootArtefact(t *testing.T) {
 			LogicalThreadID: blackboard.NewID(),
 			Version:         1,
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 			ProducedByRole:  "user", // Root artefact
 			StructuralType:  blackboard.StructuralTypeStandard,
 			Type:            "GoalDefined",
@@ -57,6 +58,7 @@ func TestTopologyValidation_ValidOrchestratorArtefact(t *testing.T) {
 			ProducedByRole:  "user",
 			ParentHashes:    []string{},
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: "test",
@@ -75,6 +77,7 @@ func TestTopologyValidation_ValidOrchestratorArtefact(t *testing.T) {
 			LogicalThreadID: blackboard.NewID(),
 			Version:         1,
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 			ProducedByRole:  "orchestrator", // Trusted authority
 			StructuralType:  blackboard.StructuralTypeFailure,
 			Type:            "SystemFailure",
@@ -112,6 +115,7 @@ func TestTopologyValidation_ValidAgentArtefact(t *testing.T) {
 			ProducedByRole:  "user",
 			ParentHashes:    []string{},
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: "Create feature",
@@ -138,6 +142,7 @@ func TestTopologyValidation_ValidAgentArtefact(t *testing.T) {
 			LogicalThreadID: blackboard.NewID(),
 			Version:         1,
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 			ProducedByRole:  "test-agent",
 			StructuralType:  blackboard.StructuralTypeStandard,
 			Type:            "CodeCommit",
@@ -170,6 +175,7 @@ func TestTopologyValidation_RejectRootArtefactWithClaim(t *testing.T) {
 			LogicalThreadID: blackboard.NewID(),
 			Version:         1,
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 			ProducedByRole:  "user",
 			StructuralType:  blackboard.StructuralTypeStandard,
 			Type:            "GoalDefined",
@@ -209,6 +215,7 @@ func TestTopologyValidation_RejectMissingClaimID(t *testing.T) {
 			ProducedByRole:  "user",
 			ParentHashes:    []string{},
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: "Create feature",
@@ -224,6 +231,7 @@ func TestTopologyValidation_RejectMissingClaimID(t *testing.T) {
 			LogicalThreadID: blackboard.NewID(),
 			Version:         1,
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 			ProducedByRole:  "malicious-agent",
 			StructuralType:  blackboard.StructuralTypeStandard,
 			Type:            "CodeCommit",
@@ -262,6 +270,7 @@ func TestTopologyValidation_RejectInvalidClaimReference(t *testing.T) {
 			ProducedByRole:  "user",
 			ParentHashes:    []string{},
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: "Create feature",
@@ -277,6 +286,7 @@ func TestTopologyValidation_RejectInvalidClaimReference(t *testing.T) {
 			LogicalThreadID: blackboard.NewID(),
 			Version:         1,
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 			ProducedByRole:  "test-agent",
 			StructuralType:  blackboard.StructuralTypeStandard,
 			Type:            "CodeCommit",
@@ -315,6 +325,7 @@ func TestTopologyValidation_RejectTerminatedClaim(t *testing.T) {
 			ProducedByRole:  "user",
 			ParentHashes:    []string{},
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: "Create feature",
@@ -341,6 +352,7 @@ func TestTopologyValidation_RejectTerminatedClaim(t *testing.T) {
 			LogicalThreadID: blackboard.NewID(),
 			Version:         1,
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 			ProducedByRole:  "test-agent",
 			StructuralType:  blackboard.StructuralTypeStandard,
 			Type:            "CodeCommit",
@@ -379,6 +391,7 @@ func TestTopologyValidation_RejectParentLinkageViolation(t *testing.T) {
 			ProducedByRole:  "user",
 			ParentHashes:    []string{},
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: "Feature A",
@@ -399,6 +412,7 @@ func TestTopologyValidation_RejectParentLinkageViolation(t *testing.T) {
 			ProducedByRole:  "user",
 			ParentHashes:    []string{},
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: "Feature B",
@@ -425,6 +439,7 @@ func TestTopologyValidation_RejectParentLinkageViolation(t *testing.T) {
 			LogicalThreadID: blackboard.NewID(),
 			Version:         1,
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 			ProducedByRole:  "test-agent",
 			StructuralType:  blackboard.StructuralTypeStandard,
 			Type:            "CodeCommit",
@@ -471,6 +486,7 @@ func TestTopologyValidation_AllowMultipleParents(t *testing.T) {
 			ProducedByRole:  "user",
 			ParentHashes:    []string{},
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: "Feature A",
@@ -491,6 +507,7 @@ func TestTopologyValidation_AllowMultipleParents(t *testing.T) {
 			ProducedByRole:  "user",
 			ParentHashes:    []string{},
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: "Requirements doc",
@@ -517,6 +534,7 @@ func TestTopologyValidation_AllowMultipleParents(t *testing.T) {
 			LogicalThreadID: blackboard.NewID(),
 			Version:         1,
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 			ProducedByRole:  "test-agent",
 			StructuralType:  blackboard.StructuralTypeStandard,
 			Type:            "CodeCommit",
