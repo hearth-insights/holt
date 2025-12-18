@@ -13,9 +13,13 @@ import (
 func TestRun_AutoApprove(t *testing.T) {
 	input := Input{
 		TargetArtefact: Artefact{
-			Type:    "TestArtefact",
-			Version: 1,
-			Payload: "test payload",
+			Header: ArtefactHeader{
+				Type:    "TestArtefact",
+				Version: 1,
+			},
+			Payload: ArtefactPayload{
+				Content: "test payload",
+			},
 		},
 	}
 	inputJSON, _ := json.Marshal(input)
@@ -41,9 +45,13 @@ func TestRun_AutoApprove(t *testing.T) {
 func TestRun_Approve(t *testing.T) {
 	input := Input{
 		TargetArtefact: Artefact{
-			Type:    "TestArtefact",
-			Version: 1,
-			Payload: "test payload",
+			Header: ArtefactHeader{
+				Type:    "TestArtefact",
+				Version: 1,
+			},
+			Payload: ArtefactPayload{
+				Content: "test payload",
+			},
 		},
 	}
 	inputJSON, _ := json.Marshal(input)
@@ -68,9 +76,13 @@ func TestRun_Approve(t *testing.T) {
 func TestRun_RejectWithFeedback(t *testing.T) {
 	input := Input{
 		TargetArtefact: Artefact{
-			Type:    "TestArtefact",
-			Version: 1,
-			Payload: "test payload",
+			Header: ArtefactHeader{
+				Type:    "TestArtefact",
+				Version: 1,
+			},
+			Payload: ArtefactPayload{
+				Content: "test payload",
+			},
 		},
 	}
 	inputJSON, _ := json.Marshal(input)
@@ -100,9 +112,13 @@ func TestRun_RejectWithFeedback(t *testing.T) {
 func TestRun_Timeout(t *testing.T) {
 	input := Input{
 		TargetArtefact: Artefact{
-			Type:    "TestArtefact",
-			Version: 1,
-			Payload: "test payload",
+			Header: ArtefactHeader{
+				Type:    "TestArtefact",
+				Version: 1,
+			},
+			Payload: ArtefactPayload{
+				Content: "test payload",
+			},
 		},
 	}
 	inputJSON, _ := json.Marshal(input)
