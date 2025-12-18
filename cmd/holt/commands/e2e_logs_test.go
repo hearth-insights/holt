@@ -5,7 +5,6 @@ package commands
 
 import (
 	"bytes"
-	"os/exec"
 	"testing"
 	"time"
 
@@ -21,29 +20,17 @@ func TestE2E_Logs(t *testing.T) {
 
 	t.Log("=== E2E: Holt Logs Command ===")
 
-	projectRoot := testutil.GetProjectRoot()
-
-	// Step 0: Build example-agent Docker image to ensure we have a valid agent
-	t.Log("Building example-agent Docker image...")
-	buildCmd := exec.Command("docker", "build",
-		"--no-cache",
-		"-t", "holt/example-agent:test",
-		"-f", "agents/example-agent/Dockerfile",
-		".")
-	buildCmd.Dir = projectRoot
-	output, err := buildCmd.CombinedOutput()
-	if err != nil {
-		t.Logf("Build output:\n%s", string(output))
-	}
-	require.NoError(t, err, "Failed to build example-agent image")
+	// Step 0: Ensure shared test agent image is built
+	testutil.EnsureTestAgentImage(t)
 
 	// Step 1: Setup environment
 	holtYML := `version: "1.0"
 orchestrator:
 agents:
   ExampleAgent:
-    image: "holt/example-agent:test"
-    command: ["/app/run.sh"]
+
+    image: "holt-test-agent:latest"
+    command: ["/app/run_echo.sh"]
     bidding_strategy:
       type: "exclusive"
     workspace:
@@ -64,7 +51,7 @@ services:
 	upCmd := &cobra.Command{}
 	upInstanceName = env.InstanceName
 	upForce = false
-	err = runUp(upCmd, []string{})
+	err := runUp(upCmd, []string{})
 	require.NoError(t, err, "Failed to start instance")
 
 	// Wait for containers

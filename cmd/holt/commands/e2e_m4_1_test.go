@@ -28,13 +28,8 @@ func TestE2E_M4_1_AgentToHumanQA(t *testing.T) {
 
 	t.Log("=== M4.1 E2E: Agent-to-Human Question/Answer ===")
 
-	// Step 0: Build question-agent Docker image
-	// Step 0: Build question-agent Docker image (fast build)
-	t.Log("Building question-agent Docker image...")
-	testutil.BuildFastTestImage(t, "question-agent:latest", map[string]string{
-		"agents/question-agent/run.sh": "/app/run.sh",
-	})
-	t.Log("✓ question-agent image built")
+	// Step 0: Ensure shared test agent image is built
+	testutil.EnsureTestAgentImage(t)
 
 	// Step 1: Setup environment with question agent
 	holtYML := `version: "1.0"
@@ -43,8 +38,9 @@ orchestrator:
   timestamp_drift_tolerance_ms: 600000 # 10 minutes for E2E tests
 agents:
   QuestionAgent:
-    image: "question-agent:latest"
-    command: ["/app/run.sh"]
+
+    image: "holt-test-agent:latest"
+    command: ["/app/run_question.sh"]
     bidding_strategy:
       type: "exclusive"
     workspace:
@@ -237,8 +233,9 @@ orchestrator:
   timestamp_drift_tolerance_ms: 600000 # 10 minutes
 agents:
   QuestionAgent:
-    image: "question-agent:latest"
-    command: ["/app/run.sh"]
+
+    image: "holt-test-agent:latest"
+    command: ["/app/run_question.sh"]
     bidding_strategy:
       type: "exclusive"
     workspace:

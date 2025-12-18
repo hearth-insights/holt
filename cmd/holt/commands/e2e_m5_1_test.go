@@ -6,7 +6,6 @@ package commands
 import (
 	"context"
 	"encoding/json"
-	"os/exec"
 	"testing"
 	"time"
 
@@ -30,38 +29,8 @@ func TestE2E_M5_1_NamedPattern(t *testing.T) {
 
 	t.Log("=== M5.1 E2E: Named Pattern Fan-In Synchronization ===")
 
-	projectRoot := testutil.GetProjectRoot()
-
-	// Build test agents
-	t.Log("Building test agent Docker images...")
-
-	// Build producer agent (creates TestResult, LintResult, SecurityScan)
-	buildCmd := exec.Command("docker", "build",
-		"-t", "m5-1-producer:latest",
-		"-f", "-",
-		".")
-	buildCmd.Dir = projectRoot
-	buildCmd.Stdin = getProducerAgentDockerfile()
-	output, err := buildCmd.CombinedOutput()
-	if err != nil {
-		t.Logf("Producer build output:\n%s", string(output))
-	}
-	require.NoError(t, err, "Failed to build producer agent")
-	t.Log("✓ Producer agent built")
-
-	// Build synchronizer agent (waits for all 3 types)
-	buildCmd = exec.Command("docker", "build",
-		"-t", "m5-1-synchronizer:latest",
-		"-f", "-",
-		".")
-	buildCmd.Dir = projectRoot
-	buildCmd.Stdin = getSynchronizerAgentDockerfile()
-	output, err = buildCmd.CombinedOutput()
-	if err != nil {
-		t.Logf("Synchronizer build output:\n%s", string(output))
-	}
-	require.NoError(t, err, "Failed to build synchronizer agent")
-	t.Log("✓ Synchronizer agent built")
+	// Step 0: Ensure shared test agent image is built
+	testutil.EnsureTestAgentImage(t)
 
 	// Setup environment with synchronizer configuration
 	holtYML := `version: "1.0"
@@ -70,14 +39,14 @@ orchestrator:
   timestamp_drift_tolerance_ms: 600000
 agents:
   Producer:
-    image: "m5-1-producer:latest"
-    command: ["/app/produce.sh"]
+    image: "holt-test-agent:latest"
+    command: ["/app/m5_1_producer.sh"]
     bidding_strategy:
       type: "exclusive"
       target_types: ["CodeCommit"]
   Synchronizer:
-    image: "m5-1-synchronizer:latest"
-    command: ["/app/synchronize.sh"]
+    image: "holt-test-agent:latest"
+    command: ["/app/m5_1_synchronizer.sh"]
     synchronize:
       ancestor_type: "CodeCommit"
       wait_for:
@@ -104,7 +73,7 @@ services:
 	upCmd := &cobra.Command{}
 	upInstanceName = env.InstanceName
 	upForce = false
-	err = runUp(upCmd, []string{})
+	err := runUp(upCmd, []string{})
 	require.NoError(t, err)
 	t.Log("✓ Instance started")
 
@@ -222,41 +191,8 @@ func TestE2E_M5_1_ProducerDeclared(t *testing.T) {
 
 	t.Log("=== M5.1 E2E: Producer-Declared Pattern (Dynamic Count) ===")
 
-	projectRoot := testutil.GetProjectRoot()
-	t.Logf("DEBUG: Project Root: %s", projectRoot)
-	checkLs := exec.Command("ls", "-R", "internal/pup")
-	checkLs.Dir = projectRoot
-	out, _ := checkLs.CombinedOutput()
-	t.Logf("DEBUG: internal/pup content:\n%s", string(out))
-
-	// Build multi-artefact producer (outputs 5 ProcessedRecords)
-	t.Log("Building multi-output producer...")
-	buildCmd := exec.Command("docker", "build",
-		"--no-cache",
-		"-t", "m5-1-multi-producer-new:latest",
-		"-f", "-",
-		".")
-	buildCmd.Dir = projectRoot
-	buildCmd.Stdin = getMultiProducerDockerfile()
-	output, err := buildCmd.CombinedOutput()
-	t.Logf("Multi-producer build output:\n%s", string(output))
-	require.NoError(t, err)
-	t.Log("✓ Multi-producer built")
-
-	// Build aggregator (synchronizes on batch_size)
-	buildCmd = exec.Command("docker", "build",
-		"--no-cache",
-		"-t", "m5-1-aggregator:latest",
-		"-f", "-",
-		".")
-	buildCmd.Dir = projectRoot
-	buildCmd.Stdin = getAggregatorDockerfile()
-	output, err = buildCmd.CombinedOutput()
-	if err != nil {
-		t.Logf("Aggregator build output:\n%s", string(output))
-	}
-	require.NoError(t, err)
-	t.Log("✓ Aggregator built")
+	// Step 0: Ensure shared test agent image is built
+	testutil.EnsureTestAgentImage(t)
 
 	holtYML := `version: "1.0"
 orchestrator:
@@ -264,14 +200,14 @@ orchestrator:
   timestamp_drift_tolerance_ms: 600000
 agents:
   MultiProducer:
-    image: "m5-1-multi-producer-new:latest"
-    command: ["/app/produce-multi.sh"]
+    image: "holt-test-agent:latest"
+    command: ["/app/m5_1_multi_producer.sh"]
     bidding_strategy:
       type: "exclusive"
       target_types: ["DataBatch"]
   Aggregator:
-    image: "m5-1-aggregator:latest"
-    command: ["/app/aggregate.sh"]
+    image: "holt-test-agent:latest"
+    command: ["/app/m5_1_aggregator.sh"]
     synchronize:
       ancestor_type: "GoalDefined"
       wait_for:
@@ -293,7 +229,7 @@ services:
 	upCmd := &cobra.Command{}
 	upInstanceName = env.InstanceName
 	upForce = false
-	err = runUp(upCmd, []string{})
+	err := runUp(upCmd, []string{})
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -316,7 +252,7 @@ services:
 		Version:         2, // V2+ continuation
 		Type:            "DataBatch",
 		CreatedAtMs:     time.Now().UnixMilli(),
-		Metadata:        "{}",  // Not used by Aggregator - it reads metadata from ProcessedRecords
+		Metadata:        "{}", // Not used by Aggregator - it reads metadata from ProcessedRecords
 	}, "batch-123")
 	t.Logf("✓ DataBatch created: %s", dataBatch.ID)
 
@@ -400,22 +336,8 @@ func TestE2E_M5_1_DeduplicationLock(t *testing.T) {
 
 	t.Log("=== M5.1 E2E: Deduplication Lock (Safety Check) ===")
 
-	projectRoot := testutil.GetProjectRoot()
-
-	// Build synchronizer with controller/worker (2 max_concurrent workers)
-	t.Log("Building concurrent synchronizer...")
-	buildCmd := exec.Command("docker", "build",
-		"-t", "m5-1-concurrent-sync-debug:latest",
-		"-f", "-",
-		".")
-	buildCmd.Dir = projectRoot
-	buildCmd.Stdin = getConcurrentSynchronizerDockerfile()
-	output, err := buildCmd.CombinedOutput()
-	if err != nil {
-		t.Logf("Concurrent sync build output:\n%s", string(output))
-	}
-	require.NoError(t, err)
-	t.Log("✓ Concurrent synchronizer built")
+	// Step 0: Ensure shared test agent image is built
+	testutil.EnsureTestAgentImage(t)
 
 	holtYML := `version: "1.0"
 orchestrator:
@@ -423,8 +345,8 @@ orchestrator:
   timestamp_drift_tolerance_ms: 600000
 agents:
   ConcurrentSync:
-    image: m5-1-concurrent-sync-debug:latest
-    command: ["/app/sync-concurrent.sh"]
+    image: holt-test-agent:latest
+    command: ["/app/m5_1_concurrent_sync.sh"]
     worker:
       workspace:
         mode: copy
@@ -439,7 +361,7 @@ agents:
         - type: "TestResult"
         - type: "LintResult"
   DummyConsumer:
-    image: "m5-1-concurrent-sync-debug:latest" # Use same image as ConcurrentSync
+    image: "holt-test-agent:latest" # Use same image as ConcurrentSync
     command: ["/app/pup", "controller"]
     bidding_strategy:
       type: "ignore"
@@ -463,7 +385,7 @@ services:
 	upCmd := &cobra.Command{}
 	upInstanceName = env.InstanceName
 	upForce = false
-	err = runUp(upCmd, []string{"--build"})
+	err := runUp(upCmd, []string{"--build"})
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -571,22 +493,8 @@ func TestE2E_M5_1_RecursiveTraversal(t *testing.T) {
 
 	t.Log("=== M5.1 E2E: Recursive Descendant Traversal (Depth=2) ===")
 
-	projectRoot := testutil.GetProjectRoot()
-
-	// Build synchronizer that waits for TestResult + LintResult (no max_depth limit)
-	t.Log("Building recursive synchronizer...")
-	buildCmd := exec.Command("docker", "build",
-		"-t", "m5-1-recursive-sync:latest",
-		"-f", "-",
-		".")
-	buildCmd.Dir = projectRoot
-	buildCmd.Stdin = getSynchronizerAgentDockerfile()
-	output, err := buildCmd.CombinedOutput()
-	if err != nil {
-		t.Logf("Build output:\n%s", string(output))
-	}
-	require.NoError(t, err)
-	t.Log("✓ Recursive synchronizer built")
+	// Step 0: Ensure shared test agent image is built
+	testutil.EnsureTestAgentImage(t)
 
 	holtYML := `version: "1.0"
 orchestrator:
@@ -594,8 +502,8 @@ orchestrator:
   timestamp_drift_tolerance_ms: 600000
 agents:
   RecursiveSync:
-    image: "m5-1-recursive-sync:latest"
-    command: ["/app/synchronize.sh"]
+    image: "holt-test-agent:latest"
+    command: ["/app/m5_1_synchronizer.sh"]
     synchronize:
       ancestor_type: "CodeCommit"
       wait_for:
@@ -618,7 +526,7 @@ services:
 	upCmd := &cobra.Command{}
 	upInstanceName = env.InstanceName
 	upForce = false
-	err = runUp(upCmd, []string{})
+	err := runUp(upCmd, []string{})
 	require.NoError(t, err)
 	// Wait removed - using deterministic polling
 
@@ -706,22 +614,8 @@ func TestE2E_M5_1_MaxDepthLimiting(t *testing.T) {
 
 	t.Log("=== M5.1 E2E: Max Depth Limiting (max_depth=1) ===")
 
-	projectRoot := testutil.GetProjectRoot()
-
-	// Build synchronizer with max_depth=1
-	t.Log("Building depth-limited synchronizer...")
-	buildCmd := exec.Command("docker", "build",
-		"-t", "m5-1-depth-limited:latest",
-		"-f", "-",
-		".")
-	buildCmd.Dir = projectRoot
-	buildCmd.Stdin = getSynchronizerAgentDockerfile()
-	output, err := buildCmd.CombinedOutput()
-	if err != nil {
-		t.Logf("Build output:\n%s", string(output))
-	}
-	require.NoError(t, err)
-	t.Log("✓ Depth-limited synchronizer built")
+	// Step 0: Ensure shared test agent image is built
+	testutil.EnsureTestAgentImage(t)
 
 	holtYML := `version: "1.0"
 orchestrator:
@@ -729,8 +623,8 @@ orchestrator:
   timestamp_drift_tolerance_ms: 600000
 agents:
   DepthLimitedSync:
-    image: "m5-1-depth-limited:latest"
-    command: ["/app/synchronize.sh"]
+    image: "holt-test-agent:latest"
+    command: ["/app/m5_1_synchronizer.sh"]
     synchronize:
       ancestor_type: "CodeCommit"
       wait_for:
@@ -753,7 +647,7 @@ services:
 	upCmd := &cobra.Command{}
 	upInstanceName = env.InstanceName
 	upForce = false
-	err = runUp(upCmd, []string{})
+	err := runUp(upCmd, []string{})
 	require.NoError(t, err)
 	// Wait removed - using deterministic polling
 
@@ -894,203 +788,5 @@ func getArtefactsByType(ctx context.Context, bbClient *blackboard.Client, artefa
 			results = append(results, artefact)
 		}
 	}
-
 	return results
-}
-
-// Dockerfile generators (inline for simplicity)
-
-func getProducerAgentDockerfile() *testutil.StringReader {
-	dockerfile := `# Build stage - compile pup
-FROM golang:1.24-alpine AS builder
-WORKDIR /build
-COPY go.mod go.sum ./
-RUN go mod download
-COPY cmd/pup ./cmd/pup
-COPY internal/pup ./internal/pup
-COPY internal/config ./internal/config
-COPY internal/debug ./internal/debug
-COPY pkg/blackboard ./pkg/blackboard
-COPY pkg/version ./pkg/version
-RUN CGO_ENABLED=0 GOOS=linux go build -o pup ./cmd/pup
-
-# Runtime stage
-FROM alpine:3.18
-RUN apk add --no-cache bash ca-certificates
-WORKDIR /app
-COPY --from=builder /build/pup /app/pup
-COPY <<'EOF' /app/produce.sh
-#!/bin/bash
-set -e
-
-# Read input from stdin (not used for this simple producer)
-cat > /dev/null
-
-# Produce a single artefact (CodeCommit trigger will create prerequisites)
-cat <<RESULT >&3
-{"artefact_type":"TriggerComplete","artefact_payload":"triggered","summary":"Producer triggered"}
-RESULT
-EOF
-RUN chmod +x /app/produce.sh
-RUN adduser -D -u 1000 agent
-USER agent
-ENTRYPOINT ["/app/pup"]
-`
-	return testutil.NewStringReader(dockerfile)
-}
-
-func getSynchronizerAgentDockerfile() *testutil.StringReader {
-	dockerfile := `# Build stage - compile pup
-FROM golang:1.24-alpine AS builder
-WORKDIR /build
-COPY go.mod go.sum ./
-RUN go mod download
-COPY cmd/pup ./cmd/pup
-COPY internal/pup ./internal/pup
-COPY internal/config ./internal/config
-COPY internal/debug ./internal/debug
-COPY pkg/blackboard ./pkg/blackboard
-COPY pkg/version ./pkg/version
-RUN CGO_ENABLED=0 GOOS=linux go build -o pup ./cmd/pup
-
-# Runtime stage
-FROM alpine:3.18
-RUN apk add --no-cache bash jq ca-certificates
-WORKDIR /app
-COPY --from=builder /build/pup /app/pup
-COPY <<'EOF' /app/synchronize.sh
-#!/bin/bash
-set -e
-
-# Read synchronizer context from stdin
-INPUT=$(cat)
-
-# Extract ancestor ID and descendant count (avoid embedding complex JSON)
-ANCESTOR_ID=$(echo "$INPUT" | jq -r '.ancestor_artefact.id // "unknown"')
-DESCENDANTS=$(echo "$INPUT" | jq -r '.descendant_artefacts | length')
-
-# Create synchronized result with safe payload
-cat <<RESULT >&3
-{"artefact_type":"DeployResult","artefact_payload":"synchronized-ancestor-$ANCESTOR_ID-descendants-$DESCENDANTS","summary":"Deployment synchronized"}
-RESULT
-EOF
-RUN chmod +x /app/synchronize.sh
-RUN adduser -D -u 1000 agent
-USER agent
-ENTRYPOINT ["/app/pup"]
-`
-	return testutil.NewStringReader(dockerfile)
-}
-
-func getMultiProducerDockerfile() *testutil.StringReader {
-	dockerfile := `# Build stage - compile pup
-FROM golang:1.24-alpine AS builder
-WORKDIR /build
-COPY go.mod go.sum ./
-RUN go mod download
-COPY cmd/pup ./cmd/pup
-COPY internal/pup ./internal/pup
-COPY internal/config ./internal/config
-COPY internal/debug ./internal/debug
-COPY pkg/blackboard ./pkg/blackboard
-COPY pkg/version ./pkg/version
-RUN CGO_ENABLED=0 GOOS=linux go build -o pup ./cmd/pup
-
-# Runtime stage
-FROM alpine:3.18
-RUN apk add --no-cache bash ca-certificates
-WORKDIR /app
-COPY --from=builder /build/pup /app/pup
-COPY <<'EOF' /app/produce-multi.sh
-#!/bin/bash
-set -e
-cat > /dev/null
-
-# Produce 5 ProcessedRecord artefacts (Pup will inject batch_size=5 metadata automatically)
-for i in {1..5}; do
-  cat <<RECORD >&3
-{"artefact_type":"ProcessedRecord","artefact_payload":"record-$i","summary":"Processed record $i"}
-RECORD
-done
-EOF
-RUN chmod +x /app/produce-multi.sh
-RUN adduser -D -u 1000 agent
-USER agent
-ENTRYPOINT ["/app/pup"]
-`
-	return testutil.NewStringReader(dockerfile)
-}
-
-func getAggregatorDockerfile() *testutil.StringReader {
-	dockerfile := `# Build stage - compile pup
-FROM golang:1.24-alpine AS builder
-WORKDIR /build
-COPY go.mod go.sum ./
-RUN go mod download
-COPY cmd/pup ./cmd/pup
-COPY internal/pup ./internal/pup
-COPY internal/config ./internal/config
-COPY internal/debug ./internal/debug
-COPY pkg/blackboard ./pkg/blackboard
-COPY pkg/version ./pkg/version
-RUN CGO_ENABLED=0 GOOS=linux go build -o pup ./cmd/pup
-
-# Runtime stage
-FROM alpine:3.18
-RUN apk add --no-cache bash jq ca-certificates
-WORKDIR /app
-COPY --from=builder /build/pup /app/pup
-COPY <<'EOF' /app/aggregate.sh
-#!/bin/bash
-set -e
-INPUT=$(cat)
-COUNT=$(echo "$INPUT" | jq -r '.descendant_artefacts | map(select(.header.type == "ProcessedRecord")) | length')
-
-cat <<RESULT >&3
-{"artefact_type":"AggregatedReport","artefact_payload":"Aggregated $COUNT records","summary":"Aggregation complete"}
-RESULT
-EOF
-RUN chmod +x /app/aggregate.sh
-RUN adduser -D -u 1000 agent
-USER agent
-ENTRYPOINT ["/app/pup"]
-`
-	return testutil.NewStringReader(dockerfile)
-}
-
-func getConcurrentSynchronizerDockerfile() *testutil.StringReader {
-	dockerfile := `# Build stage - compile pup
-FROM golang:1.24-alpine AS builder
-WORKDIR /build
-COPY go.mod go.sum ./
-RUN go mod download
-COPY cmd/pup ./cmd/pup
-COPY internal/pup ./internal/pup
-COPY internal/config ./internal/config
-COPY internal/debug ./internal/debug
-COPY pkg/blackboard ./pkg/blackboard
-COPY pkg/version ./pkg/version
-RUN CGO_ENABLED=0 GOOS=linux go build -o pup ./cmd/pup
-
-# Runtime stage
-FROM alpine:3.18
-RUN apk add --no-cache bash ca-certificates
-WORKDIR /app
-COPY --from=builder /build/pup /app/pup
-COPY <<'EOF' /app/sync-concurrent.sh
-#!/bin/bash
-set -e
-cat > /dev/null
-
-# Simple output (deduplication lock prevents multiple executions)
-cat <<RESULT >&3
-{"artefact_type":"DeployResult","artefact_payload":"deployed","summary":"Deployment complete"}
-RESULT
-EOF
-RUN chmod +x /app/sync-concurrent.sh
-RUN adduser -D -u 1000 agent
-USER agent
-ENTRYPOINT ["/app/pup"]
-`
-	return testutil.NewStringReader(dockerfile)
 }

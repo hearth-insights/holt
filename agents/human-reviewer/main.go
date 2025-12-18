@@ -23,16 +23,26 @@ type Input struct {
 	AdditionalContext []Artefact `json:"additional_context"`
 }
 
-// Artefact represents a blackboard artefact
+// Artefact represents a blackboard artefact (V2 structure)
 type Artefact struct {
-	ID              string   `json:"id"`
-	LogicalID       string   `json:"logical_id"`
+	ID     string          `json:"id"`
+	Header ArtefactHeader  `json:"header"`
+	Payload ArtefactPayload `json:"payload"`
+}
+
+// ArtefactHeader contains metadata (V2 structure)
+type ArtefactHeader struct {
+	LogicalThreadID string   `json:"logical_thread_id"`
 	Version         int      `json:"version"`
 	StructuralType  string   `json:"structural_type"`
 	Type            string   `json:"type"`
-	Payload         string   `json:"payload"`
-	SourceArtefacts []string `json:"source_artefacts"`
+	ParentHashes    []string `json:"parent_hashes"`
 	ProducedByRole  string   `json:"produced_by_role"`
+}
+
+// ArtefactPayload contains the content (V2 structure)
+type ArtefactPayload struct {
+	Content string `json:"content"`
 }
 
 // Output contract to pup (FD 3)
@@ -83,7 +93,7 @@ func Run(stdin io.Reader, stdout, stderr io.Writer, getEnv func(string) string) 
 
 	log.SetOutput(stderr) // Ensure logs go to stderr
 	log.Printf("[HumanReviewer] Reviewing %s artefact (version %d)",
-		input.TargetArtefact.Type, input.TargetArtefact.Version)
+		input.TargetArtefact.Header.Type, input.TargetArtefact.Header.Version)
 
 	// Auto-approve mode for testing
 	if autoApprove {
@@ -108,7 +118,7 @@ func Run(stdin io.Reader, stdout, stderr io.Writer, getEnv func(string) string) 
 	// Start goroutine to read user input
 	go func() {
 		fmt.Fprintf(stderr, "\nReview this %s (v%d). Approve? (y/n/comment): ",
-			input.TargetArtefact.Type, input.TargetArtefact.Version)
+			input.TargetArtefact.Header.Type, input.TargetArtefact.Header.Version)
 
 		response, err := inputScanner.ReadString('\n')
 		if err != nil {
@@ -141,11 +151,11 @@ func Run(stdin io.Reader, stdout, stderr io.Writer, getEnv func(string) string) 
 func displayArtefact(w io.Writer, art Artefact) {
 	fmt.Fprintln(w, "\n"+strings.Repeat("=", 80))
 	fmt.Fprintf(w, "Artefact ID: %s\n", art.ID)
-	fmt.Fprintf(w, "Type: %s (version %d)\n", art.Type, art.Version)
-	fmt.Fprintf(w, "Produced by: %s\n", art.ProducedByRole)
+	fmt.Fprintf(w, "Type: %s (version %d)\n", art.Header.Type, art.Header.Version)
+	fmt.Fprintf(w, "Produced by: %s\n", art.Header.ProducedByRole)
 	fmt.Fprintln(w, strings.Repeat("-", 80))
 	fmt.Fprintln(w, "Payload:")
-	fmt.Fprintln(w, art.Payload)
+	fmt.Fprintln(w, art.Payload.Content)
 	fmt.Fprintln(w, strings.Repeat("=", 80))
 }
 

@@ -6,7 +6,6 @@ package commands
 import (
 	"context"
 	"encoding/json"
-	"os/exec"
 	"testing"
 	"time"
 
@@ -26,21 +25,8 @@ func TestE2E_M4_5_HumanReviewer(t *testing.T) {
 	t.Log("=== M4.5 E2E: HumanReviewer with AUTO_APPROVE ===")
 
 	// Step 0: Build human-reviewer Docker image
-	projectRoot := testutil.GetProjectRoot()
-
-	t.Log("Building human-reviewer Docker image...")
-	buildCmd := exec.Command("docker", "build",
-		"--no-cache", // Force rebuild to ensure latest Dockerfile changes are used
-		"-t", "holt/human-reviewer:test",
-		"-f", "agents/human-reviewer/Dockerfile",
-		".")
-	buildCmd.Dir = projectRoot
-	output, err := buildCmd.CombinedOutput()
-	if err != nil {
-		t.Logf("Build output:\n%s", string(output))
-	}
-	require.NoError(t, err, "Failed to build human-reviewer image")
-	t.Log("✓ human-reviewer image built")
+	// Step 0: Ensure shared test agent image is built
+	testutil.EnsureTestAgentImage(t)
 
 	// Step 1: Setup environment with human reviewer
 	holtYML := `version: "1.0"
@@ -48,7 +34,8 @@ orchestrator:
   max_review_iterations: 3
 agents:
   HumanReviewer:
-    image: "holt/human-reviewer:test"
+
+    image: "holt-test-agent:latest"
     command: ["/app/human-reviewer"]
     bidding_strategy:
       type: "review"
@@ -78,7 +65,7 @@ services:
 	upCmd := &cobra.Command{}
 	upInstanceName = env.InstanceName
 	upForce = false
-	err = runUp(upCmd, []string{})
+	err := runUp(upCmd, []string{})
 	require.NoError(t, err, "Failed to start instance")
 	t.Logf("✓ Instance started: %s", env.InstanceName)
 
@@ -206,22 +193,8 @@ func TestE2E_M4_5_TestRunner(t *testing.T) {
 
 	t.Log("=== M4.5 E2E: TestRunner Agent ===")
 
-	projectRoot := testutil.GetProjectRoot()
-
-	// Step 0: Build test-runner Docker image
-	t.Log("Building test-runner Docker image...")
-	buildCmd := exec.Command("docker", "build",
-		"--no-cache", // Force rebuild to ensure latest Dockerfile changes are used
-		"-t", "holt/test-runner:test",
-		"-f", "agents/test-runner/Dockerfile",
-		".")
-	buildCmd.Dir = projectRoot
-	output, err := buildCmd.CombinedOutput()
-	if err != nil {
-		t.Logf("Build output:\n%s", string(output))
-	}
-	require.NoError(t, err, "Failed to build test-runner image")
-	t.Log("✓ test-runner image built")
+	// Step 0: Ensure shared test agent image is built
+	testutil.EnsureTestAgentImage(t)
 
 	// Step 1: Setup environment
 	holtYML := `version: "1.0"
@@ -229,8 +202,9 @@ orchestrator:
   max_review_iterations: 3
 agents:
   TestRunner:
-    image: "holt/test-runner:test"
-    command: ["/app/run-tests.sh"]
+
+    image: "holt-test-agent:latest"
+    command: ["/app/run_tests.sh"]
     bidding_strategy:
       type: "review"
     workspace:
@@ -253,7 +227,7 @@ services:
 	upCmd := &cobra.Command{}
 	upInstanceName = env.InstanceName
 	upForce = false
-	err = runUp(upCmd, []string{})
+	err := runUp(upCmd, []string{})
 	require.NoError(t, err, "Failed to start instance")
 	t.Logf("✓ Instance started: %s", env.InstanceName)
 

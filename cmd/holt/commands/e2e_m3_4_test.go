@@ -27,35 +27,22 @@ func TestE2E_M3_4_BasicControllerWorkerFlow(t *testing.T) {
 
 	t.Log("=== M3.4 E2E: Basic Controller-Worker Flow ===")
 
-	// Step 0: Build required Docker images
-	projectRoot := testutil.GetProjectRoot()
-
-	t.Log("Building example-git-agent Docker image...")
-	buildCmd := exec.Command("docker", "build",
-		"-t", "example-git-agent:latest",
-		"-f", "agents/example-git-agent/Dockerfile",
-		".")
-	buildCmd.Dir = projectRoot
-	output, err := buildCmd.CombinedOutput()
-	if err != nil {
-		t.Logf("Build output:\n%s", string(output))
-	}
-	require.NoError(t, err, "Failed to build example-git-agent image")
-	t.Log("✓ example-git-agent image built")
+	// Step 0: Ensure shared test agent image is built
+	testutil.EnsureTestAgentImage(t)
 
 	// Step 1: Setup environment with controller-worker configuration
 	holtYML := `version: "1.0"
 agents:
   CoderController:
     mode: "controller"
-    image: "example-git-agent:latest"
+    image: "holt-test-agent:latest"
     command: ["/app/pup"]
     bidding_strategy:
       type: "exclusive"
     worker:
-      image: "example-git-agent:latest"
+      image: "holt-test-agent:latest"
       max_concurrent: 2
-      command: ["/app/run.sh"]
+      command: ["/app/run_git.sh"]
       workspace:
         mode: rw
 services:
@@ -79,7 +66,7 @@ services:
 	upCmd := &cobra.Command{}
 	upInstanceName = env.InstanceName
 	upForce = false
-	err = runUp(upCmd, []string{})
+	err := runUp(upCmd, []string{})
 	require.NoError(t, err, "Failed to start instance")
 	t.Logf("✓ Instance started: %s", env.InstanceName)
 
@@ -92,7 +79,7 @@ services:
 		"--filter", fmt.Sprintf("name=holt-%s-CoderController", env.InstanceName),
 		"--format", "{{.Names}}")
 	verifyControllerCmd.Dir = env.TmpDir
-	output, err = verifyControllerCmd.CombinedOutput()
+	output, err := verifyControllerCmd.CombinedOutput()
 	require.NoError(t, err, "Failed to list controller container")
 	require.Contains(t, string(output), "CoderController", "Controller container not found")
 	t.Log("✓ Controller container running")
@@ -231,34 +218,22 @@ func TestE2E_M3_4_MaxConcurrentLimit(t *testing.T) {
 
 	t.Log("=== M3.4 E2E: Max Concurrent Limit Enforcement ===")
 
-	// Step 0: Build required Docker images
-	projectRoot := testutil.GetProjectRoot()
-
-	t.Log("Building example-git-agent Docker image...")
-	buildCmd := exec.Command("docker", "build",
-		"-t", "example-git-agent:latest",
-		"-f", "agents/example-git-agent/Dockerfile",
-		".")
-	buildCmd.Dir = projectRoot
-	output, err := buildCmd.CombinedOutput()
-	if err != nil {
-		t.Logf("Build output:\n%s", string(output))
-	}
-	require.NoError(t, err, "Failed to build example-git-agent image")
+	// Step 0: Ensure shared test agent image is built
+	testutil.EnsureTestAgentImage(t)
 
 	// Step 1: Setup with max_concurrent: 1
 	holtYML := `version: "1.0"
 agents:
   CoderController:
     mode: "controller"
-    image: "example-git-agent:latest"
+    image: "holt-test-agent:latest"
     command: ["/app/pup"]
     bidding_strategy:
       type: "exclusive"
     worker:
-      image: "example-git-agent:latest"
+      image: "holt-test-agent:latest"
       max_concurrent: 1
-      command: ["/app/run.sh"]
+      command: ["/app/run_git.sh"]
       workspace:
         mode: rw
 services:
@@ -279,7 +254,7 @@ services:
 	upCmd := &cobra.Command{}
 	upInstanceName = env.InstanceName
 	upForce = false
-	err = runUp(upCmd, []string{})
+	err := runUp(upCmd, []string{})
 	require.NoError(t, err, "Failed to start instance")
 
 	time.Sleep(3 * time.Second)
@@ -302,7 +277,7 @@ services:
 		"--filter", "status=running",
 		"--format", "{{.Names}}")
 	checkWorkersCmd.Dir = env.TmpDir
-	output, err = checkWorkersCmd.CombinedOutput()
+	output, err := checkWorkersCmd.CombinedOutput()
 	require.NoError(t, err, "Failed to check running workers")
 
 	runningWorkers := len(output)
@@ -330,41 +305,29 @@ func TestE2E_M3_4_BackwardCompatibility(t *testing.T) {
 
 	t.Log("=== M3.4 E2E: Backward Compatibility with Traditional Agents ===")
 
-	// Step 0: Build required Docker images
-	projectRoot := testutil.GetProjectRoot()
-
-	t.Log("Building example-git-agent Docker image...")
-	buildCmd := exec.Command("docker", "build",
-		"-t", "example-git-agent:latest",
-		"-f", "agents/example-git-agent/Dockerfile",
-		".")
-	buildCmd.Dir = projectRoot
-	output, err := buildCmd.CombinedOutput()
-	if err != nil {
-		t.Logf("Build output:\n%s", string(output))
-	}
-	require.NoError(t, err, "Failed to build example-git-agent image")
+	// Step 0: Ensure shared test agent image is built
+	testutil.EnsureTestAgentImage(t)
 
 	// Step 1: Setup with both controller and traditional agent
 	holtYML := `version: "1.0"
 agents:
   TraditionalCoder:
-    image: "example-git-agent:latest"
-    command: ["/app/run.sh"]
+    image: "holt-test-agent:latest"
+    command: ["/app/run_git.sh"]
     bidding_strategy:
       type: "exclusive"
     workspace:
       mode: rw
   ControllerCoder:
     mode: "controller"
-    image: "example-git-agent:latest"
+    image: "holt-test-agent:latest"
     command: ["/app/pup"]
     bidding_strategy:
       type: "claim"
     worker:
-      image: "example-git-agent:latest"
+      image: "holt-test-agent:latest"
       max_concurrent: 2
-      command: ["/app/run.sh"]
+      command: ["/app/run_git.sh"]
       workspace:
         mode: rw
 services:
@@ -385,7 +348,7 @@ services:
 	upCmd := &cobra.Command{}
 	upInstanceName = env.InstanceName
 	upForce = false
-	err = runUp(upCmd, []string{})
+	err := runUp(upCmd, []string{})
 	require.NoError(t, err, "Failed to start instance")
 
 	time.Sleep(3 * time.Second)
@@ -398,7 +361,7 @@ services:
 		"--filter", fmt.Sprintf("name=holt-%s-TraditionalCoder", env.InstanceName),
 		"--format", "{{.Names}}")
 	checkTraditionalCmd.Dir = env.TmpDir
-	output, err = checkTraditionalCmd.CombinedOutput()
+	output, err := checkTraditionalCmd.CombinedOutput()
 	require.NoError(t, err, "Failed to check traditional agent")
 	require.Contains(t, string(output), "TraditionalCoder", "Traditional agent not running")
 	t.Log("✓ Traditional agent running")
