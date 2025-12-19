@@ -14,10 +14,10 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
+	"github.com/google/uuid"
 	"github.com/hearth-insights/holt/internal/config"
 	"github.com/hearth-insights/holt/internal/orchestrator/debug"
 	"github.com/hearth-insights/holt/pkg/blackboard"
-	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -302,7 +302,7 @@ func TestDebugProtocol_BasicPauseResume(t *testing.T) {
 		Agents: map[string]config.Agent{
 			"test-agent": {
 				Image:           "test:latest",
-				BiddingStrategy: "exclusive",
+				BiddingStrategy: config.BiddingStrategyConfig{Type: "exclusive"},
 			},
 		},
 	}
@@ -339,18 +339,24 @@ func TestDebugProtocol_BasicPauseResume(t *testing.T) {
 	bpID := debugger.SetBreakpoint(t, string(debug.ConditionArtefactType), "TestArtefact")
 	t.Logf("Breakpoint set: %s", bpID)
 
-	// Create an artefact that will trigger breakpoint
+	// Create an artefact that will trigger breakpoint // TODO migrate to V2 format
 	artefact := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "TestArtefact",
-		Payload:         "test-payload",
-		SourceArtefacts: []string{},
-		ProducedByRole:  "test-agent",
-		CreatedAtMs:     time.Now().UnixMilli(),
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: uuid.New().String(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "TestArtefact",
+			ParentHashes:    []string{},
+			ProducedByRole:  "test-agent",
+			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "test-payload",
+		},
 	}
+	hash, _ := blackboard.ComputeArtefactHash(artefact)
+	artefact.ID = hash
 
 	err = bbClient.CreateArtefact(ctx, artefact)
 	require.NoError(t, err)
@@ -394,7 +400,6 @@ func TestDebugProtocol_ReviewConsensusReached(t *testing.T) {
 	_, redisAddr, cleanup := startTestRedis(t)
 	defer cleanup()
 
-
 	instanceName := "test-review-debug-" + uuid.New().String()[:8]
 
 	// Setup
@@ -410,11 +415,11 @@ func TestDebugProtocol_ReviewConsensusReached(t *testing.T) {
 		Agents: map[string]config.Agent{
 			"reviewer": {
 				Image:           "reviewer:latest",
-				BiddingStrategy: "review",
+				BiddingStrategy: config.BiddingStrategyConfig{Type: "review"},
 			},
 			"worker": {
 				Image:           "worker:latest",
-				BiddingStrategy: "exclusive",
+				BiddingStrategy: config.BiddingStrategyConfig{Type: "exclusive"},
 			},
 		},
 	}
@@ -441,16 +446,22 @@ func TestDebugProtocol_ReviewConsensusReached(t *testing.T) {
 
 	// Create artefact
 	artefact := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "WorkItem",
-		Payload:         "work-payload",
-		SourceArtefacts: []string{},
-		ProducedByRole:  "user",
-		CreatedAtMs:     time.Now().UnixMilli(),
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: uuid.New().String(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "WorkItem",
+			ParentHashes:    []string{},
+			ProducedByRole:  "user",
+			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "work-payload",
+		},
 	}
+	hash, _ := blackboard.ComputeArtefactHash(artefact)
+	artefact.ID = hash
 
 	err = bbClient.CreateArtefact(ctx, artefact)
 	require.NoError(t, err)
@@ -474,16 +485,22 @@ func TestDebugProtocol_ReviewConsensusReached(t *testing.T) {
 
 	// Create review artefact with approval (empty payload)
 	reviewArtefact := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeReview,
-		Type:            "Review",
-		Payload:         "{}",
-		SourceArtefacts: []string{artefact.ID},
-		ProducedByRole:  "reviewer",
-		CreatedAtMs:     time.Now().UnixMilli(),
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: uuid.New().String(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeReview,
+			Type:            "Review",
+			ParentHashes:    []string{artefact.ID},
+			ProducedByRole:  "reviewer",
+			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "{}",
+		},
 	}
+	reviewHash, _ := blackboard.ComputeArtefactHash(reviewArtefact)
+	reviewArtefact.ID = reviewHash
 
 	err = bbClient.CreateArtefact(ctx, reviewArtefact)
 	require.NoError(t, err)
@@ -520,7 +537,6 @@ func TestDebugProtocol_ManualReview(t *testing.T) {
 	_, redisAddr, cleanup := startTestRedis(t)
 	defer cleanup()
 
-
 	instanceName := "test-manual-review-" + uuid.New().String()[:8]
 
 	// Setup
@@ -532,7 +548,7 @@ func TestDebugProtocol_ManualReview(t *testing.T) {
 		Agents: map[string]config.Agent{
 			"reviewer": {
 				Image:           "reviewer:latest",
-				BiddingStrategy: "review",
+				BiddingStrategy: config.BiddingStrategyConfig{Type: "review"},
 			},
 		},
 	}
@@ -559,16 +575,22 @@ func TestDebugProtocol_ManualReview(t *testing.T) {
 
 	// Create artefact
 	artefact := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "CodeChange",
-		Payload:         "code-payload",
-		SourceArtefacts: []string{},
-		ProducedByRole:  "developer",
-		CreatedAtMs:     time.Now().UnixMilli(),
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: uuid.New().String(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "CodeChange",
+			ParentHashes:    []string{},
+			ProducedByRole:  "developer",
+			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "code-payload",
+		},
 	}
+	hash, _ := blackboard.ComputeArtefactHash(artefact)
+	artefact.ID = hash
 
 	err = bbClient.CreateArtefact(ctx, artefact)
 	require.NoError(t, err)
@@ -629,7 +651,6 @@ func TestDebugProtocol_SessionExpiration(t *testing.T) {
 	_, redisAddr, cleanup := startTestRedis(t)
 	defer cleanup()
 
-
 	instanceName := "test-expiration-" + uuid.New().String()[:8]
 
 	bbClient, err := blackboard.NewClient(&redis.Options{Addr: redisAddr, DB: 0}, instanceName)
@@ -640,7 +661,7 @@ func TestDebugProtocol_SessionExpiration(t *testing.T) {
 		Agents: map[string]config.Agent{
 			"agent": {
 				Image:           "agent:latest",
-				BiddingStrategy: "exclusive",
+				BiddingStrategy: config.BiddingStrategyConfig{Type: "exclusive"},
 			},
 		},
 	}
@@ -666,16 +687,22 @@ func TestDebugProtocol_SessionExpiration(t *testing.T) {
 
 	// Create artefact to trigger pause
 	artefact := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "TestItem",
-		Payload:         "payload",
-		SourceArtefacts: []string{},
-		ProducedByRole:  "agent",
-		CreatedAtMs:     time.Now().UnixMilli(),
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: uuid.New().String(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "TestItem",
+			ParentHashes:    []string{},
+			ProducedByRole:  "agent",
+			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "payload",
+		},
 	}
+	hash, _ := blackboard.ComputeArtefactHash(artefact)
+	artefact.ID = hash
 
 	err = bbClient.CreateArtefact(ctx, artefact)
 	require.NoError(t, err)

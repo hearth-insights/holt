@@ -16,12 +16,13 @@ func TestTopologyValidation_ValidRootArtefact(t *testing.T) {
 	engine, _, _ := setupTestEngine(t)
 
 	// Create root artefact (CLI/user-generated)
-	rootArtefact := &blackboard.VerifiableArtefact{
+	rootArtefact := &blackboard.Artefact{
 		Header: blackboard.ArtefactHeader{
 			ParentHashes:    []string{}, // Empty - root artefact
 			LogicalThreadID: blackboard.NewID(),
 			Version:         1,
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 			ProducedByRole:  "user", // Root artefact
 			StructuralType:  blackboard.StructuralTypeStandard,
 			Type:            "GoalDefined",
@@ -48,28 +49,35 @@ func TestTopologyValidation_ValidOrchestratorArtefact(t *testing.T) {
 	engine, bbClient, _ := setupTestEngine(t)
 
 	// Create parent artefact so it's not an orphan
-	parentHash := "parent-hash-123"
 	parentArtefact := &blackboard.Artefact{
-		ID:              parentHash,
-		LogicalID:       blackboard.NewID(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "Test",
-		Payload:         "test",
-		SourceArtefacts: []string{},
-		ProducedByRole:  "user",
-		CreatedAtMs:     time.Now().UnixMilli(),
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "Test",
+			ProducedByRole:  "user",
+			ParentHashes:    []string{},
+			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "test",
+		},
 	}
-	err := bbClient.CreateArtefact(ctx, parentArtefact)
+	parentHash, err := blackboard.ComputeArtefactHash(parentArtefact)
+	require.NoError(t, err)
+	parentArtefact.ID = parentHash
+	err = bbClient.CreateArtefact(ctx, parentArtefact)
 	require.NoError(t, err)
 
 	// Create orchestrator artefact (Failure/Terminal)
-	orchArtefact := &blackboard.VerifiableArtefact{
+	orchArtefact := &blackboard.Artefact{
 		Header: blackboard.ArtefactHeader{
 			ParentHashes:    []string{parentHash},
 			LogicalThreadID: blackboard.NewID(),
 			Version:         1,
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 			ProducedByRole:  "orchestrator", // Trusted authority
 			StructuralType:  blackboard.StructuralTypeFailure,
 			Type:            "SystemFailure",
@@ -98,15 +106,20 @@ func TestTopologyValidation_ValidAgentArtefact(t *testing.T) {
 	// Create parent artefact
 	parentID := blackboard.NewID()
 	parentArtefact := &blackboard.Artefact{
-		ID:              parentID,
-		LogicalID:       blackboard.NewID(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "GoalDefined",
-		Payload:         "Create feature",
-		SourceArtefacts: []string{},
-		ProducedByRole:  "user",
-		CreatedAtMs:     time.Now().UnixMilli(),
+		ID: parentID,
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "GoalDefined",
+			ProducedByRole:  "user",
+			ParentHashes:    []string{},
+			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "Create feature",
+		},
 	}
 	err := bbClient.CreateArtefact(ctx, parentArtefact)
 	require.NoError(t, err)
@@ -123,12 +136,13 @@ func TestTopologyValidation_ValidAgentArtefact(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create agent artefact with valid topology
-	agentArtefact := &blackboard.VerifiableArtefact{
+	agentArtefact := &blackboard.Artefact{
 		Header: blackboard.ArtefactHeader{
 			ParentHashes:    []string{parentID}, // References parent
 			LogicalThreadID: blackboard.NewID(),
 			Version:         1,
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 			ProducedByRole:  "test-agent",
 			StructuralType:  blackboard.StructuralTypeStandard,
 			Type:            "CodeCommit",
@@ -155,12 +169,13 @@ func TestTopologyValidation_RejectRootArtefactWithClaim(t *testing.T) {
 	engine, _, _ := setupTestEngine(t)
 
 	// Create malicious root artefact with ClaimID
-	maliciousRoot := &blackboard.VerifiableArtefact{
+	maliciousRoot := &blackboard.Artefact{
 		Header: blackboard.ArtefactHeader{
 			ParentHashes:    []string{}, // Root
 			LogicalThreadID: blackboard.NewID(),
 			Version:         1,
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 			ProducedByRole:  "user",
 			StructuralType:  blackboard.StructuralTypeStandard,
 			Type:            "GoalDefined",
@@ -191,26 +206,32 @@ func TestTopologyValidation_RejectMissingClaimID(t *testing.T) {
 	// Create parent artefact
 	parentID := blackboard.NewID()
 	parentArtefact := &blackboard.Artefact{
-		ID:              parentID,
-		LogicalID:       blackboard.NewID(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "GoalDefined",
-		Payload:         "Create feature",
-		SourceArtefacts: []string{},
-		ProducedByRole:  "user",
-		CreatedAtMs:     time.Now().UnixMilli(),
+		ID: parentID,
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "GoalDefined",
+			ProducedByRole:  "user",
+			ParentHashes:    []string{},
+			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "Create feature",
+		},
 	}
 	err := bbClient.CreateArtefact(ctx, parentArtefact)
 	require.NoError(t, err)
 
 	// Create agent artefact WITHOUT ClaimID
-	unboundArtefact := &blackboard.VerifiableArtefact{
+	unboundArtefact := &blackboard.Artefact{
 		Header: blackboard.ArtefactHeader{
 			ParentHashes:    []string{parentID},
 			LogicalThreadID: blackboard.NewID(),
 			Version:         1,
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 			ProducedByRole:  "malicious-agent",
 			StructuralType:  blackboard.StructuralTypeStandard,
 			Type:            "CodeCommit",
@@ -240,26 +261,32 @@ func TestTopologyValidation_RejectInvalidClaimReference(t *testing.T) {
 	// Create parent artefact
 	parentID := blackboard.NewID()
 	parentArtefact := &blackboard.Artefact{
-		ID:              parentID,
-		LogicalID:       blackboard.NewID(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "GoalDefined",
-		Payload:         "Create feature",
-		SourceArtefacts: []string{},
-		ProducedByRole:  "user",
-		CreatedAtMs:     time.Now().UnixMilli(),
+		ID: parentID,
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "GoalDefined",
+			ProducedByRole:  "user",
+			ParentHashes:    []string{},
+			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "Create feature",
+		},
 	}
 	err := bbClient.CreateArtefact(ctx, parentArtefact)
 	require.NoError(t, err)
 
 	// Create agent artefact with non-existent ClaimID
-	invalidClaim := &blackboard.VerifiableArtefact{
+	invalidClaim := &blackboard.Artefact{
 		Header: blackboard.ArtefactHeader{
 			ParentHashes:    []string{parentID},
 			LogicalThreadID: blackboard.NewID(),
 			Version:         1,
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 			ProducedByRole:  "test-agent",
 			StructuralType:  blackboard.StructuralTypeStandard,
 			Type:            "CodeCommit",
@@ -289,15 +316,20 @@ func TestTopologyValidation_RejectTerminatedClaim(t *testing.T) {
 	// Create parent artefact
 	parentID := blackboard.NewID()
 	parentArtefact := &blackboard.Artefact{
-		ID:              parentID,
-		LogicalID:       blackboard.NewID(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "GoalDefined",
-		Payload:         "Create feature",
-		SourceArtefacts: []string{},
-		ProducedByRole:  "user",
-		CreatedAtMs:     time.Now().UnixMilli(),
+		ID: parentID,
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "GoalDefined",
+			ProducedByRole:  "user",
+			ParentHashes:    []string{},
+			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "Create feature",
+		},
 	}
 	err := bbClient.CreateArtefact(ctx, parentArtefact)
 	require.NoError(t, err)
@@ -314,12 +346,13 @@ func TestTopologyValidation_RejectTerminatedClaim(t *testing.T) {
 	require.NoError(t, err)
 
 	// Agent tries to use terminated claim
-	reusedClaim := &blackboard.VerifiableArtefact{
+	reusedClaim := &blackboard.Artefact{
 		Header: blackboard.ArtefactHeader{
 			ParentHashes:    []string{parentID},
 			LogicalThreadID: blackboard.NewID(),
 			Version:         1,
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 			ProducedByRole:  "test-agent",
 			StructuralType:  blackboard.StructuralTypeStandard,
 			Type:            "CodeCommit",
@@ -349,15 +382,20 @@ func TestTopologyValidation_RejectParentLinkageViolation(t *testing.T) {
 	// Create artefact A
 	artefactA := blackboard.NewID()
 	artA := &blackboard.Artefact{
-		ID:              artefactA,
-		LogicalID:       blackboard.NewID(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "GoalDefined",
-		Payload:         "Feature A",
-		SourceArtefacts: []string{},
-		ProducedByRole:  "user",
-		CreatedAtMs:     time.Now().UnixMilli(),
+		ID: artefactA,
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "GoalDefined",
+			ProducedByRole:  "user",
+			ParentHashes:    []string{},
+			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "Feature A",
+		},
 	}
 	err := bbClient.CreateArtefact(ctx, artA)
 	require.NoError(t, err)
@@ -365,15 +403,20 @@ func TestTopologyValidation_RejectParentLinkageViolation(t *testing.T) {
 	// Create artefact B (unrelated)
 	artefactB := blackboard.NewID()
 	artB := &blackboard.Artefact{
-		ID:              artefactB,
-		LogicalID:       blackboard.NewID(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "GoalDefined",
-		Payload:         "Feature B",
-		SourceArtefacts: []string{},
-		ProducedByRole:  "user",
-		CreatedAtMs:     time.Now().UnixMilli(),
+		ID: artefactB,
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "GoalDefined",
+			ProducedByRole:  "user",
+			ParentHashes:    []string{},
+			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "Feature B",
+		},
 	}
 	err = bbClient.CreateArtefact(ctx, artB)
 	require.NoError(t, err)
@@ -390,12 +433,13 @@ func TestTopologyValidation_RejectParentLinkageViolation(t *testing.T) {
 	require.NoError(t, err)
 
 	// Agent submits work referencing artefact B (not A)
-	wrongParent := &blackboard.VerifiableArtefact{
+	wrongParent := &blackboard.Artefact{
 		Header: blackboard.ArtefactHeader{
 			ParentHashes:    []string{artefactB}, // WRONG - claim is for A, not B
 			LogicalThreadID: blackboard.NewID(),
 			Version:         1,
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 			ProducedByRole:  "test-agent",
 			StructuralType:  blackboard.StructuralTypeStandard,
 			Type:            "CodeCommit",
@@ -433,15 +477,20 @@ func TestTopologyValidation_AllowMultipleParents(t *testing.T) {
 	// Create artefact A (target)
 	artefactA := blackboard.NewID()
 	artA := &blackboard.Artefact{
-		ID:              artefactA,
-		LogicalID:       blackboard.NewID(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "GoalDefined",
-		Payload:         "Feature A",
-		SourceArtefacts: []string{},
-		ProducedByRole:  "user",
-		CreatedAtMs:     time.Now().UnixMilli(),
+		ID: artefactA,
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "GoalDefined",
+			ProducedByRole:  "user",
+			ParentHashes:    []string{},
+			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "Feature A",
+		},
 	}
 	err := bbClient.CreateArtefact(ctx, artA)
 	require.NoError(t, err)
@@ -449,15 +498,20 @@ func TestTopologyValidation_AllowMultipleParents(t *testing.T) {
 	// Create artefact B (context)
 	artefactB := blackboard.NewID()
 	artB := &blackboard.Artefact{
-		ID:              artefactB,
-		LogicalID:       blackboard.NewID(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "Requirements",
-		Payload:         "Requirements doc",
-		SourceArtefacts: []string{},
-		ProducedByRole:  "user",
-		CreatedAtMs:     time.Now().UnixMilli(),
+		ID: artefactB,
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "Requirements",
+			ProducedByRole:  "user",
+			ParentHashes:    []string{},
+			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "Requirements doc",
+		},
 	}
 	err = bbClient.CreateArtefact(ctx, artB)
 	require.NoError(t, err)
@@ -474,12 +528,13 @@ func TestTopologyValidation_AllowMultipleParents(t *testing.T) {
 	require.NoError(t, err)
 
 	// Agent submits work with multiple parents (A + B for context)
-	multiParent := &blackboard.VerifiableArtefact{
+	multiParent := &blackboard.Artefact{
 		Header: blackboard.ArtefactHeader{
 			ParentHashes:    []string{artefactA, artefactB}, // Both A (assigned) and B (context)
 			LogicalThreadID: blackboard.NewID(),
 			Version:         1,
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 			ProducedByRole:  "test-agent",
 			StructuralType:  blackboard.StructuralTypeStandard,
 			Type:            "CodeCommit",

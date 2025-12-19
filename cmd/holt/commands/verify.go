@@ -157,7 +157,7 @@ func runVerify(cmd *cobra.Command, args []string) error {
 	}
 
 	// Phase 6: Fetch V2 artefact
-	artefact, err := bbClient.GetVerifiableArtefact(ctx, fullID)
+	artefact, err := bbClient.GetArtefact(ctx, fullID)
 	if err != nil {
 		if blackboard.IsNotFound(err) {
 			return printer.Error(

@@ -33,7 +33,7 @@ Content-addressable artefacts identified by SHA-256 hash:
   "id": "a3f2b9c4e8d6f1a7b5c3e9d2f4a8b6c1e7d3f9a2b8c4e6d1f7a3b9c5e2d8f4a1",
   "header": {
     "parent_hashes": ["b8c4e6d1f7a3..."],  // Array of parent SHA-256 hashes
-    "logical_thread_id": "550e8400-e29b-41d4-a716-446655440000",  // Groups versions
+    "logical_thread_id": "0508eb36a3d0dd327c235b6d900f26455a2ee715300f1c4b78c3d3edce8daaaa",  // Groups versions
     "version": 2,
     "created_at_ms": 1704067200000,  // CRITICAL: Part of hash computation
     "produced_by_role": "go-coder-agent",
@@ -99,7 +99,7 @@ holt:{instance_name}:security:lockdown         # Global lockdown circuit breaker
 ```
 
 **V2 Artefact ID Format**:
-- V1: 36 characters (e.g., `550e8400-e29b-41d4-a716-446655440000`)
+- V1: 36 characters (e.g., `550e8400-e29b-41d4-a716-446655440000`) # UUIDs TO BE REMOVED
 - V2: 64 characters (e.g., `a3f2b9c4e8d6f1a7b5c3e9d2f4a8b6c1e7d3f9a2b8c4e6d1f7a3b9c5e2d8f4a1`)
 
 ## **Pub/Sub Channels**

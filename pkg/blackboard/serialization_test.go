@@ -12,15 +12,20 @@ import (
 // TestArtefactRoundTrip tests that artefact serialization and deserialization maintains perfect fidelity
 func TestArtefactRoundTrip(t *testing.T) {
 	original := &Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  StructuralTypeStandard,
-		Type:            "CodeCommit",
-		ProducedByRole:  "test-agent",
-		Payload:         "abc123def",
-		SourceArtefacts: []string{uuid.New().String(), uuid.New().String()},
-		ContextForRoles: []string{}, // M4.3: Explicitly set to empty slice
+		ID: uuid.New().String(),
+		Header: ArtefactHeader{
+			LogicalThreadID: uuid.New().String(),
+			Version:         1,
+			StructuralType:  StructuralTypeStandard,
+			Type:            "CodeCommit",
+			ProducedByRole:  "test-agent",
+			ParentHashes:    []string{uuid.New().String(), uuid.New().String()},
+			ContextForRoles: []string{}, // M4.3: Explicitly set to empty slice
+			Metadata:        "{}",       // M5.1: Explicitly set to empty object
+		},
+		Payload: ArtefactPayload{
+			Content: "abc123def",
+		},
 	}
 
 	// Convert to hash
@@ -50,15 +55,20 @@ func TestArtefactRoundTrip(t *testing.T) {
 // TestArtefactRoundTrip_EmptySourceArtefacts tests round-trip with empty source artefacts array
 func TestArtefactRoundTrip_EmptySourceArtefacts(t *testing.T) {
 	original := &Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  StructuralTypeStandard,
-		Type:            "GoalDefined",
-		ProducedByRole:  "test-agent",
-		Payload:         "Create a REST API",
-		SourceArtefacts: []string{},     // Empty array
-		ContextForRoles: []string{},     // M4.3: Explicitly set to empty slice
+		ID: uuid.New().String(),
+		Header: ArtefactHeader{
+			LogicalThreadID: uuid.New().String(),
+			Version:         1,
+			StructuralType:  StructuralTypeStandard,
+			Type:            "GoalDefined",
+			ProducedByRole:  "test-agent",
+			ParentHashes:    []string{}, // Empty array
+			ContextForRoles: []string{}, // M4.3: Explicitly set to empty slice
+			Metadata:        "{}",       // M5.1: Explicitly set to empty object
+		},
+		Payload: ArtefactPayload{
+			Content: "Create a REST API",
+		},
 	}
 
 	hash, err := ArtefactToHash(original)
@@ -81,22 +91,26 @@ func TestArtefactRoundTrip_EmptySourceArtefacts(t *testing.T) {
 	}
 
 	// Specifically check that result has empty slice, not nil
-	if result.SourceArtefacts == nil {
-		t.Error("deserialized source artefacts should be empty slice, not nil")
+	if result.Header.ParentHashes == nil {
+		t.Error("deserialized parent hashes should be empty slice, not nil")
 	}
 }
 
 // TestArtefactRoundTrip_NilSourceArtefacts tests that nil source artefacts converts to empty array
 func TestArtefactRoundTrip_NilSourceArtefacts(t *testing.T) {
 	original := &Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  StructuralTypeStandard,
-		Type:            "GoalDefined",
+		ID: uuid.New().String(),
+		Header: ArtefactHeader{
+			LogicalThreadID: uuid.New().String(),
+			Version:         1,
+			StructuralType:  StructuralTypeStandard,
+			Type:            "GoalDefined",
 			ProducedByRole:  "test-agent",
-		Payload:         "Create a REST API",
-		SourceArtefacts: nil, // Nil slice
+			ParentHashes:    nil, // Nil slice
+		},
+		Payload: ArtefactPayload{
+			Content: "Create a REST API",
+		},
 	}
 
 	hash, err := ArtefactToHash(original)
@@ -115,11 +129,11 @@ func TestArtefactRoundTrip_NilSourceArtefacts(t *testing.T) {
 	}
 
 	// Result should have empty slice, not nil
-	if result.SourceArtefacts == nil {
-		t.Error("nil source artefacts should deserialize to empty slice")
+	if result.Header.ParentHashes == nil {
+		t.Error("nil parent hashes should deserialize to empty slice")
 	}
-	if len(result.SourceArtefacts) != 0 {
-		t.Errorf("nil source artefacts should deserialize to empty slice, got length %d", len(result.SourceArtefacts))
+	if len(result.Header.ParentHashes) != 0 {
+		t.Errorf("nil parent hashes should deserialize to empty slice, got length %d", len(result.Header.ParentHashes))
 	}
 }
 
@@ -138,7 +152,7 @@ func TestHashToArtefact_MalformedJSON(t *testing.T) {
 
 	_, err := HashToArtefact(hash)
 	if err == nil {
-		t.Error("expected error for malformed source_artefacts JSON, got nil")
+		t.Error("expected error for malformed parent_hashes JSON, got nil")
 	}
 }
 
@@ -151,7 +165,7 @@ func TestHashToArtefact_InvalidVersion(t *testing.T) {
 		"structural_type":  "Standard",
 		"type":             "CodeCommit",
 		"payload":          "abc123",
-		"source_artefacts": "[]",
+		"parent_hashes":    "[]",
 		"produced_by_role": "go-coder",
 	}
 
@@ -274,14 +288,18 @@ func TestArtefactToHash_AllStructuralTypes(t *testing.T) {
 	for _, st := range structuralTypes {
 		t.Run(string(st), func(t *testing.T) {
 			artefact := &Artefact{
-				ID:              uuid.New().String(),
-				LogicalID:       uuid.New().String(),
-				Version:         1,
-				StructuralType:  st,
-				Type:            "Test",
-			ProducedByRole:  "test-agent",
-				Payload:         "test payload",
-				SourceArtefacts: []string{},
+				ID: uuid.New().String(),
+				Header: ArtefactHeader{
+					LogicalThreadID: uuid.New().String(),
+					Version:         1,
+					StructuralType:  st,
+					Type:            "Test",
+					ProducedByRole:  "test-agent",
+					ParentHashes:    []string{},
+				},
+				Payload: ArtefactPayload{
+					Content: "test payload",
+				},
 			}
 
 			hash, err := ArtefactToHash(artefact)
@@ -475,6 +493,123 @@ func TestHashToClaim_M3_5_MalformedGrantQueue(t *testing.T) {
 	_, err := HashToClaim(hash)
 	if err == nil {
 		t.Error("expected error for malformed grant_queue JSON, got nil")
+	}
+}
+
+// M5.1: Test metadata round-trip with valid JSON
+func TestArtefactRoundTrip_WithMetadata(t *testing.T) {
+	original := &Artefact{
+		ID: uuid.New().String(),
+		Header: ArtefactHeader{
+			LogicalThreadID: uuid.New().String(),
+			Version:         1,
+			StructuralType:  StructuralTypeStandard,
+			Type:            "TestResult",
+			ProducedByRole:  "test-agent",
+			ParentHashes:    []string{uuid.New().String()},
+			ContextForRoles: []string{},
+			Metadata:        `{"batch_size":"5","status":"complete"}`, // M5.1: Valid JSON metadata
+		},
+		Payload: ArtefactPayload{
+			Content: "test-data",
+		},
+	}
+
+	hash, err := ArtefactToHash(original)
+	if err != nil {
+		t.Fatalf("ArtefactToHash failed: %v", err)
+	}
+
+	// Verify metadata is present in hash
+	if hash["metadata"] != `{"batch_size":"5","status":"complete"}` {
+		t.Errorf("metadata not preserved in hash: got %q", hash["metadata"])
+	}
+
+	stringHash := make(map[string]string)
+	for k, v := range hash {
+		stringHash[k] = toString(v)
+	}
+
+	result, err := HashToArtefact(stringHash)
+	if err != nil {
+		t.Fatalf("HashToArtefact failed: %v", err)
+	}
+
+	if result.Header.Metadata != original.Header.Metadata {
+		t.Errorf("metadata mismatch:\noriginal: %s\nresult:   %s", original.Header.Metadata, result.Header.Metadata)
+	}
+}
+
+// M5.1: Test metadata defaults to empty object when omitted
+func TestArtefactRoundTrip_EmptyMetadata(t *testing.T) {
+	original := &Artefact{
+		ID: uuid.New().String(),
+		Header: ArtefactHeader{
+			LogicalThreadID: uuid.New().String(),
+			Version:         1,
+			StructuralType:  StructuralTypeStandard,
+			Type:            "TestResult",
+			ProducedByRole:  "test-agent",
+			ParentHashes:    []string{},
+			ContextForRoles: []string{},
+			Metadata:        "", // M5.1: Empty metadata
+		},
+		Payload: ArtefactPayload{
+			Content: "test-data",
+		},
+	}
+
+	hash, err := ArtefactToHash(original)
+	if err != nil {
+		t.Fatalf("ArtefactToHash failed: %v", err)
+	}
+
+	// Verify metadata defaults to "{}"
+	if hash["metadata"] != "{}" {
+		t.Errorf("expected metadata to default to '{}', got %q", hash["metadata"])
+	}
+
+	stringHash := make(map[string]string)
+	for k, v := range hash {
+		stringHash[k] = toString(v)
+	}
+
+	result, err := HashToArtefact(stringHash)
+	if err != nil {
+		t.Fatalf("HashToArtefact failed: %v", err)
+	}
+
+	// Result should have "{}" for empty metadata
+	if result.Header.Metadata != "{}" {
+		t.Errorf("expected metadata to be '{}', got %q", result.Header.Metadata)
+	}
+}
+
+// M5.1: Test metadata defaults to empty object when missing from hash
+func TestHashToArtefact_MissingMetadata(t *testing.T) {
+	hash := map[string]string{
+		"id":                uuid.New().String(),
+		"logical_id":        uuid.New().String(),
+		"version":           "1",
+		"structural_type":   "Standard",
+		"type":              "TestResult",
+		"payload":           "test-data",
+		"parent_hashes":     "[]",
+		"produced_by_role":  "test-agent",
+		"created_at_ms":     "1234567890",
+		"context_for_roles": "[]",
+		"claim_id":          "",
+		// metadata field is missing (simulating old data)
+	}
+
+	result, err := HashToArtefact(hash)
+	if err != nil {
+		t.Fatalf("HashToArtefact failed: %v", err)
+	}
+
+	// Should default to "{}"
+	if result.Header.Metadata != "{}" {
+		t.Errorf("expected metadata to default to '{}' for missing field, got %q", result.Header.Metadata)
 	}
 }
 

@@ -28,6 +28,17 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-w -s -X 
 # Runtime stage
 FROM alpine:latest
 
+# Build arguments for labels (passed through from build stage)
+ARG VERSION=dev
+ARG COMMIT=none
+ARG DATE=unknown
+
+# Add version labels for introspection
+LABEL org.opencontainers.image.version="${VERSION}"
+LABEL org.opencontainers.image.revision="${COMMIT}"
+LABEL org.opencontainers.image.created="${DATE}"
+LABEL holt.component="orchestrator"
+
 # Install ca-certificates for HTTPS and git for M4.7 System Spine
 RUN apk --no-cache add ca-certificates git
 

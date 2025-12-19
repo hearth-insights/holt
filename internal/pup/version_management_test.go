@@ -3,10 +3,11 @@ package pup
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/hearth-insights/holt/pkg/blackboard"
 	"github.com/google/uuid"
+	"github.com/hearth-insights/holt/pkg/blackboard"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -45,29 +46,44 @@ func TestCreateReworkArtefact_VersionIncrement(t *testing.T) {
 
 	// Create target artefact (v1)
 	targetArtefact := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "CodeCommit",
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "CodeCommit",
 			ProducedByRole:  "test-agent",
-		Payload:         "v1-hash",
-		SourceArtefacts: []string{},
+			ParentHashes:    []string{},
+			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "v1-hash",
+		},
 	}
-	err := bbClient.CreateArtefact(ctx, targetArtefact)
+	targetHash, err := blackboard.ComputeArtefactHash(targetArtefact)
+	require.NoError(t, err)
+	targetArtefact.ID = targetHash
+	err = bbClient.CreateArtefact(ctx, targetArtefact)
 	require.NoError(t, err)
 
 	// Create review artefact
 	reviewArtefact := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeReview,
-		Type:            "Review",
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeReview,
+			Type:            "Review",
 			ProducedByRole:  "test-agent",
-		Payload:         `{"issue": "needs tests"}`,
-		SourceArtefacts: []string{targetArtefact.ID},
+			ParentHashes:    []string{targetArtefact.ID},
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: `{"issue": "needs tests"}`,
+		},
 	}
+	reviewHash, err := blackboard.ComputeArtefactHash(reviewArtefact)
+	require.NoError(t, err)
+	reviewArtefact.ID = reviewHash
 	err = bbClient.CreateArtefact(ctx, reviewArtefact)
 	require.NoError(t, err)
 
@@ -86,7 +102,7 @@ func TestCreateReworkArtefact_VersionIncrement(t *testing.T) {
 
 	// Create tool output
 	toolOutput := &ToolOutput{
-		ArtefactType:    "CodeCommit",
+		ArtefactType:    "TestType", // Matches target type
 		ArtefactPayload: "v2-hash",
 		Summary:         "Fixed tests",
 	}
@@ -96,27 +112,27 @@ func TestCreateReworkArtefact_VersionIncrement(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify version was incremented
-	assert.Equal(t, 2, reworkArtefact.Version)
+	assert.Equal(t, 2, reworkArtefact.Header.Version)
 
 	// Verify logical_id was preserved
-	assert.Equal(t, targetArtefact.LogicalID, reworkArtefact.LogicalID)
+	assert.Equal(t, targetArtefact.Header.LogicalThreadID, reworkArtefact.Header.LogicalThreadID)
 
 	// Verify type was preserved
-	assert.Equal(t, targetArtefact.Type, reworkArtefact.Type)
+	assert.Equal(t, targetArtefact.Header.Type, reworkArtefact.Header.Type)
 
 	// Verify payload from tool output
-	assert.Equal(t, "v2-hash", reworkArtefact.Payload)
+	assert.Equal(t, "v2-hash", reworkArtefact.Payload.Content)
 
 	// Verify source_artefacts includes target + review
-	assert.Len(t, reworkArtefact.SourceArtefacts, 2)
-	assert.Contains(t, reworkArtefact.SourceArtefacts, targetArtefact.ID)
-	assert.Contains(t, reworkArtefact.SourceArtefacts, reviewArtefact.ID)
+	assert.Len(t, reworkArtefact.Header.ParentHashes, 2)
+	assert.Contains(t, reworkArtefact.Header.ParentHashes, targetArtefact.ID)
+	assert.Contains(t, reworkArtefact.Header.ParentHashes, reviewArtefact.ID)
 
 	// Verify produced by correct role
-	assert.Equal(t, "Coder", reworkArtefact.ProducedByRole)
+	assert.Equal(t, "Coder", reworkArtefact.Header.ProducedByRole)
 
 	// Verify structural type from tool output
-	assert.Equal(t, blackboard.StructuralTypeStandard, reworkArtefact.StructuralType)
+	assert.Equal(t, blackboard.StructuralTypeStandard, reworkArtefact.Header.StructuralType)
 }
 
 func TestCreateReworkArtefact_MultipleReviews(t *testing.T) {
@@ -125,42 +141,66 @@ func TestCreateReworkArtefact_MultipleReviews(t *testing.T) {
 
 	// Create target artefact (v2)
 	targetArtefact := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         2,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "CodeCommit",
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         2,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "CodeCommit",
 			ProducedByRole:  "test-agent",
-		Payload:         "v2-hash",
-		SourceArtefacts: []string{},
+			ParentHashes:    []string{},
+			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "v2-hash",
+		},
 	}
-	err := bbClient.CreateArtefact(ctx, targetArtefact)
+	targetHash, err := blackboard.ComputeArtefactHash(targetArtefact)
+	require.NoError(t, err)
+	targetArtefact.ID = targetHash
+	err = bbClient.CreateArtefact(ctx, targetArtefact)
 	require.NoError(t, err)
 
 	// Create multiple review artefacts
 	review1 := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeReview,
-		Type:            "Review",
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeReview,
+			Type:            "Review",
 			ProducedByRole:  "test-agent",
-		Payload:         `{"issue": "needs tests"}`,
-		SourceArtefacts: []string{targetArtefact.ID},
+			ParentHashes:    []string{targetArtefact.ID},
+			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: `{"issue": "needs tests"}`,
+		},
 	}
+	review1Hash, err := blackboard.ComputeArtefactHash(review1)
+	require.NoError(t, err)
+	review1.ID = review1Hash
 	err = bbClient.CreateArtefact(ctx, review1)
 	require.NoError(t, err)
 
 	review2 := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeReview,
-		Type:            "Review",
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeReview,
+			Type:            "Review",
 			ProducedByRole:  "test-agent",
-		Payload:         `{"issue": "add docs"}`,
-		SourceArtefacts: []string{targetArtefact.ID},
+			ParentHashes:    []string{targetArtefact.ID},
+			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: `{"issue": "add docs"}`,
+		},
 	}
+	review2Hash, err := blackboard.ComputeArtefactHash(review2)
+	require.NoError(t, err)
+	review2.ID = review2Hash
 	err = bbClient.CreateArtefact(ctx, review2)
 	require.NoError(t, err)
 
@@ -189,13 +229,13 @@ func TestCreateReworkArtefact_MultipleReviews(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify version was incremented (v2 → v3)
-	assert.Equal(t, 3, reworkArtefact.Version)
+	assert.Equal(t, 3, reworkArtefact.Header.Version)
 
 	// Verify source_artefacts includes target + both reviews
-	assert.Len(t, reworkArtefact.SourceArtefacts, 3)
-	assert.Contains(t, reworkArtefact.SourceArtefacts, targetArtefact.ID)
-	assert.Contains(t, reworkArtefact.SourceArtefacts, review1.ID)
-	assert.Contains(t, reworkArtefact.SourceArtefacts, review2.ID)
+	assert.Len(t, reworkArtefact.Header.ParentHashes, 3)
+	assert.Contains(t, reworkArtefact.Header.ParentHashes, targetArtefact.ID)
+	assert.Contains(t, reworkArtefact.Header.ParentHashes, review1.ID)
+	assert.Contains(t, reworkArtefact.Header.ParentHashes, review2.ID)
 }
 
 func TestAssembleContext_WithAdditionalContextIDs(t *testing.T) {
@@ -204,43 +244,65 @@ func TestAssembleContext_WithAdditionalContextIDs(t *testing.T) {
 
 	// Create source artefact (GoalDefined)
 	goalArtefact := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "GoalDefined",
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "GoalDefined",
 			ProducedByRole:  "test-agent",
-		Payload:         "feature.txt",
-		SourceArtefacts: []string{},
+			ParentHashes:    []string{},
+			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "feature.txt",
+		},
 	}
-	err := bbClient.CreateArtefact(ctx, goalArtefact)
+	goalHash, err := blackboard.ComputeArtefactHash(goalArtefact)
+	require.NoError(t, err)
+	goalArtefact.ID = goalHash
+	err = bbClient.CreateArtefact(ctx, goalArtefact)
 	require.NoError(t, err)
 
 	// Create target artefact (v1) that references goal
 	targetArtefact := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "CodeCommit",
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "CodeCommit",
 			ProducedByRole:  "test-agent",
-		Payload:         "v1-hash",
-		SourceArtefacts: []string{goalArtefact.ID},
+			ParentHashes:    []string{goalArtefact.ID},
+			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "v1-hash",
+		},
 	}
+	targetHash, _ := blackboard.ComputeArtefactHash(targetArtefact)
+	targetArtefact.ID = targetHash
 	err = bbClient.CreateArtefact(ctx, targetArtefact)
 	require.NoError(t, err)
 
 	// Create review artefact
 	reviewArtefact := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeReview,
-		Type:            "Review",
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeReview,
+			Type:            "Review",
 			ProducedByRole:  "test-agent",
-		Payload:         `{"issue": "needs tests"}`,
-		SourceArtefacts: []string{targetArtefact.ID},
+			ParentHashes:    []string{targetArtefact.ID},
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: `{"issue": "needs tests"}`,
+		},
 	}
+	reviewHash, err := blackboard.ComputeArtefactHash(reviewArtefact)
+	require.NoError(t, err)
+	reviewArtefact.ID = reviewHash
 	err = bbClient.CreateArtefact(ctx, reviewArtefact)
 	require.NoError(t, err)
 
@@ -269,13 +331,13 @@ func TestAssembleContext_WithAdditionalContextIDs(t *testing.T) {
 	// Find the artefacts in context (order may vary)
 	var foundGoal, foundReview, foundTarget bool
 	for _, art := range contextChain {
-		if art.Type == "GoalDefined" {
+		if art.Header.Type == "GoalDefined" {
 			foundGoal = true
 		}
-		if art.Type == "Review" {
+		if art.Header.Type == "Review" {
 			foundReview = true
 		}
-		if art.Type == "CodeCommit" {
+		if art.Header.Type == "CodeCommit" {
 			foundTarget = true
 		}
 	}
@@ -291,29 +353,44 @@ func TestAssembleContext_RegularClaim_NoAdditionalContext(t *testing.T) {
 
 	// Create source artefact
 	goalArtefact := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "GoalDefined",
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "GoalDefined",
 			ProducedByRole:  "test-agent",
-		Payload:         "feature.txt",
-		SourceArtefacts: []string{},
+			ParentHashes:    []string{},
+			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "feature.txt",
+		},
 	}
-	err := bbClient.CreateArtefact(ctx, goalArtefact)
+	goalHash, err := blackboard.ComputeArtefactHash(goalArtefact)
+	require.NoError(t, err)
+	goalArtefact.ID = goalHash
+	err = bbClient.CreateArtefact(ctx, goalArtefact)
 	require.NoError(t, err)
 
 	// Create target artefact
 	targetArtefact := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "CodeCommit",
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "CodeCommit",
 			ProducedByRole:  "test-agent",
-		Payload:         "commit-hash",
-		SourceArtefacts: []string{goalArtefact.ID},
+			ParentHashes:    []string{goalArtefact.ID},
+			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "commit-hash",
+		},
 	}
+	targetHash, _ := blackboard.ComputeArtefactHash(targetArtefact)
+	targetArtefact.ID = targetHash
 	err = bbClient.CreateArtefact(ctx, targetArtefact)
 	require.NoError(t, err)
 
@@ -334,7 +411,7 @@ func TestAssembleContext_RegularClaim_NoAdditionalContext(t *testing.T) {
 
 	// Verify context only includes source artefacts
 	require.Len(t, contextChain, 1)
-	assert.Equal(t, "GoalDefined", contextChain[0].Type)
+	assert.Equal(t, "GoalDefined", contextChain[0].Header.Type)
 }
 
 func TestCreateResultArtefact_DetectsFeedbackClaim(t *testing.T) {
@@ -343,29 +420,43 @@ func TestCreateResultArtefact_DetectsFeedbackClaim(t *testing.T) {
 
 	// Create target artefact
 	targetArtefact := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "CodeCommit",
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "TestType", // Updated to match output type and avoid git validation
 			ProducedByRole:  "test-agent",
-		Payload:         "v1-hash",
-		SourceArtefacts: []string{},
+			ParentHashes:    []string{},
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "v1-hash",
+		},
 	}
-	err := bbClient.CreateArtefact(ctx, targetArtefact)
+	targetHash, err := blackboard.ComputeArtefactHash(targetArtefact)
+	require.NoError(t, err)
+	targetArtefact.ID = targetHash
+	err = bbClient.CreateArtefact(ctx, targetArtefact)
 	require.NoError(t, err)
 
 	// Create review artefact for additional context
 	reviewArtefact := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeReview,
-		Type:            "Review",
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeReview,
+			Type:            "Review",
 			ProducedByRole:  "test-agent",
-		Payload:         `{"issue": "needs fixes"}`,
-		SourceArtefacts: []string{targetArtefact.ID},
+			ParentHashes:    []string{targetArtefact.ID},
+			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: `{"issue": "needs fixes"}`,
+		},
 	}
+	reviewHash, err := blackboard.ComputeArtefactHash(reviewArtefact)
+	require.NoError(t, err)
+	reviewArtefact.ID = reviewHash
 	err = bbClient.CreateArtefact(ctx, reviewArtefact)
 	require.NoError(t, err)
 
@@ -384,19 +475,19 @@ func TestCreateResultArtefact_DetectsFeedbackClaim(t *testing.T) {
 
 	// Create tool output
 	toolOutput := &ToolOutput{
-		ArtefactType:    "TestArtefact",
+		ArtefactType:    "TestType", // Matches target type
 		ArtefactPayload: "v2-payload",
 		Summary:         "Fixed",
 	}
 
 	// Call createResultArtefact (should call createReworkArtefact internally)
-	resultArtefact, err := engine.createResultArtefact(ctx, feedbackClaim, toolOutput)
+	resultArtefact, err := engine.createResultArtefact(ctx, feedbackClaim, toolOutput, targetArtefact, "")
 	require.NoError(t, err)
 
 	// Verify it created a rework artefact (version incremented, logical_id preserved)
-	assert.Equal(t, 2, resultArtefact.Version, "Should increment version for feedback claim")
-	assert.Equal(t, targetArtefact.LogicalID, resultArtefact.LogicalID, "Should preserve logical_id for feedback claim")
-	assert.Equal(t, targetArtefact.Type, resultArtefact.Type, "Should preserve type for feedback claim")
+	assert.Equal(t, 2, resultArtefact.Header.Version, "Should increment version for feedback claim")
+	assert.Equal(t, targetArtefact.Header.LogicalThreadID, resultArtefact.Header.LogicalThreadID, "Should preserve logical_id for feedback claim")
+	assert.Equal(t, targetArtefact.Header.Type, resultArtefact.Header.Type, "Should preserve type for feedback claim")
 }
 
 func TestCreateResultArtefact_RegularClaim_NewThread(t *testing.T) {
@@ -405,16 +496,24 @@ func TestCreateResultArtefact_RegularClaim_NewThread(t *testing.T) {
 
 	// Create target artefact
 	targetArtefact := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "GoalDefined",
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "GoalDefined",
 			ProducedByRole:  "test-agent",
-		Payload:         "goal.txt",
-		SourceArtefacts: []string{},
+			ParentHashes:    []string{},
+			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "goal.txt",
+		},
 	}
-	err := bbClient.CreateArtefact(ctx, targetArtefact)
+	targetHash, err := blackboard.ComputeArtefactHash(targetArtefact)
+	require.NoError(t, err)
+	targetArtefact.ID = targetHash
+	err = bbClient.CreateArtefact(ctx, targetArtefact)
 	require.NoError(t, err)
 
 	// Create regular claim (NOT pending_assignment)
@@ -438,11 +537,11 @@ func TestCreateResultArtefact_RegularClaim_NewThread(t *testing.T) {
 	}
 
 	// Call createResultArtefact (should create new work)
-	resultArtefact, err := engine.createResultArtefact(ctx, regularClaim, toolOutput)
+	resultArtefact, err := engine.createResultArtefact(ctx, regularClaim, toolOutput, targetArtefact, "")
 	require.NoError(t, err)
 
 	// Verify it created new work (new logical_id, version 1)
-	assert.Equal(t, 1, resultArtefact.Version, "Should be version 1 for new work")
-	assert.NotEqual(t, targetArtefact.LogicalID, resultArtefact.LogicalID, "Should have new logical_id for new work")
-	assert.Equal(t, "TestArtefact", resultArtefact.Type, "Should use type from tool output")
+	assert.Equal(t, 1, resultArtefact.Header.Version, "Should be version 1 for new work")
+	assert.NotEqual(t, targetArtefact.Header.LogicalThreadID, resultArtefact.Header.LogicalThreadID, "Should have new logical_id for new work")
+	assert.Equal(t, "TestArtefact", resultArtefact.Header.Type, "Should use type from tool output")
 }

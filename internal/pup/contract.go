@@ -49,6 +49,11 @@ type ToolInput struct {
 
 	// LoadedKnowledge is the list of knowledge names that were loaded
 	LoadedKnowledge []string `json:"loaded_knowledge,omitempty"`
+
+	// M5.1: Synchronization fields (fan-in)
+	// Populated if the agent has a synchronize configuration
+	AncestorArtefact    *blackboard.Artefact `json:"ancestor_artefact,omitempty"`
+	DescendantArtefacts []interface{}        `json:"descendant_artefacts,omitempty"`
 }
 
 // ToolOutput represents the JSON structure that agent tools write to stdout.

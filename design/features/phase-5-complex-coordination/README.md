@@ -2,24 +2,103 @@
 
 **Goal**: Enable the orchestration of complex, non-linear workflows involving multi-dependency synchronization ("fan-in") and conditional pathing, moving Holt from a phased execution model to a full Directed Acyclic Graph (DAG) coordination platform.
 
+**Status**: **In Progress** - M5.1 Complete ✅
+
 ## **Phase Success Criteria**
 
-- A "synchronizer" or "aggregator" agent can be built that waits for several distinct artefacts from different workflow branches to be completed before it begins its own work.
-- The system can support conditional execution paths, where the creation of one type of artefact (e.g., `HighSeverityBugFound`) can trigger a completely different set of agents than another artefact (e.g., `TestsPassed`).
-- Complex, real-world CI/CD pipelines, including build, multi-platform testing, security scanning, and conditional deployment, can be fully modeled and executed within Holt.
-- The `holt watch` output and `holt hoard` audit trail can be used to clearly visualize and debug these complex, branching, and merging workflows.
+- ✅ **M5.1**: A "synchronizer" or "aggregator" agent can be built that waits for several distinct artefacts from different workflow branches to be completed before it begins its own work.
+- ⏳ **M5.2+**: The system can support conditional execution paths, where the creation of one type of artefact (e.g., `HighSeverityBugFound`) can trigger a completely different set of agents than another artefact (e.g., `TestsPassed`).
+- ⏳ **M5.2+**: Complex, real-world CI/CD pipelines, including build, multi-platform testing, security scanning, and conditional deployment, can be fully modeled and executed within Holt.
+- ✅ **M5.1**: The `holt watch` output and `holt hoard` audit trail can be used to clearly visualize and debug these complex, branching, and merging workflows.
 
-## **Key Features for This Phase**
+## **Milestones**
 
-1.  **Fan-In / Synchronization Pattern:**
-    *   Formalize the design pattern where an agent's bidding logic inspects the blackboard to verify that multiple, distinct prerequisite artefacts exist before submitting a `claim` or `exclusive` bid.
-    *   This allows an agent to act as a synchronization point, waiting for several parallel branches of a workflow to complete.
+### **M5.1: Declarative Fan-In Synchronization** ✅ **Complete**
 
-2.  **Conditional Pathing:**
-    *   Leverage dynamic bidding to a greater extent, allowing agents to create highly conditional workflows. For example, an agent could bid `exclusive` on a `TestResult` artefact only if its payload contains `"status": "failed"`, thereby creating a dedicated "failure recovery" branch in the workflow.
+Enables agents to declaratively wait for multiple prerequisite artefacts before executing.
 
-3.  **Advanced Context-Aware Bidding:**
-    *   Agent bidding scripts will evolve to become more sophisticated, using the `context_chain` and direct blackboard queries to make decisions based on the full history and state of the workflow, not just the target artefact.
+**Status**: Implementation complete, tested, documented
+
+**Key Features:**
+- **Named Pattern**: Wait for specific artefact types (e.g., TestResult + LintResult + SecurityScan)
+- **Producer-Declared Pattern**: Wait for N artefacts (N from runtime metadata)
+- **Multi-Artefact Output**: Agents can create multiple artefacts in one execution
+- **Atomic Indexing**: Reverse index for efficient graph traversal
+- **Deduplication Locks**: Prevent race conditions in concurrent workflows
+
+**Deliverables:**
+- ✅ Blackboard Lua script for atomic artefact creation
+- ✅ Reverse index (parent → children) for descendant traversal
+- ✅ Pup synchronizer mode with declarative configuration
+- ✅ Multi-artefact buffer-and-flush pattern
+- ✅ Comprehensive documentation and examples
+- ✅ 53 unit/integration/E2E tests (1,969 lines)
+
+**Example Agents:**
+- `agents/example-deployer-agent/` - Named pattern (CI/CD deployment)
+- `agents/example-batch-aggregator-agent/` - Producer-Declared pattern (data processing)
+
+**Documentation:**
+- Design: `design/features/phase-5-complex-coordination/M5.1-fan-in.md`
+- Guide: `docs/guides/fan-in-synchronization.md`
+- Reference: `docs/guides/agent-development.md` (Synchronizer Agents section)
+
+---
+
+### **M5.2: Automatic Workflow Completion** ⏳ **Next**
+
+Enable the Orchestrator to automatically detect workflow completion when no explicit Terminal artefact is produced.
+
+**Status**: Design complete, implementation pending
+
+**Key Features:**
+- **Quiescence Detection**: Automatically detect when all work is finished (all claims complete, no unclaimed artefacts)
+- **Auto-Termination**: Generate Terminal artefact when workflow reaches dead end
+- **Configurable**: `orchestrator.auto_terminate` setting to enable/disable
+- **Grace Period**: Configurable delay before termination to prevent jitter
+- **Watch Integration**: `holt watch --exit-on-completion` automatically exits
+
+**Design Document**: `design/features/phase-5-complex-coordination/M5.2-automatic-workflow-completion.md`
+
+---
+
+### **M5.3+: Future Enhancements** 💡 **Planned**
+
+Addressing M5.1 known limitations and expanding DAG capabilities:
+
+1.  **Timeout-Based Synchronization** (Addresses M5.1 Limitation: Partial Fan-In Hang)
+    *   Add `timeout` configuration to synchronizers (e.g., "wait 10 minutes for all prerequisites")
+    *   Create Failure artefact if timeout expires with diagnostic information
+    *   Prevent indefinite hangs on partial failures (4 of 5 shards complete scenario)
+    *   **Impact**: Resolves production blocker for long-running batch workflows
+
+2.  **Orphaned Lock Cleanup** (Addresses M5.1 Limitation: Deadlock on Pup Crash)
+    *   Heartbeat-based lock monitoring
+    *   Automatic lock cleanup on Pup crash detection
+    *   Configurable TTL with early release on health check failure
+    *   **Impact**: Reduces 10-minute deadlock window to seconds
+
+3.  **Reverse Index Garbage Collection** (Addresses M5.1 Limitation: Unbounded Growth)
+    *   `holt gc` command to clean up completed workflow indices
+    *   Automatic cleanup based on artefact age or instance lifecycle
+    *   Configurable retention policies
+    *   **Impact**: Enables long-running instances without memory bloat
+
+4.  **Cross-Ancestor Synchronization**
+    *   Wait for descendants of multiple ancestors (not just one)
+    *   Example: Merge results from parallel CodeCommit branches
+    *   **Impact**: Enables complex merge scenarios in multi-branch workflows
+
+5.  **Conditional Pathing**
+    *   Leverage dynamic bidding for highly conditional workflows
+    *   Example: Bid on `TestResult` only if payload contains `"status": "failed"`
+    *   Creates dedicated "failure recovery" branches
+    *   **Impact**: Enables conditional DAG execution paths
+
+6.  **Dynamic Wait Conditions**
+    *   Runtime-configurable synchronization requirements
+    *   Modify `wait_for` based on workflow state
+    *   **Impact**: Enables adaptive workflow patterns
 
 ## **Implementation Constraints**
 

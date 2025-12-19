@@ -345,7 +345,7 @@ services:
 // M3.7: Removed - map keys guarantee uniqueness - 			},
 // M3.7: Removed - map keys guarantee uniqueness - 		},
 // M3.7: Removed - map keys guarantee uniqueness - 	}
-// M3.7: Removed - map keys guarantee uniqueness - 
+// M3.7: Removed - map keys guarantee uniqueness -
 // M3.7: Removed - map keys guarantee uniqueness - 	err := config.Validate()
 // M3.7: Removed - map keys guarantee uniqueness - 	assert.Error(t, err)
 // M3.7: Removed - map keys guarantee uniqueness - 	assert.Contains(t, err.Error(), "duplicate agent role 'Coder' found")
@@ -353,7 +353,7 @@ services:
 // M3.7: Removed - map keys guarantee uniqueness - 	assert.Contains(t, err.Error(), "agent-2")
 // M3.7: Removed - map keys guarantee uniqueness - 	assert.Contains(t, err.Error(), "all agents must have unique roles in Phase 3")
 // M3.7: Removed - map keys guarantee uniqueness - }
-// M3.7: Removed - map keys guarantee uniqueness - 
+// M3.7: Removed - map keys guarantee uniqueness -
 // M3.7: Removed - map keys guarantee uniqueness - func TestValidate_UniqueRoles(t *testing.T) {
 // M3.7: Removed - map keys guarantee uniqueness - 	config := &HoltConfig{
 // M3.7: Removed - map keys guarantee uniqueness - 		Version: "1.0",
@@ -375,7 +375,7 @@ services:
 // M3.7: Removed - map keys guarantee uniqueness - 			},
 // M3.7: Removed - map keys guarantee uniqueness - 		},
 // M3.7: Removed - map keys guarantee uniqueness - 	}
-// M3.7: Removed - map keys guarantee uniqueness - 
+// M3.7: Removed - map keys guarantee uniqueness -
 // M3.7: Removed - map keys guarantee uniqueness - 	err := config.Validate()
 // M3.7: Removed - map keys guarantee uniqueness - 	assert.NoError(t, err)
 // M3.7: Removed - map keys guarantee uniqueness - }
@@ -401,15 +401,15 @@ services:
 // M3.7: Removed - map keys guarantee uniqueness - 			},
 // M3.7: Removed - map keys guarantee uniqueness - 		},
 // M3.7: Removed - map keys guarantee uniqueness - 	}
-// M3.7: Removed - map keys guarantee uniqueness - 
+// M3.7: Removed - map keys guarantee uniqueness -
 // M3.7: Removed - map keys guarantee uniqueness - 	// Should catch the first duplicate it encounters
 // M3.7: Removed - map keys guarantee uniqueness - 	err := config.Validate()
 // M3.7: Removed - map keys guarantee uniqueness - 	assert.Error(t, err)
 // M3.7: Removed - map keys guarantee uniqueness - 	assert.Contains(t, err.Error(), "duplicate agent role")
 // M3.7: Removed - map keys guarantee uniqueness - }
-// M3.7: Removed - map keys guarantee uniqueness - 
+// M3.7: Removed - map keys guarantee uniqueness -
 // M3.7: Removed - map keys guarantee uniqueness - // M3.3: Orchestrator config validation tests
-// M3.7: Removed - map keys guarantee uniqueness - 
+// M3.7: Removed - map keys guarantee uniqueness -
 // M3.7: Removed - map keys guarantee uniqueness - func TestValidate_OrchestratorConfig_DefaultValue(t *testing.T) {
 // M3.7: Removed - map keys guarantee uniqueness - 	config := &HoltConfig{
 // M3.7: Removed - map keys guarantee uniqueness - 		Version: "1.0",

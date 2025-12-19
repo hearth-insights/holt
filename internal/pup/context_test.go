@@ -10,29 +10,39 @@ import (
 func TestFilterContextArtefacts(t *testing.T) {
 	contextMap := map[string]*blackboard.Artefact{
 		"log-1": {
-			LogicalID:      "log-1",
-			Type:           "GoalDefined",
-			StructuralType: blackboard.StructuralTypeStandard,
+			Header: blackboard.ArtefactHeader{
+				LogicalThreadID: "log-1",
+				Type:            "GoalDefined",
+				StructuralType:  blackboard.StructuralTypeStandard,
+			},
 		},
 		"log-2": {
-			LogicalID:      "log-2",
-			Type:           "DesignSpec",
-			StructuralType: blackboard.StructuralTypeStandard,
+			Header: blackboard.ArtefactHeader{
+				LogicalThreadID: "log-2",
+				Type:            "DesignSpec",
+				StructuralType:  blackboard.StructuralTypeStandard,
+			},
 		},
 		"log-3": {
-			LogicalID:      "log-3",
-			Type:           "ToolFailure",
-			StructuralType: blackboard.StructuralTypeFailure,
+			Header: blackboard.ArtefactHeader{
+				LogicalThreadID: "log-3",
+				Type:            "ToolFailure",
+				StructuralType:  blackboard.StructuralTypeFailure,
+			},
 		},
 		"log-4": {
-			LogicalID:      "log-4",
-			Type:           "UserAnswer",
-			StructuralType: blackboard.StructuralTypeAnswer,
+			Header: blackboard.ArtefactHeader{
+				LogicalThreadID: "log-4",
+				Type:            "UserAnswer",
+				StructuralType:  blackboard.StructuralTypeAnswer,
+			},
 		},
 		"log-5": {
-			LogicalID:      "log-5",
-			Type:           "CodeReview",
-			StructuralType: blackboard.StructuralTypeReview,
+			Header: blackboard.ArtefactHeader{
+				LogicalThreadID: "log-5",
+				Type:            "CodeReview",
+				StructuralType:  blackboard.StructuralTypeReview,
+			},
 		},
 	}
 
@@ -45,17 +55,17 @@ func TestFilterContextArtefacts(t *testing.T) {
 
 	// Verify only Standard, Answer, and Review types present
 	for _, art := range filtered {
-		if art.StructuralType != blackboard.StructuralTypeStandard &&
-			art.StructuralType != blackboard.StructuralTypeAnswer &&
-			art.StructuralType != blackboard.StructuralTypeReview {
-			t.Errorf("Filtered artefact has wrong structural_type: %s", art.StructuralType)
+		if art.Header.StructuralType != blackboard.StructuralTypeStandard &&
+			art.Header.StructuralType != blackboard.StructuralTypeAnswer &&
+			art.Header.StructuralType != blackboard.StructuralTypeReview {
+			t.Errorf("Filtered artefact has wrong structural_type: %s", art.Header.StructuralType)
 		}
 	}
 
 	// Verify only Failure was filtered out
 	for _, art := range filtered {
-		if art.LogicalID == "log-3" {
-			t.Errorf("Failure artefact should have been filtered out: %s", art.LogicalID)
+		if art.Header.LogicalThreadID == "log-3" {
+			t.Errorf("Failure artefact should have been filtered out: %s", art.Header.LogicalThreadID)
 		}
 	}
 }
@@ -74,16 +84,22 @@ func TestFilterContextArtefacts_EmptyMap(t *testing.T) {
 func TestFilterContextArtefacts_AllFiltered(t *testing.T) {
 	contextMap := map[string]*blackboard.Artefact{
 		"log-1": {
-			LogicalID:      "log-1",
-			StructuralType: blackboard.StructuralTypeFailure,
+			Header: blackboard.ArtefactHeader{
+				LogicalThreadID: "log-1",
+				StructuralType:  blackboard.StructuralTypeFailure,
+			},
 		},
 		"log-2": {
-			LogicalID:      "log-2",
-			StructuralType: blackboard.StructuralTypeQuestion,
+			Header: blackboard.ArtefactHeader{
+				LogicalThreadID: "log-2",
+				StructuralType:  blackboard.StructuralTypeQuestion,
+			},
 		},
 		"log-3": {
-			LogicalID:      "log-3",
-			StructuralType: blackboard.StructuralTypeTerminal,
+			Header: blackboard.ArtefactHeader{
+				LogicalThreadID: "log-3",
+				StructuralType:  blackboard.StructuralTypeTerminal,
+			},
 		},
 	}
 
@@ -98,9 +114,9 @@ func TestFilterContextArtefacts_AllFiltered(t *testing.T) {
 func TestSortContextChronologically(t *testing.T) {
 	// Input in BFS order (newest first, discovered from target backwards)
 	artefacts := []*blackboard.Artefact{
-		{LogicalID: "newest", Type: "Third"},
-		{LogicalID: "middle", Type: "Second"},
-		{LogicalID: "oldest", Type: "First"},
+		{Header: blackboard.ArtefactHeader{LogicalThreadID: "newest", Type: "Third"}},
+		{Header: blackboard.ArtefactHeader{LogicalThreadID: "middle", Type: "Second"}},
+		{Header: blackboard.ArtefactHeader{LogicalThreadID: "oldest", Type: "First"}},
 	}
 
 	sorted := sortContextChronologically(artefacts)
@@ -110,16 +126,16 @@ func TestSortContextChronologically(t *testing.T) {
 		t.Fatalf("Expected 3 sorted artefacts, got %d", len(sorted))
 	}
 
-	if sorted[0].LogicalID != "oldest" {
-		t.Errorf("Expected oldest artefact first, got %s", sorted[0].LogicalID)
+	if sorted[0].Header.LogicalThreadID != "oldest" {
+		t.Errorf("Expected oldest artefact first, got %s", sorted[0].Header.LogicalThreadID)
 	}
 
-	if sorted[1].LogicalID != "middle" {
-		t.Errorf("Expected middle artefact second, got %s", sorted[1].LogicalID)
+	if sorted[1].Header.LogicalThreadID != "middle" {
+		t.Errorf("Expected middle artefact second, got %s", sorted[1].Header.LogicalThreadID)
 	}
 
-	if sorted[2].LogicalID != "newest" {
-		t.Errorf("Expected newest artefact last, got %s", sorted[2].LogicalID)
+	if sorted[2].Header.LogicalThreadID != "newest" {
+		t.Errorf("Expected newest artefact last, got %s", sorted[2].Header.LogicalThreadID)
 	}
 }
 
@@ -136,7 +152,7 @@ func TestSortContextChronologically_EmptySlice(t *testing.T) {
 // TestSortContextChronologically_SingleArtefact verifies single artefact
 func TestSortContextChronologically_SingleArtefact(t *testing.T) {
 	artefacts := []*blackboard.Artefact{
-		{LogicalID: "only", Type: "OnlyOne"},
+		{Header: blackboard.ArtefactHeader{LogicalThreadID: "only", Type: "OnlyOne"}},
 	}
 
 	sorted := sortContextChronologically(artefacts)
@@ -145,8 +161,8 @@ func TestSortContextChronologically_SingleArtefact(t *testing.T) {
 		t.Fatalf("Expected 1 sorted artefact, got %d", len(sorted))
 	}
 
-	if sorted[0].LogicalID != "only" {
-		t.Errorf("Expected 'only' artefact, got %s", sorted[0].LogicalID)
+	if sorted[0].Header.LogicalThreadID != "only" {
+		t.Errorf("Expected 'only' artefact, got %s", sorted[0].Header.LogicalThreadID)
 	}
 }
 
@@ -233,22 +249,28 @@ func TestFilterAndMergeKnowledge(t *testing.T) {
 
 		allKnowledge := []*blackboard.Artefact{
 			{
-				Type:            "go-sdk-docs",
-				Version:         1,
-				ContextForRoles: []string{"coder-*"},
-				Payload:         "Go SDK documentation",
+				Header: blackboard.ArtefactHeader{
+					Type:            "go-sdk-docs",
+					Version:         1,
+					ContextForRoles: []string{"coder-*"},
+				},
+				Payload: blackboard.ArtefactPayload{Content: "Go SDK documentation"},
 			},
 			{
-				Type:            "review-guidelines",
-				Version:         1,
-				ContextForRoles: []string{"reviewer-*"},
-				Payload:         "Review guidelines",
+				Header: blackboard.ArtefactHeader{
+					Type:            "review-guidelines",
+					Version:         1,
+					ContextForRoles: []string{"reviewer-*"},
+				},
+				Payload: blackboard.ArtefactPayload{Content: "Review guidelines"},
 			},
 			{
-				Type:            "global-config",
-				Version:         1,
-				ContextForRoles: []string{"*"},
-				Payload:         "Global config",
+				Header: blackboard.ArtefactHeader{
+					Type:            "global-config",
+					Version:         1,
+					ContextForRoles: []string{"*"},
+				},
+				Payload: blackboard.ArtefactPayload{Content: "Global config"},
 			},
 		}
 
@@ -265,7 +287,7 @@ func TestFilterAndMergeKnowledge(t *testing.T) {
 
 		found := make(map[string]bool)
 		for _, k := range filtered {
-			found[k.Type] = true
+			found[k.Header.Type] = true
 		}
 
 		if !found["go-sdk-docs"] {
@@ -286,22 +308,28 @@ func TestFilterAndMergeKnowledge(t *testing.T) {
 
 		allKnowledge := []*blackboard.Artefact{
 			{
-				Type:            "api-docs",
-				Version:         1,
-				ContextForRoles: []string{"*"},
-				Payload:         "Version 1",
+				Header: blackboard.ArtefactHeader{
+					Type:            "api-docs",
+					Version:         1,
+					ContextForRoles: []string{"*"},
+				},
+				Payload: blackboard.ArtefactPayload{Content: "Version 1"},
 			},
 			{
-				Type:            "api-docs",
-				Version:         3,
-				ContextForRoles: []string{"*"},
-				Payload:         "Version 3",
+				Header: blackboard.ArtefactHeader{
+					Type:            "api-docs",
+					Version:         3,
+					ContextForRoles: []string{"*"},
+				},
+				Payload: blackboard.ArtefactPayload{Content: "Version 3"},
 			},
 			{
-				Type:            "api-docs",
-				Version:         2,
-				ContextForRoles: []string{"*"},
-				Payload:         "Version 2",
+				Header: blackboard.ArtefactHeader{
+					Type:            "api-docs",
+					Version:         2,
+					ContextForRoles: []string{"*"},
+				},
+				Payload: blackboard.ArtefactPayload{Content: "Version 2"},
 			},
 		}
 
@@ -315,12 +343,12 @@ func TestFilterAndMergeKnowledge(t *testing.T) {
 			t.Errorf("Expected 1 merged knowledge, got %d", len(filtered))
 		}
 
-		if filtered[0].Version != 3 {
-			t.Errorf("Expected version 3 (latest), got version %d", filtered[0].Version)
+		if filtered[0].Header.Version != 3 {
+			t.Errorf("Expected version 3 (latest), got version %d", filtered[0].Header.Version)
 		}
 
-		if filtered[0].Payload != "Version 3" {
-			t.Errorf("Expected 'Version 3' payload, got %s", filtered[0].Payload)
+		if filtered[0].Payload.Content != "Version 3" {
+			t.Errorf("Expected 'Version 3' payload, got %s", filtered[0].Payload.Content)
 		}
 	})
 
@@ -331,28 +359,36 @@ func TestFilterAndMergeKnowledge(t *testing.T) {
 
 		allKnowledge := []*blackboard.Artefact{
 			{
-				Type:            "api-docs",
-				Version:         2,
-				ContextForRoles: []string{"*-coder"},
-				Payload:         "API v2",
+				Header: blackboard.ArtefactHeader{
+					Type:            "api-docs",
+					Version:         2,
+					ContextForRoles: []string{"*-coder"},
+				},
+				Payload: blackboard.ArtefactPayload{Content: "API v2"},
 			},
 			{
-				Type:            "api-docs",
-				Version:         1,
-				ContextForRoles: []string{"*-coder"},
-				Payload:         "API v1",
+				Header: blackboard.ArtefactHeader{
+					Type:            "api-docs",
+					Version:         1,
+					ContextForRoles: []string{"*-coder"},
+				},
+				Payload: blackboard.ArtefactPayload{Content: "API v1"},
 			},
 			{
-				Type:            "db-schema",
-				Version:         3,
-				ContextForRoles: []string{"backend-*"},
-				Payload:         "Schema v3",
+				Header: blackboard.ArtefactHeader{
+					Type:            "db-schema",
+					Version:         3,
+					ContextForRoles: []string{"backend-*"},
+				},
+				Payload: blackboard.ArtefactPayload{Content: "Schema v3"},
 			},
 			{
-				Type:            "db-schema",
-				Version:         1,
-				ContextForRoles: []string{"backend-*"},
-				Payload:         "Schema v1",
+				Header: blackboard.ArtefactHeader{
+					Type:            "db-schema",
+					Version:         1,
+					ContextForRoles: []string{"backend-*"},
+				},
+				Payload: blackboard.ArtefactPayload{Content: "Schema v1"},
 			},
 		}
 
@@ -368,15 +404,15 @@ func TestFilterAndMergeKnowledge(t *testing.T) {
 
 		byName := make(map[string]*blackboard.Artefact)
 		for _, k := range filtered {
-			byName[k.Type] = k
+			byName[k.Header.Type] = k
 		}
 
-		if byName["api-docs"].Version != 2 {
-			t.Errorf("Expected api-docs version 2, got %d", byName["api-docs"].Version)
+		if byName["api-docs"].Header.Version != 2 {
+			t.Errorf("Expected api-docs version 2, got %d", byName["api-docs"].Header.Version)
 		}
 
-		if byName["db-schema"].Version != 3 {
-			t.Errorf("Expected db-schema version 3, got %d", byName["db-schema"].Version)
+		if byName["db-schema"].Header.Version != 3 {
+			t.Errorf("Expected db-schema version 3, got %d", byName["db-schema"].Header.Version)
 		}
 	})
 
@@ -387,9 +423,11 @@ func TestFilterAndMergeKnowledge(t *testing.T) {
 
 		allKnowledge := []*blackboard.Artefact{
 			{
-				Type:            "coder-only",
-				Version:         1,
-				ContextForRoles: []string{"coder-*"},
+				Header: blackboard.ArtefactHeader{
+					Type:            "coder-only",
+					Version:         1,
+					ContextForRoles: []string{"coder-*"},
+				},
 			},
 		}
 
@@ -408,19 +446,25 @@ func TestFilterAndMergeKnowledge(t *testing.T) {
 func TestFilterContextArtefacts_FiltersOutKnowledge(t *testing.T) {
 	contextMap := map[string]*blackboard.Artefact{
 		"log-1": {
-			LogicalID:      "log-1",
-			Type:           "GoalDefined",
-			StructuralType: blackboard.StructuralTypeStandard,
+			Header: blackboard.ArtefactHeader{
+				LogicalThreadID: "log-1",
+				Type:            "GoalDefined",
+				StructuralType:  blackboard.StructuralTypeStandard,
+			},
 		},
 		"log-2": {
-			LogicalID:      "log-2",
-			Type:           "api-docs",
-			StructuralType: blackboard.StructuralTypeKnowledge,
+			Header: blackboard.ArtefactHeader{
+				LogicalThreadID: "log-2",
+				Type:            "api-docs",
+				StructuralType:  blackboard.StructuralTypeKnowledge,
+			},
 		},
 		"log-3": {
-			LogicalID:      "log-3",
-			Type:           "CodeCommit",
-			StructuralType: blackboard.StructuralTypeStandard,
+			Header: blackboard.ArtefactHeader{
+				LogicalThreadID: "log-3",
+				Type:            "CodeCommit",
+				StructuralType:  blackboard.StructuralTypeStandard,
+			},
 		},
 	}
 
@@ -433,7 +477,7 @@ func TestFilterContextArtefacts_FiltersOutKnowledge(t *testing.T) {
 
 	// Verify Knowledge was filtered out
 	for _, art := range filtered {
-		if art.StructuralType == blackboard.StructuralTypeKnowledge {
+		if art.Header.StructuralType == blackboard.StructuralTypeKnowledge {
 			t.Errorf("Knowledge artefact should have been filtered out")
 		}
 	}

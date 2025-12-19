@@ -25,31 +25,45 @@ func TestHoardEnhancements(t *testing.T) {
 		defer bbClient.Close()
 		ctx := context.Background()
 
-		// 1. Create SystemManifest
-		manifestID := "manifest-123"
+		// 1. Create SystemManifest with proper hash ID
 		manifestPayload := `{"config_hash": "hash123", "git_commit": "commit123"}`
 		manifest := &blackboard.Artefact{
-			ID:             manifestID,
-			LogicalID:      "log-man-1",
-			Version:        1,
-			StructuralType: blackboard.StructuralTypeSystemManifest,
-			Type:           "SystemManifest",
-			ProducedByRole: "orchestrator",
-			Payload:        manifestPayload,
+			Header: blackboard.ArtefactHeader{
+				LogicalThreadID: blackboard.NewID(),
+				Version:         1,
+				StructuralType:  blackboard.StructuralTypeSystemManifest,
+				Type:            "SystemManifest",
+				ProducedByRole:  "orchestrator",
+				ParentHashes:    []string{},
+				CreatedAtMs:     1234567890,
+			},
+			Payload: blackboard.ArtefactPayload{
+				Content: manifestPayload,
+			},
 		}
+		hash, err := blackboard.ComputeArtefactHash(manifest)
+		require.NoError(t, err)
+		manifest.ID = hash
 		require.NoError(t, bbClient.CreateArtefact(ctx, manifest))
 
 		// 2. Create Anchored Artefact
 		artefact := &blackboard.Artefact{
-			ID:              "art-123",
-			LogicalID:       "log-art-1",
-			Version:        1,
-			StructuralType: blackboard.StructuralTypeStandard,
-			Type:           "GoalDefined",
-			ProducedByRole: "user",
-			Payload:        "goal",
-			SourceArtefacts: []string{manifestID},
+			Header: blackboard.ArtefactHeader{
+				LogicalThreadID: blackboard.NewID(),
+				Version:         1,
+				StructuralType:  blackboard.StructuralTypeStandard,
+				Type:            "GoalDefined",
+				ProducedByRole:  "user",
+				ParentHashes:    []string{manifest.ID},
+				CreatedAtMs:     1234567891,
+			},
+			Payload: blackboard.ArtefactPayload{
+				Content: "goal",
+			},
 		}
+		hash, err = blackboard.ComputeArtefactHash(artefact)
+		require.NoError(t, err)
+		artefact.ID = hash
 		require.NoError(t, bbClient.CreateArtefact(ctx, artefact))
 
 		// 3. List with spine
@@ -77,23 +91,31 @@ func TestHoardEnhancements(t *testing.T) {
 		defer bbClient.Close()
 		ctx := context.Background()
 
-		// Create artefact
+		// Create artefact with proper hash ID
 		artefact := &blackboard.Artefact{
-			ID:              "art-123",
-			LogicalID:       "log-art-1",
-			Version:        1,
-			StructuralType: blackboard.StructuralTypeStandard,
-			Type:           "GoalDefined",
-			ProducedByRole: "user",
-			Payload:        "goal",
+			Header: blackboard.ArtefactHeader{
+				LogicalThreadID: blackboard.NewID(),
+				Version:         1,
+				StructuralType:  blackboard.StructuralTypeStandard,
+				Type:            "GoalDefined",
+				ProducedByRole:  "user",
+				ParentHashes:    []string{},
+				CreatedAtMs:     1234567890,
+			},
+			Payload: blackboard.ArtefactPayload{
+				Content: "goal",
+			},
 		}
+		hash, err := blackboard.ComputeArtefactHash(artefact)
+		require.NoError(t, err)
+		artefact.ID = hash
 		require.NoError(t, bbClient.CreateArtefact(ctx, artefact))
 
-		// List with JSON and fields
+		// List with JSON and fields (using top-level fields)
 		var buf bytes.Buffer
 		opts := &ListOptions{
 			Format: "json",
-			Fields: []string{"id", "type", "produced_by_role"},
+			Fields: []string{"id", "header"},
 		}
 		err = ListArtefacts(ctx, bbClient, "test-instance", opts, &buf)
 		require.NoError(t, err)
@@ -105,10 +127,9 @@ func TestHoardEnhancements(t *testing.T) {
 		require.Len(t, result, 1)
 
 		item := result[0]
-		assert.Equal(t, "art-123", item["id"])
-		assert.Equal(t, "GoalDefined", item["type"])
-		assert.Equal(t, "user", item["produced_by_role"])
-		assert.NotContains(t, item, "payload") // Should not be present
+		assert.Equal(t, artefact.ID, item["id"])
+		assert.Contains(t, item, "header")     // Header should be present
+		assert.NotContains(t, item, "payload") // Payload should not be present
 	})
 
 	t.Run("json output with spine field", func(t *testing.T) {
@@ -121,30 +142,45 @@ func TestHoardEnhancements(t *testing.T) {
 		defer bbClient.Close()
 		ctx := context.Background()
 
-		// Create Manifest and Artefact
-		manifestID := "manifest-123"
+		// Create Manifest with proper hash ID
 		manifestPayload := `{"config_hash": "hash123", "git_commit": "commit123"}`
 		manifest := &blackboard.Artefact{
-			ID:             manifestID,
-			LogicalID:      "log-man-1",
-			Version:        1,
-			StructuralType: blackboard.StructuralTypeSystemManifest,
-			Type:           "SystemManifest",
-			ProducedByRole: "orchestrator",
-			Payload:        manifestPayload,
+			Header: blackboard.ArtefactHeader{
+				LogicalThreadID: blackboard.NewID(),
+				Version:         1,
+				StructuralType:  blackboard.StructuralTypeSystemManifest,
+				Type:            "SystemManifest",
+				ProducedByRole:  "orchestrator",
+				ParentHashes:    []string{},
+				CreatedAtMs:     1234567890,
+			},
+			Payload: blackboard.ArtefactPayload{
+				Content: manifestPayload,
+			},
 		}
+		hash, err := blackboard.ComputeArtefactHash(manifest)
+		require.NoError(t, err)
+		manifest.ID = hash
 		require.NoError(t, bbClient.CreateArtefact(ctx, manifest))
 
+		// Create Artefact with proper hash ID
 		artefact := &blackboard.Artefact{
-			ID:              "art-123",
-			LogicalID:       "log-art-1",
-			Version:        1,
-			StructuralType: blackboard.StructuralTypeStandard,
-			Type:           "GoalDefined",
-			ProducedByRole: "user",
-			Payload:        "goal",
-			SourceArtefacts: []string{manifestID},
+			Header: blackboard.ArtefactHeader{
+				LogicalThreadID: blackboard.NewID(),
+				Version:         1,
+				StructuralType:  blackboard.StructuralTypeStandard,
+				Type:            "GoalDefined",
+				ProducedByRole:  "user",
+				ParentHashes:    []string{manifest.ID},
+				CreatedAtMs:     1234567891,
+			},
+			Payload: blackboard.ArtefactPayload{
+				Content: "goal",
+			},
 		}
+		hash, err = blackboard.ComputeArtefactHash(artefact)
+		require.NoError(t, err)
+		artefact.ID = hash
 		require.NoError(t, bbClient.CreateArtefact(ctx, artefact))
 
 		// List with JSON and spine field
@@ -168,7 +204,7 @@ func TestHoardEnhancements(t *testing.T) {
 		require.Len(t, result, 1)
 
 		item := result[0]
-		assert.Equal(t, "art-123", item.ID)
+		assert.Equal(t, artefact.ID, item.ID)
 		require.NotNil(t, item.Spine)
 		assert.Equal(t, "commit123", item.Spine.GitCommit)
 	})

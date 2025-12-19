@@ -1,0 +1,67 @@
+# Stage 1: Build additional binaries (human-reviewer)
+FROM golang:1.24-alpine AS builder
+WORKDIR /build
+
+# Copy go module files
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code for human-reviewer
+COPY agents/human-reviewer/main.go ./agents/human-reviewer/
+
+# Build human-reviewer binary
+RUN CGO_ENABLED=0 go build -o human-reviewer ./agents/human-reviewer/main.go
+
+# Stage 2: Consolidated Test Agent Image
+# Inherits from holt-test-base-agent (which has pre-compiled pup)
+FROM holt-test-base-agent:latest
+
+# Switch to root to copy files and set permissions
+USER root
+
+# Copy human-reviewer binary from builder
+COPY --from=builder /build/human-reviewer /app/human-reviewer
+RUN chmod +x /app/human-reviewer
+
+# Copy scripts from example-agent
+COPY agents/example-agent/run.sh /app/run_echo.sh
+RUN chmod +x /app/run_echo.sh
+
+# Copy scripts from example-git-agent
+COPY agents/example-git-agent/run.sh /app/run_git.sh
+COPY agents/example-git-agent/bid.sh /app/bid_git.sh
+RUN chmod +x /app/run_git.sh /app/bid_git.sh
+
+# Copy scripts from conditional-reviewer-agent
+COPY agents/conditional-reviewer-agent/run.sh /app/run_conditional_reviewer.sh
+RUN chmod +x /app/run_conditional_reviewer.sh
+
+# Copy scripts from always-reject-reviewer-agent
+COPY agents/always-reject-reviewer-agent/run.sh /app/run_reject_reviewer.sh
+RUN chmod +x /app/run_reject_reviewer.sh
+
+# Copy scripts from question-agent
+COPY agents/question-agent/run.sh /app/run_question.sh
+RUN chmod +x /app/run_question.sh
+
+# Copy scripts from caching-agent
+COPY testing/docker/scripts/caching_agent.sh /app/run_caching.sh
+RUN chmod +x /app/run_caching.sh
+
+# Copy scripts from test-runner
+COPY agents/test-runner/run-tests.sh /app/run_tests.sh
+RUN chmod +x /app/run_tests.sh
+
+# Copy M5.1 E2E Scripts
+COPY testing/docker/scripts/m5_1_producer.sh /app/m5_1_producer.sh
+COPY testing/docker/scripts/m5_1_synchronizer.sh /app/m5_1_synchronizer.sh
+COPY testing/docker/scripts/m5_1_multi_producer.sh /app/m5_1_multi_producer.sh
+COPY testing/docker/scripts/m5_1_aggregator.sh /app/m5_1_aggregator.sh
+COPY testing/docker/scripts/m5_1_concurrent_sync.sh /app/m5_1_concurrent_sync.sh
+RUN chmod +x /app/m5_1_*.sh
+
+# Switch back to agent user for runtime
+USER agent
+
+# Default entrypoint is pup (inherited from base), arguments provided by holt.yml
+ENTRYPOINT ["/app/pup"]

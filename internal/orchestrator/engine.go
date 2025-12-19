@@ -123,10 +123,11 @@ func (e *Engine) Run(ctx context.Context) error {
 				continue
 			}
 
+			// Publish event
 			e.logEvent("artefact_received", map[string]interface{}{
-				"artefact_id":     artefact.ID,
-				"type":            artefact.Type,
-				"structural_type": artefact.StructuralType,
+				"artefact_id":      artefact.ID,
+				"produced_by_role": artefact.Header.ProducedByRole,
+				"version":          artefact.Header.Version,
 			})
 
 			if err := e.processArtefact(ctx, artefact); err != nil {
@@ -156,22 +157,23 @@ func (e *Engine) Run(ctx context.Context) error {
 func (e *Engine) processArtefact(ctx context.Context, artefact *blackboard.Artefact) error {
 	// Do not create claims for artefacts that are the output of a process, like reviews or failures.
 	// M4.3: Also skip Knowledge artefacts as they are passive context data, not claimable work.
-	if artefact.StructuralType == blackboard.StructuralTypeTerminal ||
-		artefact.StructuralType == blackboard.StructuralTypeFailure ||
-		artefact.StructuralType == blackboard.StructuralTypeReview ||
-		artefact.StructuralType == blackboard.StructuralTypeKnowledge {
+	if artefact.Header.StructuralType == blackboard.StructuralTypeTerminal ||
+		artefact.Header.StructuralType == blackboard.StructuralTypeFailure ||
+		artefact.Header.StructuralType == blackboard.StructuralTypeReview ||
+		artefact.Header.StructuralType == blackboard.StructuralTypeKnowledge {
 		e.logEvent("claim_creation_skipped", map[string]interface{}{
 			"artefact_id":     artefact.ID,
-			"type":            artefact.Type,
-			"structural_type": artefact.StructuralType,
+			"type":            artefact.Header.Type,
+			"structural_type": artefact.Header.StructuralType,
 			"reason":          "Artefact is not a claimable work type.",
 		})
 		return nil
 	}
 
 	// M4.6: Cryptographic verification for V2 artefacts
+	// M4.6: Cryptographic verification for V2 artefacts
 	// Must verify parent existence, timestamp drift, and content hash before claim creation
-	if err := e.verifyArtefactV1(ctx, artefact); err != nil {
+	if err := e.verifyArtefact(ctx, artefact); err != nil {
 		log.Printf("[Orchestrator] Artefact %s failed verification: %v", artefact.ID, err)
 		// Verification failed - lockdown may have been triggered inside verifyArtefact
 		// Do NOT create claim for invalid artefacts
@@ -197,9 +199,9 @@ func (e *Engine) processArtefact(ctx context.Context, artefact *blackboard.Artef
 	claimID := blackboard.NewID()
 
 	claim := &blackboard.Claim{
-		ID:         claimID,
-		ArtefactID: artefact.ID,
-		Status:     blackboard.ClaimStatusPendingReview, // Always start in review phase
+		ID:                    claimID,
+		ArtefactID:            artefact.ID,
+		Status:                blackboard.ClaimStatusPendingReview, // Always start in review phase
 		GrantedReviewAgents:   []string{},
 		GrantedParallelAgents: []string{},
 		GrantedExclusiveAgent: "",
@@ -249,14 +251,19 @@ func (e *Engine) processArtefact(ctx context.Context, artefact *blackboard.Artef
 // M3.3: Also handles pending_assignment claims (feedback claims).
 // M4.1: Also handles Question artefacts (triggers feedback loop).
 func (e *Engine) processArtefactForPhases(ctx context.Context, artefact *blackboard.Artefact) {
-	// Skip non-phase-relevant artefacts
-	if artefact.StructuralType == blackboard.StructuralTypeTerminal ||
-		artefact.StructuralType == blackboard.StructuralTypeFailure {
+	// Handle Terminal artefacts specially - they signal claim completion
+	if artefact.Header.StructuralType == blackboard.StructuralTypeTerminal {
+		e.handleTerminalArtefact(ctx, artefact)
+		return
+	}
+
+	// Skip Failure artefacts
+	if artefact.Header.StructuralType == blackboard.StructuralTypeFailure {
 		return
 	}
 
 	// M4.1: Handle Question artefacts (trigger feedback loop)
-	if artefact.StructuralType == blackboard.StructuralTypeQuestion {
+	if artefact.Header.StructuralType == blackboard.StructuralTypeQuestion {
 		if err := e.handleQuestionArtefact(ctx, artefact); err != nil {
 			log.Printf("[Orchestrator] Error handling Question artefact %s: %v", artefact.ID, err)
 		}
@@ -281,20 +288,20 @@ func (e *Engine) processArtefactForPhases(ctx context.Context, artefact *blackbo
 		}
 
 		// Check if this artefact is from a granted agent in the current phase
-		if !e.isProducedByGrantedAgent(claim, artefact.ProducedByRole, phaseState.Phase) {
+		if !e.isProducedByGrantedAgent(claim, artefact.Header.ProducedByRole, phaseState.Phase) {
 			continue
 		}
 
 		// Track this artefact as received
-		phaseState.ReceivedArtefacts[artefact.ProducedByRole] = artefact.ID
+		phaseState.ReceivedArtefacts[artefact.Header.ProducedByRole] = artefact.ID
 
 		log.Printf("[Orchestrator] Phase %s artefact received for claim %s: producer=%s, artefact=%s",
-			phaseState.Phase, claim.ID, artefact.ProducedByRole, artefact.ID)
+			phaseState.Phase, claim.ID, artefact.Header.ProducedByRole, artefact.ID)
 
 		e.logEvent("phase_artefact_received", map[string]interface{}{
 			"claim_id":    claim.ID,
 			"phase":       phaseState.Phase,
-			"agent_role":  artefact.ProducedByRole,
+			"agent_role":  artefact.Header.ProducedByRole,
 			"artefact_id": artefact.ID,
 		})
 
@@ -305,7 +312,7 @@ func (e *Engine) processArtefactForPhases(ctx context.Context, artefact *blackbo
 
 // isSourceOfClaim checks if an artefact is derived from the claim's target artefact.
 func isSourceOfClaim(artefact *blackboard.Artefact, claimArtefactID string) bool {
-	for _, sourceID := range artefact.SourceArtefacts {
+	for _, sourceID := range artefact.Header.ParentHashes {
 		if sourceID == claimArtefactID {
 			return true
 		}
@@ -444,7 +451,7 @@ func (e *Engine) checkPendingAssignmentClaims(ctx context.Context, artefact *bla
 			continue
 		}
 
-		if artefact.ProducedByRole != grantedAgentRole {
+		if artefact.Header.ProducedByRole != grantedAgentRole {
 			// Artefact not from granted agent, continue waiting
 			continue
 		}
@@ -536,4 +543,136 @@ func (e *Engine) initializeSystemSpine(ctx context.Context) error {
 	log.Printf("[Orchestrator] System Spine initialized - active manifest: %s", activeManifestID[:16]+"...")
 
 	return nil
+}
+
+// handleTerminalArtefact processes Terminal artefacts that signal claim completion.
+// Terminal artefacts are created by pups after all work artefacts have been produced,
+// ensuring multi-artefact claims complete correctly.
+func (e *Engine) handleTerminalArtefact(ctx context.Context, artefact *blackboard.Artefact) {
+	if artefact.Header.ClaimID == "" {
+		log.Printf("[Orchestrator] Terminal artefact %s has no ClaimID, ignoring", artefact.ID)
+		return
+	}
+
+	claim, err := e.client.GetClaim(ctx, artefact.Header.ClaimID)
+	if err != nil {
+		log.Printf("[Orchestrator] Error fetching claim %s for Terminal artefact: %v", artefact.Header.ClaimID, err)
+		return
+	}
+
+	// Verify the Terminal artefact is from a granted agent
+	isGranted := false
+
+	// Check exclusive grant
+	if claim.GrantedExclusiveAgent == artefact.Header.ProducedByRole {
+		isGranted = true
+	}
+
+	// Check review grants
+	for _, agent := range claim.GrantedReviewAgents {
+		if agent == artefact.Header.ProducedByRole {
+			isGranted = true
+			break
+		}
+	}
+
+	// Check parallel grants
+	for _, agent := range claim.GrantedParallelAgents {
+		if agent == artefact.Header.ProducedByRole {
+			isGranted = true
+			break
+		}
+	}
+
+	if !isGranted {
+		log.Printf("[Orchestrator] Terminal artefact from %s not from any granted agent for claim %s",
+			artefact.Header.ProducedByRole, claim.ID)
+		return
+	}
+
+	log.Printf("[Orchestrator] Terminal artefact received from %s, processing claim %s", artefact.Header.ProducedByRole, claim.ID)
+
+	// Check if any sibling artefacts (from this claim) are Question or Failure
+	// If so, terminate the claim instead of completing it
+	shouldTerminate, terminationReason := e.checkForTerminationSiblings(ctx, claim, artefact)
+
+	if shouldTerminate {
+		// Terminate claim (Question or Failure was produced)
+		claim.Status = blackboard.ClaimStatusTerminated
+		claim.TerminationReason = terminationReason
+
+		if err := e.client.UpdateClaim(ctx, claim); err != nil {
+			log.Printf("[Orchestrator] Error updating claim %s to terminated: %v", claim.ID, err)
+			return
+		}
+
+		e.logEvent("claim_terminated", map[string]interface{}{
+			"claim_id":             claim.ID,
+			"terminal_artefact_id": artefact.ID,
+			"producer":             artefact.Header.ProducedByRole,
+			"termination_reason":   terminationReason,
+		})
+
+		log.Printf("[Orchestrator] Claim %s terminated via Terminal artefact: %s", claim.ID, terminationReason)
+	} else {
+		// Complete claim (normal success)
+		claim.Status = blackboard.ClaimStatusComplete
+
+		if err := e.client.UpdateClaim(ctx, claim); err != nil {
+			log.Printf("[Orchestrator] Error updating claim %s to complete: %v", claim.ID, err)
+			return
+		}
+
+		e.logEvent("claim_complete", map[string]interface{}{
+			"claim_id":             claim.ID,
+			"terminal_artefact_id": artefact.ID,
+			"producer":             artefact.Header.ProducedByRole,
+		})
+
+		log.Printf("[Orchestrator] Claim %s marked complete via Terminal artefact", claim.ID)
+	}
+
+	// Remove from phase tracking
+	delete(e.phaseStates, claim.ID)
+}
+
+// checkForTerminationSiblings checks if any artefacts produced for this claim are
+// Question or Failure types. If so, the claim should be terminated instead of completed.
+// Returns (shouldTerminate, terminationReason).
+func (e *Engine) checkForTerminationSiblings(ctx context.Context, claim *blackboard.Claim, terminalArtefact *blackboard.Artefact) (bool, string) {
+	// Scan all artefacts to find those with this claim ID
+	artefactIDs, err := e.client.ScanArtefacts(ctx, "")
+	if err != nil {
+		log.Printf("[Orchestrator] Error scanning artefacts for claim %s: %v", claim.ID, err)
+		// Default to completion if we can't scan
+		return false, ""
+	}
+
+	for _, artefactID := range artefactIDs {
+		// Skip the terminal artefact itself
+		if artefactID == terminalArtefact.ID {
+			continue
+		}
+
+		art, err := e.client.GetArtefact(ctx, artefactID)
+		if err != nil {
+			continue
+		}
+
+		// Check if this artefact belongs to this claim
+		if art.Header.ClaimID != claim.ID {
+			continue
+		}
+
+		// Check if it's a Question or Failure
+		switch art.Header.StructuralType {
+		case blackboard.StructuralTypeQuestion:
+			return true, fmt.Sprintf("Agent produced Question artefact: %s", art.ID)
+		case blackboard.StructuralTypeFailure:
+			return true, fmt.Sprintf("Agent produced Failure artefact: %s (type: %s)", art.ID, art.Header.Type)
+		}
+	}
+
+	// No Question/Failure siblings found - normal completion
+	return false, ""
 }

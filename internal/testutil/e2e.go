@@ -227,11 +227,74 @@ test-failed:
 	return env
 }
 
+// CreateTestManifest creates a minimal SystemManifest for E2E tests.
+// This allows test artefacts to be properly anchored and pass M4.7 validation.
+// Returns the manifest artefact ID (hash) for use as parent in test artefacts.
+func (env *E2EEnvironment) CreateTestManifest(ctx context.Context) string {
+	manifestID := blackboard.NewID()
+
+	// Create minimal system identity
+	identity := &blackboard.SystemIdentity{
+		Strategy:     "local",
+		ConfigHash:   "test-config-hash",
+		GitCommit:    "test-git-hash",
+		ComputedAtMs: time.Now().UnixMilli(),
+	}
+
+	identityJSON, err := json.Marshal(identity)
+	require.NoError(env.T, err, "Failed to marshal test identity")
+
+	manifest := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
+		ParentHashes:    []string{}, // Manifests have no parents
+		LogicalThreadID: manifestID, // Manifests use their ID as thread
+		Version:         1,
+		StructuralType:  blackboard.StructuralTypeSystemManifest,
+		Type:            "SystemConfig",
+		ProducedByRole:  "orchestrator",
+		CreatedAtMs:     time.Now().UnixMilli(),
+		Metadata:        "{}",
+	}, string(identityJSON))
+
+	env.T.Logf("✓ Test SystemManifest created: %s", manifest.ID[:16]+"...")
+	return manifest.ID
+}
+
+// CreateWorkflowSpine creates a minimal workflow spine (Manifest → Goal) for E2E tests.
+// This provides a proper M4.7-compliant starting point for test workflows.
+// Returns (manifestID, goalID) for use as anchors in test artefacts.
+func (env *E2EEnvironment) CreateWorkflowSpine(ctx context.Context, goalPayload string) (string, string) {
+	manifestID := env.CreateTestManifest(ctx)
+
+	goalThreadID := blackboard.NewID()
+	goalDefined := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
+		ParentHashes:    []string{manifestID},
+		LogicalThreadID: goalThreadID,
+		Version:         1,
+		Type:            "GoalDefined",
+		Metadata:        "{}",
+	}, goalPayload)
+
+	env.T.Logf("✓ Workflow spine created: Manifest → GoalDefined")
+	return manifestID, goalDefined.ID
+}
+
 // CreateVerifiableArtefact helper creates a V2-compliant artefact (hashed ID) and writes it to the blackboard.
 // It handles the hashing, V1 conversion, and error checking to reduce boilerplate in E2E tests.
 func (env *E2EEnvironment) CreateVerifiableArtefact(ctx context.Context, header blackboard.ArtefactHeader, payload string) *blackboard.Artefact {
+	// Apply sensible defaults for test artefacts
+	if header.StructuralType == "" {
+		header.StructuralType = blackboard.StructuralTypeStandard
+	}
+	if header.ProducedByRole == "" {
+		header.ProducedByRole = "user"
+	}
+	if header.CreatedAtMs == 0 {
+		header.CreatedAtMs = time.Now().UnixMilli()
+	}
+	// ClaimID defaults to "" (correct for test artefacts created outside claims)
+
 	// Construct V2 artefact
-	v2Art := &blackboard.VerifiableArtefact{
+	artefact := &blackboard.Artefact{
 		Header: header,
 		Payload: blackboard.ArtefactPayload{
 			Content: payload,
@@ -239,30 +302,15 @@ func (env *E2EEnvironment) CreateVerifiableArtefact(ctx context.Context, header 
 	}
 
 	// Compute hash
-	hash, err := blackboard.ComputeArtefactHash(v2Art)
+	hash, err := blackboard.ComputeArtefactHash(artefact)
 	require.NoError(env.T, err, "Failed to compute artefact hash")
-	v2Art.ID = hash
-
-	// Convert to V1 for client compatibility
-	v1Art := &blackboard.Artefact{
-		ID:              v2Art.ID,
-		LogicalID:       v2Art.Header.LogicalThreadID,
-		Version:         v2Art.Header.Version,
-		StructuralType:  v2Art.Header.StructuralType,
-		Type:            v2Art.Header.Type,
-		Payload:         v2Art.Payload.Content,
-		ProducedByRole:  v2Art.Header.ProducedByRole,
-		SourceArtefacts: v2Art.Header.ParentHashes,
-		CreatedAtMs:     v2Art.Header.CreatedAtMs,
-		ClaimID:         v2Art.Header.ClaimID,
-		ContextForRoles: v2Art.Header.ContextForRoles,
-	}
+	artefact.ID = hash
 
 	// Create in Redis
-	err = env.BBClient.CreateArtefact(ctx, v1Art)
+	err = env.BBClient.CreateArtefact(ctx, artefact)
 	require.NoError(env.T, err, "Failed to create verifiable artefact")
 
-	return v1Art
+	return artefact
 }
 
 // InitializeBlackboardClient connects to the blackboard for this environment
@@ -297,6 +345,43 @@ func (env *E2EEnvironment) InitializeBlackboardClient() {
 		time.Sleep(1 * time.Second)
 	}
 	require.Fail(env.T, "Redis did not become ready within 10 seconds")
+}
+
+// WaitForLogMessage waits for a specific log message in a container
+func (env *E2EEnvironment) WaitForLogMessage(containerNameSuffix, message string, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+
+	// Determine full container name
+	var fullName string
+	if containerNameSuffix == "orchestrator" || containerNameSuffix == "redis" {
+		fullName = fmt.Sprintf("holt-%s-%s", containerNameSuffix, env.InstanceName)
+	} else {
+		// Agent pattern: containerNameSuffix is "agent-{agent-name}"
+		agentName := containerNameSuffix[6:] // Remove "agent-" prefix
+		fullName = fmt.Sprintf("holt-%s-%s", env.InstanceName, agentName)
+	}
+
+	env.T.Logf("Waiting for log message '%s' in container %s...", message, fullName)
+
+	for time.Now().Before(deadline) {
+		logs, err := env.DockerClient.ContainerLogs(env.Ctx, fullName, container.LogsOptions{
+			ShowStdout: true,
+			ShowStderr: true,
+		})
+		if err == nil {
+			logBytes, _ := io.ReadAll(logs)
+			logOutput := string(logBytes)
+			logs.Close()
+
+			if strings.Contains(logOutput, message) {
+				env.T.Logf("✓ Found log message: %s", message)
+				return
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	require.Fail(env.T, fmt.Sprintf("Log message '%s' not found in container %s within %v", message, fullName, timeout))
 }
 
 // WaitForContainer waits for a container to be running (up to 30 seconds)
@@ -372,6 +457,12 @@ func (env *E2EEnvironment) WaitForArtefactByType(artefactType string) *blackboar
 	for i := 0; i < 60; i++ {
 		// Scan for artefacts using Redis SCAN
 		pattern := fmt.Sprintf("holt:%s:artefact:*", env.InstanceName)
+
+		// M5.1: Fail fast if global lockdown is detected
+		if err := checkLockdown(env.Ctx, env.BBClient); err != nil {
+			require.FailNow(env.T, "Global Lockdown Detected", err.Error())
+		}
+
 		iter := env.BBClient.RedisClient().Scan(env.Ctx, 0, pattern, 0).Iterator()
 
 		allArtefacts = allArtefacts[:0] // Reset for this iteration
@@ -394,23 +485,43 @@ func (env *E2EEnvironment) WaitForArtefactByType(artefactType string) *blackboar
 			if data["type"] == artefactType {
 				// Parse artefact
 				artefact := &blackboard.Artefact{
-					ID:              data["id"],
-					LogicalID:       data["logical_id"],
-					StructuralType:  blackboard.StructuralType(data["structural_type"]),
-					Type:            data["type"],
-					Payload:         data["payload"],
-					ProducedByRole:  data["produced_by_role"],
-					ClaimID:         data["claim_id"], // M4.6: Capture ClaimID
-					SourceArtefacts: []string{},       // Simplified for now
+					ID: data["id"],
+					Header: blackboard.ArtefactHeader{
+						LogicalThreadID: data["logical_id"],
+						StructuralType:  blackboard.StructuralType(data["structural_type"]),
+						Type:            data["type"],
+						ProducedByRole:  data["produced_by_role"],
+						ClaimID:         data["claim_id"], // M4.6: Capture ClaimID
+						Metadata:        data["metadata"], // M5.1: Capture Metadata
+						ParentHashes:    []string{},       // Simplified for now
+					},
+					Payload: blackboard.ArtefactPayload{
+						Content: data["payload"],
+					},
 				}
 
 				if versionStr, ok := data["version"]; ok {
 					if version, err := strconv.Atoi(versionStr); err == nil {
-						artefact.Version = version
+						artefact.Header.Version = version
 					}
 				}
 
-				env.T.Logf("✓ Found artefact: type=%s, id=%s, claim_id=%s, payload=%s", artefact.Type, artefact.ID, artefact.ClaimID, artefact.Payload)
+				// Handle parent hashes if present
+				if parentHashesJSON, ok := data["parent_hashes"]; ok && parentHashesJSON != "" {
+					var parents []string
+					if err := json.Unmarshal([]byte(parentHashesJSON), &parents); err == nil {
+						artefact.Header.ParentHashes = parents
+					}
+				}
+
+				// Parse context_for_roles if present
+				if rolesJSON, ok := data["context_for_roles"]; ok && rolesJSON != "" {
+					var roles []string
+					json.Unmarshal([]byte(rolesJSON), &roles)
+					artefact.Header.ContextForRoles = roles
+				}
+
+				env.T.Logf("✓ Found artefact: type=%s, id=%s, claim_id=%s, payload=%s", artefact.Header.Type, artefact.ID, artefact.Header.ClaimID, artefact.Payload.Content)
 				return artefact
 			} else {
 				env.T.Logf("✗ other artefact: type=%s, id=%s, claim_id=%s, v=%s payload=%s",
@@ -585,29 +696,6 @@ func (env *E2EEnvironment) CreateTestAgent(agentName, runScript string) {
 	env.T.Logf("✓ Created test agent: %s", agentName)
 }
 
-// GetProjectRoot returns the project root directory for building Docker images
-func GetProjectRoot() string {
-	// When running tests, we need to go up from internal/testutil to project root
-	// This works because tests compile to a binary in the cmd/holt/commands directory
-	root, err := os.Getwd()
-	if err != nil {
-		return "."
-	}
-
-	// Walk up until we find go.mod
-	for {
-		if _, err := os.Stat(filepath.Join(root, "go.mod")); err == nil {
-			return root
-		}
-		parent := filepath.Dir(root)
-		if parent == root {
-			// Reached filesystem root, default to current dir
-			return "."
-		}
-		root = parent
-	}
-}
-
 // WaitForArtefactOfType waits for an artefact with the specified type to appear on the blackboard.
 //
 // WARNING: This function returns the FIRST artefact found with matching type, regardless of version.
@@ -632,6 +720,11 @@ func WaitForArtefactOfType(ctx context.Context, client *blackboard.Client, artef
 	deadline := time.Now().Add(timeout)
 
 	for time.Now().Before(deadline) {
+		// Fail fast if global lockdown
+		if err := checkLockdown(ctx, client); err != nil {
+			return nil, err
+		}
+
 		// Scan for artefacts
 		pattern := fmt.Sprintf("holt:*:artefact:*")
 		iter := client.GetRedisClient().Scan(ctx, 0, pattern, 0).Iterator()
@@ -645,17 +738,21 @@ func WaitForArtefactOfType(ctx context.Context, client *blackboard.Client, artef
 
 			if data["type"] == artefactType {
 				artefact := &blackboard.Artefact{
-					ID:             data["id"],
-					LogicalID:      data["logical_id"],
-					StructuralType: blackboard.StructuralType(data["structural_type"]),
-					Type:           data["type"],
-					Payload:        data["payload"],
-					ProducedByRole: data["produced_by_role"],
+					ID: data["id"],
+					Header: blackboard.ArtefactHeader{
+						LogicalThreadID: data["logical_id"],
+						StructuralType:  blackboard.StructuralType(data["structural_type"]),
+						Type:            data["type"],
+						ProducedByRole:  data["produced_by_role"],
+					},
+					Payload: blackboard.ArtefactPayload{
+						Content: data["payload"],
+					},
 				}
 
 				if versionStr, ok := data["version"]; ok {
 					if version, err := strconv.Atoi(versionStr); err == nil {
-						artefact.Version = version
+						artefact.Header.Version = version
 					}
 				}
 
@@ -663,7 +760,7 @@ func WaitForArtefactOfType(ctx context.Context, client *blackboard.Client, artef
 				if rolesJSON, ok := data["context_for_roles"]; ok && rolesJSON != "" {
 					var roles []string
 					json.Unmarshal([]byte(rolesJSON), &roles)
-					artefact.ContextForRoles = roles
+					artefact.Header.ContextForRoles = roles
 				}
 
 				return artefact, nil
@@ -681,6 +778,11 @@ func WaitForArtefactVersion(ctx context.Context, client *blackboard.Client, logi
 	deadline := time.Now().Add(timeout)
 
 	for time.Now().Before(deadline) {
+		// Fail fast if global lockdown
+		if err := checkLockdown(ctx, client); err != nil {
+			return nil, err
+		}
+
 		// Scan for artefacts
 		pattern := fmt.Sprintf("holt:*:artefact:*")
 		iter := client.GetRedisClient().Scan(ctx, 0, pattern, 0).Iterator()
@@ -696,13 +798,17 @@ func WaitForArtefactVersion(ctx context.Context, client *blackboard.Client, logi
 				versionStr := data["version"]
 				if version, err := strconv.Atoi(versionStr); err == nil && version == targetVersion {
 					artefact := &blackboard.Artefact{
-						ID:             data["id"],
-						LogicalID:      data["logical_id"],
-						Version:        version,
-						StructuralType: blackboard.StructuralType(data["structural_type"]),
-						Type:           data["type"],
-						Payload:        data["payload"],
-						ProducedByRole: data["produced_by_role"],
+						ID: data["id"],
+						Header: blackboard.ArtefactHeader{
+							LogicalThreadID: data["logical_id"],
+							Version:         version,
+							StructuralType:  blackboard.StructuralType(data["structural_type"]),
+							Type:            data["type"],
+							ProducedByRole:  data["produced_by_role"],
+						},
+						Payload: blackboard.ArtefactPayload{
+							Content: data["payload"],
+						},
 					}
 
 					return artefact, nil
@@ -740,18 +846,25 @@ func FindAllArtefactsOfType(ctx context.Context, client *blackboard.Client, arte
 		}
 
 		if data["type"] == artefactType {
+			// Debug log
+
 			artefact := &blackboard.Artefact{
-				ID:             data["id"],
-				LogicalID:      data["logical_id"],
-				StructuralType: blackboard.StructuralType(data["structural_type"]),
-				Type:           data["type"],
-				Payload:        data["payload"],
-				ProducedByRole: data["produced_by_role"],
+				ID: data["id"],
+				Header: blackboard.ArtefactHeader{
+					LogicalThreadID: data["logical_id"],
+					StructuralType:  blackboard.StructuralType(data["structural_type"]),
+					Type:            data["type"],
+					ProducedByRole:  data["produced_by_role"],
+					Metadata:        data["metadata"], // M5.1: Capture Metadata
+				},
+				Payload: blackboard.ArtefactPayload{
+					Content: data["payload"],
+				},
 			}
 
 			if versionStr, ok := data["version"]; ok {
 				if version, err := strconv.Atoi(versionStr); err == nil {
-					artefact.Version = version
+					artefact.Header.Version = version
 				}
 			}
 
@@ -759,7 +872,7 @@ func FindAllArtefactsOfType(ctx context.Context, client *blackboard.Client, arte
 			if rolesJSON, ok := data["context_for_roles"]; ok && rolesJSON != "" {
 				var roles []string
 				json.Unmarshal([]byte(rolesJSON), &roles)
-				artefact.ContextForRoles = roles
+				artefact.Header.ContextForRoles = roles
 			}
 
 			results = append(results, artefact)
@@ -795,6 +908,11 @@ func WaitForArtefactWithContext(ctx context.Context, client *blackboard.Client, 
 	deadline := time.Now().Add(timeout)
 
 	for time.Now().Before(deadline) {
+		// Fail fast if global lockdown
+		if err := checkLockdown(ctx, client); err != nil {
+			return nil, err
+		}
+
 		// Get all artefacts of the specified type
 		artefacts, err := FindAllArtefactsOfType(ctx, client, artefactType)
 		if err != nil {
@@ -803,7 +921,7 @@ func WaitForArtefactWithContext(ctx context.Context, client *blackboard.Client, 
 
 		// Check each artefact's thread_context to see if it contains the related artefact
 		for _, artefact := range artefacts {
-			threadContextKey := blackboard.ThreadContextKey(instanceName, artefact.LogicalID)
+			threadContextKey := blackboard.ThreadContextKey(instanceName, artefact.Header.LogicalThreadID)
 			isMember, err := client.GetRedisClient().SIsMember(ctx, threadContextKey, relatedArtefactID).Result()
 			if err != nil {
 				continue
@@ -817,6 +935,35 @@ func WaitForArtefactWithContext(ctx context.Context, client *blackboard.Client, 
 	}
 
 	return nil, fmt.Errorf("artefact of type '%s' with relatedArtefactID='%s' in thread_context not found within %v", artefactType, relatedArtefactID, timeout)
+}
+
+// WaitForArtefactCount polls until at least 'count' artefacts of a specific type exist.
+// This is useful for testing multi-iteration loops (e.g. waiting for the 3rd review rejection).
+func (env *E2EEnvironment) WaitForArtefactCount(artefactType string, count int, timeout time.Duration) ([]*blackboard.Artefact, error) {
+	deadline := time.Now().Add(timeout)
+	lastCount := 0
+
+	for time.Now().Before(deadline) {
+		// Fail fast if global lockdown
+		if err := checkLockdown(env.Ctx, env.BBClient); err != nil {
+			return nil, err
+		}
+
+		artefacts, err := FindAllArtefactsOfType(env.Ctx, env.BBClient, artefactType)
+		if err != nil {
+			return nil, err // Return error immediately if scanning fails
+		}
+
+		lastCount = len(artefacts)
+		if lastCount >= count {
+			env.T.Logf("✓ Found %d/%d required artefacts of type '%s'", lastCount, count, artefactType)
+			return artefacts, nil
+		}
+
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	return nil, fmt.Errorf("found only %d artefacts of type '%s' within %v (required: %d)", lastCount, artefactType, timeout, count)
 }
 
 // DumpInstanceLogs retrieves and logs all container logs for an instance.
@@ -833,6 +980,46 @@ func (env *E2EEnvironment) DumpInstanceLogs() {
 	if err != nil {
 		env.T.Logf("Failed to list containers: %v", err)
 		return
+	}
+
+	// Dump Redis State (Claims and Artefacts)
+	if env.BBClient != nil {
+		env.T.Log("--- Redis State Dump ---")
+
+		// Dump Claims
+		claimPattern := fmt.Sprintf("holt:%s:claim:*", env.InstanceName)
+		claimIter := env.BBClient.RedisClient().Scan(env.Ctx, 0, claimPattern, 0).Iterator()
+		foundClaims := false
+		for claimIter.Next(env.Ctx) {
+			foundClaims = true
+			key := claimIter.Val()
+			data, _ := env.BBClient.RedisClient().HGetAll(env.Ctx, key).Result()
+			env.T.Logf("Claim: id=%s key=%s status=%s artefact_id=%s exclusive=%s",
+				data["id"], key, data["status"], data["artefact_id"], data["granted_exclusive_agent"])
+		}
+		if !foundClaims {
+			env.T.Log("(no claims found)")
+		}
+
+		// Dump Artefacts
+		artefactPattern := fmt.Sprintf("holt:%s:artefact:*", env.InstanceName)
+		artefactIter := env.BBClient.RedisClient().Scan(env.Ctx, 0, artefactPattern, 0).Iterator()
+		foundArtefacts := false
+		for artefactIter.Next(env.Ctx) {
+			foundArtefacts = true
+			key := artefactIter.Val()
+			data, _ := env.BBClient.RedisClient().HGetAll(env.Ctx, key).Result()
+			// Truncate payload for legibility
+			payload := data["payload"]
+			if len(payload) > 50 {
+				payload = payload[:50] + "..."
+			}
+			env.T.Logf("Artefact: type=%s id=%s payload=%s", data["type"], data["id"], payload)
+		}
+		if !foundArtefacts {
+			env.T.Log("(no artefacts found)")
+		}
+		env.T.Log("--- End Redis State Dump ---")
 	}
 
 	for _, c := range containers {
@@ -868,4 +1055,48 @@ func (env *E2EEnvironment) DumpInstanceLogs() {
 	}
 
 	env.T.Log("=== End container logs ===")
+}
+
+// StringReader wraps a string to implement io.Reader for Docker build contexts
+// M5.1: Helper for inline Dockerfiles in E2E tests
+type StringReader struct {
+	content string
+	pos     int
+}
+
+// NewStringReader creates a new StringReader
+func NewStringReader(s string) *StringReader {
+	return &StringReader{content: s, pos: 0}
+}
+
+// Read implements io.Reader
+func (sr *StringReader) Read(p []byte) (n int, err error) {
+	if sr.pos >= len(sr.content) {
+		return 0, io.EOF
+	}
+	n = copy(p, sr.content[sr.pos:])
+	sr.pos += n
+	return n, nil
+}
+
+// checkLockdown checks if the instance is in global lockdown and returns a descriptive error if so.
+func checkLockdown(ctx context.Context, client *blackboard.Client) error {
+	if client == nil {
+		return nil
+	}
+	key := blackboard.SecurityLockdownKey(client.GetInstanceName())
+	val, err := client.GetRedisClient().Get(ctx, key).Result()
+	if err == redis.Nil {
+		return nil // No lockdown
+	}
+	if err != nil {
+		return nil // Ignore connection errors, continue polling
+	}
+
+	// Lockdown detected!
+	var alert blackboard.SecurityAlert
+	_ = json.Unmarshal([]byte(val), &alert) // Ignore unmarshal errors, just show raw val if needed
+
+	return fmt.Errorf("🚨 GLOBAL LOCKDOWN DETECTED 🚨\nType: %s\nAction: %s\nExpected: %s\nActual:   %s\nDetails: %s",
+		alert.Type, alert.OrchestratorAction, alert.HashExpected, alert.HashActual, val)
 }

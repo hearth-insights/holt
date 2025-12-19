@@ -14,26 +14,84 @@ import (
 	"time"
 )
 
-// Artefact represents an immutable work product on the blackboard.
-// Artefacts are the fundamental unit of state in Holt - every piece of work,
-// decision, and result is represented as an artefact with complete provenance.
+// Artefact replaces the old v1 struct.
+// It uses V2 content-addressable Merkle DAG architecture where
+// every artefact's identity is its SHA-256 content hash.
 type Artefact struct {
-	ID              string         `json:"id"`               // SHA-256 Hash (64 hex chars)
-	LogicalID       string         `json:"logical_id"`       // UUID or Hash - groups versions
-	Version         int            `json:"version"`          // Incrementing version number (starts at 1)
-	StructuralType  StructuralType `json:"structural_type"`  // Role in orchestration flow
-	Type            string         `json:"type"`             // User-defined domain type (e.g., "CodeCommit", "DesignSpec")
-	Payload         string         `json:"payload"`          // Main content (git hash, JSON, text)
-	SourceArtefacts []string       `json:"source_artefacts"` // Array of parent artefact IDs
-	ProducedByRole  string         `json:"produced_by_role"` // Agent's role from holt.yml or "user"
-	CreatedAtMs     int64          `json:"created_at_ms"`    // M3.9: Unix timestamp in milliseconds when artefact was created
+	// ID is the SHA-256 hash (hex-encoded, 64 characters)
+	// This is the artefact's immutable, content-derived address.
+	ID string `json:"id"`
 
-	// M4.3: Context caching - glob patterns for which agent roles should receive this Knowledge
-	ContextForRoles []string `json:"context_for_roles,omitempty"` // Only used for Knowledge artefacts
+	Header  ArtefactHeader  `json:"header"`
+	Payload ArtefactPayload `json:"payload"`
+}
+
+// ArtefactHeader contains metadata and provenance links.
+// All fields in this struct are included in the hash computation.
+// CRITICAL: Any modification to field names, types, or tags will change hash computation.
+type ArtefactHeader struct {
+	// ParentHashes replaces v1's SourceArtefacts - now stores SHA-256 hashes, not UUIDs
+	// Empty array for root artefacts (e.g., GoalDefined)
+	ParentHashes []string `json:"parent_hashes"`
+
+	// LogicalThreadID groups versions of the same conceptual artefact
+	// Retained for O(1) "latest version" lookups via Redis ZSET
+	// V1 (new thread): Generate new UUID
+	// V2+ (versions): Inherit UUID from parent
+	LogicalThreadID string `json:"logical_thread_id"` // UUID format
+
+	// Version counter within the logical thread (starts at 1)
+	Version int `json:"version"`
+
+	// Timestamp of creation (part of hashed content - CRITICAL for temporal ordering)
+	CreatedAtMs int64 `json:"created_at_ms"` // Unix milliseconds
+
+	// Agent that produced this artefact
+	ProducedByRole string `json:"produced_by_role"`
+
+	// Orchestration role (hardcoded enum in StructuralType)
+	StructuralType StructuralType `json:"structural_type"`
+
+	// User-defined domain type (opaque to orchestrator)
+	Type string `json:"type"`
+
+	// M4.3: Context caching - INCLUDED in hash for security/visibility scope
+	// Uses omitempty: empty/nil slice excluded from canonical JSON to save space
+	ContextForRoles []string `json:"context_for_roles,omitempty"`
 
 	// M4.6 Security Addendum: Grant Linkage & Topology Validation
 	// ClaimID cryptographically binds this artefact to the authorization that permitted its creation
+	// MUST be present for agent-produced artefacts (unless root artefact with ParentHashes=[])
+	// Empty for root artefacts (CLI-generated) and some orchestrator-generated artefacts
+	// Uses omitempty: empty string excluded from canonical JSON
 	ClaimID string `json:"claim_id,omitempty"`
+
+	// M5.1: Metadata for synchronization
+	// Value is JSON-encoded map[string]string (e.g. {"batch_size": "5"})
+	// Included in hash to prevent tampering with synchronization parameters
+	Metadata string `json:"metadata,omitempty"`
+}
+
+// ArtefactPayload is the actual content.
+// HARD LIMIT: 1MB (1,048,576 bytes). Larger content must be written to disk/git
+// and referenced via hash in the payload.
+type ArtefactPayload struct {
+	Content string `json:"content"` // Max 1MB
+}
+
+// MaxPayloadSize is the hard limit for artefact payload content.
+// This prevents Redis memory pressure and ensures fast hash computation.
+const MaxPayloadSize = 1 * 1024 * 1024 // 1MB
+
+// HashMismatchError is returned when artefact hash verification fails.
+// This indicates potential tampering or data corruption.
+type HashMismatchError struct {
+	Expected string // Hash computed by verifier (Orchestrator)
+	Actual   string // Hash claimed in artefact ID (from Pup)
+}
+
+func (e *HashMismatchError) Error() string {
+	return "hash mismatch: expected " + e.Expected + ", got " + e.Actual
 }
 
 // StructuralType defines the role an artefact plays in the orchestration flow.
@@ -167,43 +225,6 @@ type GrantQueue struct {
 	PausedAtMs int64  `json:"paused_at_ms"` // M3.9: Unix timestamp in milliseconds when claim was paused
 	AgentName  string `json:"agent_name"`   // Agent name that would be granted
 	Position   int    `json:"position"`     // Reserved for future display/debugging (not populated in M3.5)
-}
-
-// Validate checks if the Artefact has valid field values.
-// Returns an error if any validation fails.
-func (a *Artefact) Validate() error {
-	if a.ID == "" {
-		return fmt.Errorf("invalid artefact ID: empty")
-	}
-
-	if a.LogicalID == "" {
-		return fmt.Errorf("invalid logical ID: empty")
-	}
-
-	if a.Version < 1 {
-		return fmt.Errorf("invalid version: must be >= 1, got %d", a.Version)
-	}
-
-	if err := a.StructuralType.Validate(); err != nil {
-		return fmt.Errorf("invalid structural type: %w", err)
-	}
-
-	if a.Type == "" {
-		return fmt.Errorf("artefact type cannot be empty")
-	}
-
-	if a.ProducedByRole == "" {
-		return fmt.Errorf("produced_by_role cannot be empty")
-	}
-
-	// Validate all source artefact IDs
-	for i, sourceID := range a.SourceArtefacts {
-		if sourceID == "" {
-			return fmt.Errorf("invalid source artefact at index %d: empty", i)
-		}
-	}
-
-	return nil
 }
 
 // Validate checks if the StructuralType is a valid enum value.

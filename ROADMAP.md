@@ -20,13 +20,14 @@ Holt is being developed through a series of well-defined phases, each delivering
 *Goal: Orchestrate multiple, specialized agents in a collaborative workflow.*
 - **Features:** Multi-stage pipelines (review → parallel → exclusive), controller-worker scaling pattern, consensus bidding, automated feedback loops, and powerful CLI observability features.
 
-### Phase 4: "Human-in-the-Loop" 🚧
+### Phase 4: "Human-in-the-Loop" ✅
 *Goal: Make the system production-ready with human oversight.*
-- **Features:** `Question`/`Answer` artefacts for human guidance and mandatory approval gates for critical actions.
+- **Features:** `Question`/`Answer` artefacts for human guidance, interactive debugger with breakpoints, and session management.
 
-### Phase 5: "Complex Coordination" 📋
+### Phase 5: "Complex Coordination" 🚧
 *Goal: Enable the orchestration of complex, non-linear workflows (DAGs).*
-- **Features:** Support for "fan-in" synchronization patterns and conditional workflow pathing based on agent bidding logic.
+- **M5.1 Complete ✅:** Declarative fan-in synchronization with Named and Producer-Declared patterns, multi-artefact output, atomic indexing
+- **Remaining:** Conditional workflow pathing, timeout-based synchronization, dynamic workflow modification
 
 ---
 

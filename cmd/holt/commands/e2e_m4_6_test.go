@@ -59,10 +59,10 @@ services:
 	env.InitializeBlackboardClient()
 	bbClient := env.BBClient
 
-	// Test 1: Create a V2 VerifiableArtefact
+	// Test 1: Create a V2 Artefact
 	t.Run("CreateAndVerifyV2Artefact", func(t *testing.T) {
 		// Create a valid V2 artefact
-		artefact := &blackboard.VerifiableArtefact{
+		artefact := &blackboard.Artefact{
 			Header: blackboard.ArtefactHeader{
 				ParentHashes:    []string{}, // Root artefact
 				LogicalThreadID: blackboard.NewID(),
@@ -71,6 +71,7 @@ services:
 				ProducedByRole:  "test-agent",
 				StructuralType:  blackboard.StructuralTypeStandard,
 				Type:            "TestArtefact",
+				Metadata:        "{}",
 			},
 			Payload: blackboard.ArtefactPayload{
 				Content: "Test payload content for M4.6 verification",
@@ -85,12 +86,12 @@ services:
 		artefact.ID = hash
 
 		// Write to blackboard
-		err = bbClient.WriteVerifiableArtefact(ctx, artefact)
+		err = bbClient.CreateArtefact(ctx, artefact)
 		require.NoError(t, err, "Failed to write artefact")
 
-		// Test 1a: Verify the artefact using GetVerifiableArtefact + ValidateArtefactHash
+		// Test 1a: Verify the artefact using GetArtefact + ValidateArtefactHash
 		// (This simulates what `holt verify` does internally)
-		retrieved, err := bbClient.GetVerifiableArtefact(ctx, hash)
+		retrieved, err := bbClient.GetArtefact(ctx, hash)
 		require.NoError(t, err, "Failed to retrieve artefact")
 		assert.Equal(t, hash, retrieved.ID, "Retrieved artefact ID should match")
 
@@ -112,7 +113,7 @@ services:
 	// Test 2: Tamper detection - modify payload after hash computation
 	t.Run("DetectTamperedArtefact", func(t *testing.T) {
 		// Create artefact
-		artefact := &blackboard.VerifiableArtefact{
+		artefact := &blackboard.Artefact{
 			Header: blackboard.ArtefactHeader{
 				ParentHashes:    []string{},
 				LogicalThreadID: blackboard.NewID(),
@@ -121,6 +122,7 @@ services:
 				ProducedByRole:  "malicious-agent",
 				StructuralType:  blackboard.StructuralTypeStandard,
 				Type:            "TamperedArtefact",
+				Metadata:        "{}",
 			},
 			Payload: blackboard.ArtefactPayload{
 				Content: "Original content",
@@ -150,7 +152,7 @@ services:
 		// Create artefact with non-existent parent
 		nonExistentParent := "0000000000000000000000000000000000000000000000000000000000000000"
 
-		artefact := &blackboard.VerifiableArtefact{
+		artefact := &blackboard.Artefact{
 			Header: blackboard.ArtefactHeader{
 				ParentHashes:    []string{nonExistentParent}, // Parent doesn't exist
 				LogicalThreadID: blackboard.NewID(),
@@ -159,6 +161,7 @@ services:
 				ProducedByRole:  "test-agent",
 				StructuralType:  blackboard.StructuralTypeStandard,
 				Type:            "OrphanArtefact",
+				Metadata:        "{}",
 			},
 			Payload: blackboard.ArtefactPayload{
 				Content: "Content with invalid parent",
@@ -184,7 +187,7 @@ services:
 		now := time.Now().UnixMilli()
 
 		// Test 4a: Future timestamp (>5 minutes ahead)
-		futureArtefact := &blackboard.VerifiableArtefact{
+		futureArtefact := &blackboard.Artefact{
 			Header: blackboard.ArtefactHeader{
 				ParentHashes:    []string{},
 				LogicalThreadID: blackboard.NewID(),
@@ -193,6 +196,7 @@ services:
 				ProducedByRole:  "time-traveling-agent",
 				StructuralType:  blackboard.StructuralTypeStandard,
 				Type:            "FutureArtefact",
+				Metadata:        "{}",
 			},
 			Payload: blackboard.ArtefactPayload{
 				Content: "Content from the future",
@@ -210,7 +214,7 @@ services:
 		assert.Greater(t, drift, threshold, "Drift should exceed threshold")
 
 		// Test 4b: Past timestamp (>5 minutes ago)
-		pastArtefact := &blackboard.VerifiableArtefact{
+		pastArtefact := &blackboard.Artefact{
 			Header: blackboard.ArtefactHeader{
 				ParentHashes:    []string{},
 				LogicalThreadID: blackboard.NewID(),
@@ -219,6 +223,7 @@ services:
 				ProducedByRole:  "ancient-agent",
 				StructuralType:  blackboard.StructuralTypeStandard,
 				Type:            "PastArtefact",
+				Metadata:        "{}",
 			},
 			Payload: blackboard.ArtefactPayload{
 				Content: "Content from the past",

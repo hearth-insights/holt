@@ -109,7 +109,7 @@ func runVerifyConfig(cmd *cobra.Command, args []string) error {
 		manifestID = matches[0]
 	}
 
-	manifest, err := bbClient.GetVerifiableArtefact(ctx, manifestID)
+	manifest, err := bbClient.GetArtefact(ctx, manifestID)
 	if err != nil {
 		return fmt.Errorf("failed to fetch manifest %s: %w", manifestID, err)
 	}
@@ -162,10 +162,10 @@ func runVerifyConfig(cmd *cobra.Command, args []string) error {
 		cmd := exec.Command("git", "rev-parse", "HEAD")
 		cmd.Dir = workspaceRoot
 		output, err := cmd.Output()
-		
+
 		printer.Info("Git Commit Verification:\n")
 		printer.Info("  Stored:  %s\n", storedIdentity.GitCommit)
-		
+
 		if err != nil {
 			printer.Warning("  Current: (git command failed: %v)\n", err)
 		} else {

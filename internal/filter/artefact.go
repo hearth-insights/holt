@@ -19,23 +19,23 @@ type Criteria struct {
 // Empty/zero criteria values are treated as "match all" for that criterion.
 func (c *Criteria) Matches(art *blackboard.Artefact) bool {
 	// Time filtering - check CreatedAtMs field
-	if c.SinceTimestampMs > 0 && art.CreatedAtMs < c.SinceTimestampMs {
+	if c.SinceTimestampMs > 0 && art.Header.CreatedAtMs < c.SinceTimestampMs {
 		return false
 	}
-	if c.UntilTimestampMs > 0 && art.CreatedAtMs > c.UntilTimestampMs {
+	if c.UntilTimestampMs > 0 && art.Header.CreatedAtMs > c.UntilTimestampMs {
 		return false
 	}
 
 	// Type filtering - glob pattern matching
 	if c.TypeGlob != "" {
-		matched, err := filepath.Match(c.TypeGlob, art.Type)
+		matched, err := filepath.Match(c.TypeGlob, art.Header.Type)
 		if err != nil || !matched {
 			return false
 		}
 	}
 
 	// Agent filtering - exact match on produced_by_role
-	if c.AgentRole != "" && art.ProducedByRole != c.AgentRole {
+	if c.AgentRole != "" && art.Header.ProducedByRole != c.AgentRole {
 		return false
 	}
 

@@ -6,8 +6,8 @@ import (
 	"io"
 	"os"
 
-	"github.com/hearth-insights/holt/pkg/blackboard"
 	"github.com/google/uuid"
+	"github.com/hearth-insights/holt/pkg/blackboard"
 )
 
 // GetArtefact retrieves a single artefact by ID and prints it as JSON.

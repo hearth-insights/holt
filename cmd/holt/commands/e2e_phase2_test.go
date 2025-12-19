@@ -95,8 +95,8 @@ func TestE2E_Phase2_HappyPath(t *testing.T) {
 	t.Log("Step 4: Verifying GoalDefined artefact...")
 	goalArtefact := env.WaitForArtefactByType("GoalDefined")
 	require.NotNil(t, goalArtefact)
-	require.Equal(t, goalFilename, goalArtefact.Payload)
-	require.Equal(t, "user", goalArtefact.ProducedByRole)
+	require.Equal(t, goalFilename, goalArtefact.Payload.Content)
+	require.Equal(t, "user", goalArtefact.Header.ProducedByRole)
 	t.Logf("✓ GoalDefined artefact created: id=%s", goalArtefact.ID)
 
 	// Step 5: Wait for agent to execute and create CodeCommit artefact
@@ -111,12 +111,12 @@ func TestE2E_Phase2_HappyPath(t *testing.T) {
 
 	codeCommitArtefact := env.WaitForArtefactByType("CodeCommit")
 	require.NotNil(t, codeCommitArtefact)
-	require.NotEmpty(t, codeCommitArtefact.Payload, "CodeCommit payload (commit hash) is empty")
-	t.Logf("✓ CodeCommit artefact created: id=%s, commit=%s", codeCommitArtefact.ID, codeCommitArtefact.Payload)
+	require.NotEmpty(t, codeCommitArtefact.Payload.Content, "CodeCommit payload (commit hash) is empty")
+	t.Logf("✓ CodeCommit artefact created: id=%s, commit=%s", codeCommitArtefact.ID, codeCommitArtefact.Payload.Content)
 
 	// Step 6: Verify Git commit exists
 	t.Log("Step 6: Verifying Git commit exists in repository...")
-	commitHash := codeCommitArtefact.Payload
+	commitHash := codeCommitArtefact.Payload.Content
 	env.VerifyGitCommitExists(commitHash)
 	t.Logf("✓ Git commit %s verified", commitHash)
 
@@ -135,8 +135,8 @@ func TestE2E_Phase2_HappyPath(t *testing.T) {
 	t.Log("Step 9: Verifying audit trail...")
 	// CodeCommit should reference GoalDefined in source_artefacts
 	// (This is implicit in the agent's behavior, but we can verify via context chain)
-	require.Equal(t, "Standard", string(goalArtefact.StructuralType))
-	require.Equal(t, "Standard", string(codeCommitArtefact.StructuralType))
+	require.Equal(t, "Standard", string(goalArtefact.Header.StructuralType))
+	require.Equal(t, "Standard", string(codeCommitArtefact.Header.StructuralType))
 	t.Log("✓ Audit trail: GoalDefined → CodeCommit")
 
 	t.Log("=== Phase 2 Happy Path Test Complete ===")
@@ -203,7 +203,7 @@ func TestE2E_Phase2_MultipleWorkflows(t *testing.T) {
 
 	commit1 := env.WaitForArtefactByType("CodeCommit")
 	require.NotNil(t, commit1)
-	env.VerifyGitCommitExists(commit1.Payload)
+	env.VerifyGitCommitExists(commit1.Payload.Content)
 	env.VerifyFileExists("file1.txt")
 	t.Log("✓ First workflow complete")
 
@@ -225,7 +225,7 @@ func TestE2E_Phase2_MultipleWorkflows(t *testing.T) {
 		for iter.Next(ctx) {
 			key := iter.Val()
 			data, _ := env.BBClient.RedisClient().HGetAll(ctx, key).Result()
-			if data["type"] == "CodeCommit" && data["payload"] != commit1.Payload {
+			if data["type"] == "CodeCommit" && data["payload"] != commit1.Payload.Content {
 				commit2 = &testutil.ArtefactResult{
 					ID:      data["id"],
 					Type:    data["type"],
@@ -242,7 +242,7 @@ func TestE2E_Phase2_MultipleWorkflows(t *testing.T) {
 	}
 
 	require.NotNil(t, commit2, "Second CodeCommit not found")
-	require.NotEqual(t, commit1.Payload, commit2.Payload, "Both commits have same hash")
+	require.NotEqual(t, commit1.Payload.Content, commit2.Payload, "Both commits have same hash")
 
 	env.VerifyGitCommitExists(commit2.Payload)
 	env.VerifyFileExists("file2.txt")

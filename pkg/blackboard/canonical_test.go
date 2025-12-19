@@ -37,7 +37,7 @@ func TestHashDeterminism(t *testing.T) {
 // RFC 8785 guarantees lexicographic key sorting.
 func TestCanonicalisation_FieldOrder(t *testing.T) {
 	// Create artefact with fields in one order
-	a1 := &VerifiableArtefact{
+	a1 := &Artefact{
 		Header: ArtefactHeader{
 			Type:            "CodeCommit",
 			ProducedByRole:  "coder",
@@ -53,7 +53,7 @@ func TestCanonicalisation_FieldOrder(t *testing.T) {
 	}
 
 	// Create identical artefact (fields will be in different memory order due to map iteration)
-	a2 := &VerifiableArtefact{
+	a2 := &Artefact{
 		Payload: ArtefactPayload{
 			Content: "test content",
 		},
@@ -225,11 +225,11 @@ func TestComputeArtefactHash_PanicRecovery(t *testing.T) {
 }
 
 // Helper function to create a consistent test artefact
-func createTestArtefact() *VerifiableArtefact {
-	return &VerifiableArtefact{
+func createTestArtefact() *Artefact {
+	return &Artefact{
 		Header: ArtefactHeader{
 			ParentHashes:    []string{},
-			LogicalThreadID: "550e8400-e29b-41d4-a716-446655440000",
+			LogicalThreadID: "0508eb36a3d0dd327c235b6d900f26455a2ee715300f1c4b78c3d3edce8dafe9",
 			Version:         1,
 			CreatedAtMs:     1704067200000,
 			ProducedByRole:  "test-agent",

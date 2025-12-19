@@ -2,6 +2,8 @@ package blackboard
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/hearth-insights/holt/internal/debug"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -60,43 +63,88 @@ func (c *Client) RedisClient() *redis.Client {
 }
 
 // CreateArtefact writes an artefact to Redis and publishes an event.
+// M5.1: Uses atomic Lua script to ensure reverse index consistency.
+//
 // Validates the artefact before writing. Returns error if validation fails or Redis operation fails.
 // Publishes full artefact JSON to holt:{instance}:artefact_events after successful write.
 //
 // The artefact is stored as a Redis hash at holt:{instance}:artefact:{id}.
 // This method is idempotent - writing the same artefact twice is safe.
+//
+// CRITICAL: Lua script failures are FATAL. If this method returns an error,
+// the caller MUST panic/exit immediately (partial artefact creation is unacceptable).
+// CreateArtefact writes an artefact to Redis and publishes an event.
+// M5.1: Uses atomic Lua script to ensure reverse index consistency.
+//
+// Validates the artefact before writing. Returns error if validation fails or Redis operation fails.
+// Publishes full artefact JSON to holt:{instance}:artefact_events after successful write.
+//
+// The artefact is stored as a Redis hash at holt:{instance}:artefact:{id}.
+// This method is idempotent - writing the same artefact twice is safe.
+//
+// CRITICAL: Lua script failures are FATAL. If this method returns an error,
+// the caller MUST panic/exit immediately (partial artefact creation is unacceptable).
 func (c *Client) CreateArtefact(ctx context.Context, a *Artefact) error {
 	// M3.9: Auto-populate CreatedAtMs if not set
-	if a.CreatedAtMs == 0 {
-		a.CreatedAtMs = time.Now().UnixMilli()
+	if a.Header.CreatedAtMs == 0 {
+		a.Header.CreatedAtMs = time.Now().UnixMilli()
 	}
+
+	// M5.1: Ensure metadata is valid JSON (default to empty object)
+	if a.Header.Metadata == "" {
+		a.Header.Metadata = "{}"
+	}
+	debug.Log("Client creating artefact %s with metadata: %s", a.ID, a.Header.Metadata)
 
 	// Validate artefact
 	if err := a.Validate(); err != nil {
 		return fmt.Errorf("invalid artefact: %w", err)
 	}
 
-	// Convert to Redis hash
-	hash, err := ArtefactToHash(a)
+	// Encode source artefacts as JSON (Header.ParentHashes)
+	sourceArtefactsJSON, err := json.Marshal(a.Header.ParentHashes)
 	if err != nil {
-		return fmt.Errorf("failed to serialize artefact: %w", err)
+		return fmt.Errorf("failed to marshal parent_hashes (source_artefacts): %w", err)
 	}
 
-	// Write to Redis
-	key := ArtefactKey(c.instanceName, a.ID)
-	if err := c.rdb.HSet(ctx, key, hash).Err(); err != nil {
-		return fmt.Errorf("failed to write artefact to Redis: %w", err)
+	// Encode context_for_roles as JSON
+	contextForRolesJSON, err := json.Marshal(a.Header.ContextForRoles)
+	if err != nil {
+		return fmt.Errorf("failed to marshal context_for_roles: %w", err)
 	}
 
-	// Publish event
+	// Encode full artefact for Pub/Sub event
 	artefactJSON, err := json.Marshal(a)
 	if err != nil {
 		return fmt.Errorf("failed to marshal artefact for event: %w", err)
 	}
 
-	channel := ArtefactEventsChannel(c.instanceName)
-	if err := c.rdb.Publish(ctx, channel, artefactJSON).Err(); err != nil {
-		return fmt.Errorf("failed to publish artefact event: %w", err)
+	// M5.1: Execute atomic Lua script
+	script := redis.NewScript(createArtefactScript)
+	_, err = script.Run(ctx, c.rdb,
+		[]string{
+			ArtefactKey(c.instanceName, a.ID),
+			ThreadKey(c.instanceName, a.Header.LogicalThreadID),
+			ArtefactEventsChannel(c.instanceName),
+		},
+		a.ID,
+		a.Header.LogicalThreadID,
+		a.Header.Version,
+		string(a.Header.StructuralType),
+		a.Header.Type,
+		a.Payload.Content,
+		string(sourceArtefactsJSON),
+		a.Header.ProducedByRole,
+		a.Header.CreatedAtMs,
+		string(contextForRolesJSON),
+		a.Header.ClaimID,
+		a.Header.Metadata,
+		string(artefactJSON),
+	).Result()
+
+	if err != nil {
+		// M5.1: Lua failure is FATAL - partial artefact creation is unacceptable
+		log.Fatalf("[Blackboard] FATAL: Lua script create_artefact failed for artefact %s: %v", a.ID, err)
 	}
 
 	return nil
@@ -191,6 +239,7 @@ func (c *Client) CreateClaim(ctx context.Context, claim *Claim) error {
 
 	// Write to Redis
 	key := ClaimKey(c.instanceName, claim.ID)
+	debug.Log("CreateClaim writing to key: %s", key)
 	if err := c.rdb.HSet(ctx, key, hash).Err(); err != nil {
 		return fmt.Errorf("failed to write claim to Redis: %w", err)
 	}
@@ -319,6 +368,7 @@ func (c *Client) SetBid(ctx context.Context, claimID string, agentName string, b
 
 	// Write bid to Redis
 	key := ClaimBidsKey(c.instanceName, claimID)
+	debug.Log("SetBid writing to key: '%s' agent: '%s'", key, agentName)
 	if err := c.rdb.HSet(ctx, key, agentName, string(bidJSON)).Err(); err != nil {
 		return fmt.Errorf("failed to write bid to Redis: %w", err)
 	}
@@ -342,6 +392,7 @@ func (c *Client) SetBid(ctx context.Context, claimID string, agentName string, b
 // Expects JSON-encoded bids in Redis. Fails if data is not valid JSON.
 func (c *Client) GetAllBids(ctx context.Context, claimID string) (map[string]Bid, error) {
 	key := ClaimBidsKey(c.instanceName, claimID)
+	debug.Log("GetAllBids reading from key: '%s'", key)
 
 	// Read all bids from Redis
 	rawBids, err := c.rdb.HGetAll(ctx, key).Result()
@@ -547,6 +598,8 @@ func (c *Client) SubscribeArtefactEvents(ctx context.Context) (*Subscription, er
 		defer close(errorsChan)
 		defer pubsub.Close()
 
+		debug.Log("Subscribing to channel: '%s'", channel)
+
 		// Receive channel from pubsub
 		ch := pubsub.Channel()
 
@@ -558,24 +611,22 @@ func (c *Client) SubscribeArtefactEvents(ctx context.Context) (*Subscription, er
 				if !ok {
 					return
 				}
-
-				// Unmarshal artefact from JSON
+				debug.Log("Raw message received on %s: %s", msg.Channel, msg.Payload)
 				var artefact Artefact
 				if err := json.Unmarshal([]byte(msg.Payload), &artefact); err != nil {
-					// Send error on error channel, skip message
+					log.Printf("[Blackboard] Failed to unmarshal artefact event: %v (payload: %s)", err, msg.Payload)
 					select {
-					case errorsChan <- fmt.Errorf("failed to unmarshal artefact event: %w", err):
-					case <-subCtx.Done():
-						return
+					case errorsChan <- fmt.Errorf("failed to unmarshal event: %w", err):
+					default:
+						// Drop error if channel full
 					}
 					continue
 				}
-
-				// Send artefact on events channel
+				debug.Log("Dispatching event for artefact %s", artefact.ID)
 				select {
 				case eventsChan <- &artefact:
-				case <-subCtx.Done():
-					return
+				default:
+					log.Printf("[Blackboard] Warning: Event channel full, dropping event for %s", artefact.ID)
 				}
 			}
 		}
@@ -1024,19 +1075,30 @@ func (c *Client) CreateOrVersionKnowledge(ctx context.Context, knowledgeName, kn
 	}
 
 	// Create the Knowledge artefact
-	artefactID := uuid.New().String()
+	// Use V2 structure with Header and Payload
 	knowledge := &Artefact{
-		ID:              artefactID,
-		LogicalID:       logicalID,
-		Version:         version,
-		StructuralType:  StructuralTypeKnowledge,
-		Type:            knowledgeName, // The knowledge_name becomes the Type field
-		Payload:         knowledgePayload,
-		SourceArtefacts: []string{}, // Knowledge artefacts have no sources
-		ProducedByRole:  producedByRole,
-		ContextForRoles: contextForRoles,
-		CreatedAtMs:     time.Now().UnixMilli(),
+		Header: ArtefactHeader{
+			LogicalThreadID: logicalID,
+			Version:         version,
+			StructuralType:  StructuralTypeKnowledge,
+			Type:            knowledgeName, // The knowledge_name becomes the Type field
+			ParentHashes:    []string{},    // Knowledge artefacts have no sources
+			ProducedByRole:  producedByRole,
+			ContextForRoles: contextForRoles,
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: ArtefactPayload{
+			Content: knowledgePayload,
+		},
 	}
+
+	// Compute content-based ID (V2)
+	hashID, err := ComputeArtefactHash(knowledge)
+	if err != nil {
+		return nil, fmt.Errorf("failed to compute knowledge artefact hash: %w", err)
+	}
+	knowledge.ID = hashID
+	artefactID := knowledge.ID // Fix: define artefactID for subsequent use
 
 	// Write the artefact to Redis (without publishing an event - Knowledge is passive)
 	if err := knowledge.Validate(); err != nil {
@@ -1080,6 +1142,144 @@ func (c *Client) CreateOrVersionKnowledge(ctx context.Context, knowledgeName, kn
 // Use this to check if GetArtefact, GetClaim, or GetLatestVersion returned "not found".
 func IsNotFound(err error) bool {
 	return errors.Is(err, redis.Nil)
+}
+
+// GetDescendants retrieves all descendants of an artefact using recursive traversal.
+// M5.1: Used by Synchronizers to find all artefacts below an ancestor in the DAG.
+//
+// Parameters:
+//   - ancestorID: The ID of the ancestor artefact to start traversal from
+//   - maxDepth: Maximum depth to traverse (0 = unlimited)
+//
+// Returns:
+//   - Array of descendant artefacts (children, grandchildren, etc.)
+//   - Empty array if no descendants found
+//   - Error if traversal fails
+//
+// Implementation notes:
+//   - Uses BFS (breadth-first search) traversal via reverse index
+//   - Detects and handles cycles automatically via visited map
+//   - O(n) complexity where n = total descendants
+func (c *Client) GetDescendants(ctx context.Context, ancestorID string, maxDepth int) ([]*Artefact, error) {
+	visited := make(map[string]bool)
+	var descendants []*Artefact
+
+	var traverse func(string, int) error
+	traverse = func(nodeID string, depth int) error {
+		// Prevent revisiting (cycle detection)
+		if visited[nodeID] {
+			return nil
+		}
+		visited[nodeID] = true
+
+		// Check max depth limit - children of this node will be at depth+1
+		if maxDepth > 0 && depth >= maxDepth {
+			return nil // Don't get children beyond max depth
+		}
+
+		// Get children from reverse index
+		childrenKey := ChildrenIndexKey(c.instanceName, nodeID)
+		debug.Log("GetDescendants querying children key: '%s'", childrenKey)
+		childIDs, err := c.rdb.SMembers(ctx, childrenKey).Result()
+		if err != nil {
+			return fmt.Errorf("failed to get children of %s: %w", nodeID, err)
+		}
+		debug.Log("GetDescendants found %d children for %s", len(childIDs), nodeID)
+
+		for _, childID := range childIDs {
+			// Skip if already visited (cycle detection)
+			if visited[childID] {
+				continue
+			}
+
+			// Load child artefact
+			child, err := c.GetArtefact(ctx, childID)
+			if err != nil {
+				if IsNotFound(err) {
+					// Child exists in index but not in Redis (inconsistency, but skip gracefully)
+					log.Printf("[Blackboard] WARNING: Child %s in index but not found in Redis", childID)
+					continue
+				}
+				return fmt.Errorf("failed to load child artefact %s: %w", childID, err)
+			}
+
+			descendants = append(descendants, child)
+
+			// Recurse into grandchildren (child is at depth+1, its children will be at depth+2)
+			if err := traverse(childID, depth+1); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	}
+
+	// Start traversal from ancestor (depth 0, so direct children are at depth 1)
+	if err := traverse(ancestorID, 0); err != nil {
+		return nil, err
+	}
+
+	return descendants, nil
+}
+
+// AcquireSyncLock attempts to acquire a synchronization deduplication lock.
+// M5.1: Used by Synchronizers to prevent duplicate bids when multiple workers
+// complete simultaneously.
+//
+// Parameters:
+//   - ancestorID: The ID of the ancestor artefact being synchronized on
+//   - agentRole: The agent role attempting to acquire the lock
+//
+// Returns:
+//   - true if lock acquired successfully
+//   - false if lock already held by another worker (deduplication)
+//   - error if Redis operation fails
+//
+// Implementation notes:
+//   - Uses SET NX EX for atomic lock acquisition with TTL
+//   - Lock TTL: 10 minutes (600 seconds)
+//   - Lock is NEVER explicitly released (TTL handles cleanup)
+//   - Agent role is SHA-256 hashed for key construction
+func (c *Client) AcquireSyncLock(ctx context.Context, ancestorID, agentRole string) (bool, error) {
+	// Hash agent role for lock key (first 8 chars of hex digest)
+	hash := sha256.Sum256([]byte(agentRole))
+	roleHash := hex.EncodeToString(hash[:])[:8]
+
+	lockKey := SyncDedupLockKey(c.instanceName, ancestorID, roleHash)
+
+	// SET NX EX 600 (10 minutes)
+	result, err := c.rdb.SetNX(ctx, lockKey, "1", 10*time.Minute).Result()
+	if err != nil {
+		return false, fmt.Errorf("failed to acquire sync lock: %w", err)
+	}
+
+	return result, nil
+}
+
+// CheckSyncLock checks if a synchronization deduplication lock is currently held.
+// M5.1: Non-destructive check used by synchronizers to peek at lock status without acquiring it.
+//
+// Returns:
+//   - true if the lock is held
+//   - false if the lock is not held
+//   - error if the check fails
+func (c *Client) CheckSyncLock(ctx context.Context, ancestorID, agentRole string) (bool, error) {
+	// Hash agent role for lock key
+	hash := sha256.Sum256([]byte(agentRole))
+	roleHash := hex.EncodeToString(hash[:])[:8]
+
+	lockKey := SyncDedupLockKey(c.instanceName, ancestorID, roleHash)
+
+	// GET key. If exists -> locked.
+	val, err := c.rdb.Get(ctx, lockKey).Result()
+	if err == redis.Nil {
+		return false, nil // Not locked
+	}
+	if err != nil {
+		return false, fmt.Errorf("failed to check sync lock: %w", err)
+	}
+
+	return val == "1", nil
 }
 
 // IsHashMismatchError checks if an error is a HashMismatchError and optionally extracts it.
@@ -1224,97 +1424,6 @@ func (c *Client) PublishSecurityAlert(ctx context.Context, alert *SecurityAlert)
 	return nil
 }
 
-// WriteVerifiableArtefact writes a VerifiableArtefact to Redis.
-// M4.6: This is used for V2 hash-based artefacts during testing and eventual migration.
-// Similar to CreateArtefact but for the VerifiableArtefact type.
-//
-// Stores the artefact as a Redis Hash (HSET) to be compatible with existing GetArtefact (HGETALL) calls.
-func (c *Client) WriteVerifiableArtefact(ctx context.Context, a *VerifiableArtefact) error {
-	// Validate artefact structure
-	if err := a.Validate(); err != nil {
-		return fmt.Errorf("invalid verifiable artefact: %w", err)
-	}
-
-	// Convert V2 VerifiableArtefact to V1 Artefact for backwards compatibility with HGETALL
-	// This ensures GetArtefact works for both V1 (UUID) and V2 (Hash) artefacts
-	v1Artefact := &Artefact{
-		ID:              a.ID,
-		LogicalID:       a.Header.LogicalThreadID,
-		Version:         a.Header.Version,
-		StructuralType:  a.Header.StructuralType,
-		Type:            a.Header.Type,
-		Payload:         a.Payload.Content,
-		SourceArtefacts: a.Header.ParentHashes,
-		ProducedByRole:  a.Header.ProducedByRole,
-		CreatedAtMs:     a.Header.CreatedAtMs,
-		ClaimID:         a.Header.ClaimID,
-		ContextForRoles: a.Header.ContextForRoles,
-	}
-
-	// Convert to Redis hash
-	hash, err := ArtefactToHash(v1Artefact)
-	if err != nil {
-		return fmt.Errorf("failed to serialize verifiable artefact to hash: %w", err)
-	}
-
-	// Write to Redis using hash ID as key (HSET)
-	key := ArtefactKey(c.instanceName, a.ID)
-	if err := c.rdb.HSet(ctx, key, hash).Err(); err != nil {
-		return fmt.Errorf("failed to write verifiable artefact to Redis: %w", err)
-	}
-
-	// Note: We don't publish to artefact_events channel here because this is test-only.
-	// When V2 is fully implemented, the pup will write and publish.
-
-	return nil
-}
-
-// GetVerifiableArtefact retrieves a V2 VerifiableArtefact by its hash ID.
-// Returns (nil, redis.Nil) if the artefact doesn't exist.
-// Use IsNotFound() to check for not-found errors.
-// M4.6 Phase 4: Used by CLI verify command for independent hash verification.
-func (c *Client) GetVerifiableArtefact(ctx context.Context, hashID string) (*VerifiableArtefact, error) {
-	key := ArtefactKey(c.instanceName, hashID)
-
-	// Read hash from Redis (HGETALL)
-	hashData, err := c.rdb.HGetAll(ctx, key).Result()
-	if err != nil {
-		return nil, fmt.Errorf("failed to read verifiable artefact from Redis: %w", err)
-	}
-
-	// Check if key exists
-	if len(hashData) == 0 {
-		return nil, redis.Nil
-	}
-
-	// Convert Hash to V1 Artefact first (reusing existing deserialization logic)
-	v1Artefact, err := HashToArtefact(hashData)
-	if err != nil {
-		return nil, fmt.Errorf("failed to deserialize verifiable artefact from hash: %w", err)
-	}
-
-	// Convert V1 Artefact to V2 VerifiableArtefact structure
-	v2Artefact := &VerifiableArtefact{
-		ID: v1Artefact.ID,
-		Header: ArtefactHeader{
-			ParentHashes:    v1Artefact.SourceArtefacts,
-			LogicalThreadID: v1Artefact.LogicalID,
-			Version:         v1Artefact.Version,
-			CreatedAtMs:     v1Artefact.CreatedAtMs,
-			ProducedByRole:  v1Artefact.ProducedByRole,
-			StructuralType:  v1Artefact.StructuralType,
-			Type:            v1Artefact.Type,
-			ContextForRoles: v1Artefact.ContextForRoles,
-			ClaimID:         v1Artefact.ClaimID,
-		},
-		Payload: ArtefactPayload{
-			Content: v1Artefact.Payload,
-		},
-	}
-
-	return v2Artefact, nil
-}
-
 // ScanKeys scans for Redis keys matching the given pattern.
 // Returns an array of matching key strings (sorted for consistency).
 // Uses Redis SCAN for efficient iteration without blocking.
@@ -1446,9 +1555,9 @@ func (c *Client) keepAlive(ctx context.Context, pubsub *redis.PubSub) {
 		case <-ticker.C:
 			// Send PING and log result for debugging
 			if err := pubsub.Ping(ctx); err != nil {
-				log.Printf("DEBUG: KeepAlive PING failed: %v", err)
+				debug.Log("KeepAlive PING failed: %v", err)
 			} else {
-				// log.Printf("DEBUG: KeepAlive PING success") // Uncomment for very verbose logging
+				debug.Log("KeepAlive PING success")
 			}
 		}
 	}

@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/hearth-insights/holt/pkg/blackboard"
 	"github.com/google/uuid"
+	"github.com/hearth-insights/holt/pkg/blackboard"
 	"github.com/stretchr/testify/require"
 )
 
@@ -41,12 +41,15 @@ fi
 	t.Run("should ignore GoalDefined artefact", func(t *testing.T) {
 		// Create a GoalDefined artefact
 		goalArtefact := &blackboard.Artefact{
-			ID:   uuid.New().String(),
-			Type: "GoalDefined",
+			ID: uuid.New().String(),
+			Header: blackboard.ArtefactHeader{
+				Type: "GoalDefined",
+			},
 		}
 
 		// Determine the bid
-		bidType, err := pupEngine.determineBidType(ctx, goalArtefact)
+		claim := &blackboard.Claim{ID: "test-claim", ArtefactID: goalArtefact.ID}
+		bidType, err := pupEngine.determineBidType(ctx, claim, goalArtefact)
 
 		// Assert that the bid is "ignore"
 		require.NoError(t, err)
@@ -56,12 +59,15 @@ fi
 	t.Run("should review RecipeYAML artefact", func(t *testing.T) {
 		// Create a RecipeYAML artefact
 		recipeArtefact := &blackboard.Artefact{
-			ID:   uuid.New().String(),
-			Type: "RecipeYAML",
+			ID: uuid.New().String(),
+			Header: blackboard.ArtefactHeader{
+				Type: "RecipeYAML",
+			},
 		}
 
 		// Determine the bid
-		bidType, err := pupEngine.determineBidType(ctx, recipeArtefact)
+		claim := &blackboard.Claim{ID: "test-claim", ArtefactID: recipeArtefact.ID}
+		bidType, err := pupEngine.determineBidType(ctx, claim, recipeArtefact)
 
 		// Assert that the bid is "review"
 		require.NoError(t, err)
@@ -76,8 +82,9 @@ fi
 			},
 		}
 
-		goalArtefact := &blackboard.Artefact{Type: "GoalDefined"}
-		bidType, err := staticEngine.determineBidType(ctx, goalArtefact)
+		goalArtefact := &blackboard.Artefact{Header: blackboard.ArtefactHeader{Type: "GoalDefined"}}
+		claim := &blackboard.Claim{ID: "test-claim", ArtefactID: goalArtefact.ID}
+		bidType, err := staticEngine.determineBidType(ctx, claim, goalArtefact)
 
 		require.NoError(t, err)
 		require.Equal(t, blackboard.BidTypeExclusive, bidType, "Should use static bidding_strategy as fallback")
@@ -101,8 +108,9 @@ exit 1
 			},
 		}
 
-		artefact := &blackboard.Artefact{Type: "SomeType"}
-		bidType, err := engineWithFallback.determineBidType(ctx, artefact)
+		artefact := &blackboard.Artefact{Header: blackboard.ArtefactHeader{Type: "SomeType"}}
+		claim := &blackboard.Claim{ID: "test-claim", ArtefactID: artefact.ID}
+		bidType, err := engineWithFallback.determineBidType(ctx, claim, artefact)
 
 		require.NoError(t, err)
 		require.Equal(t, blackboard.BidTypeParallel, bidType, "Should fall back to static strategy on script failure")
@@ -126,8 +134,9 @@ exit 1
 			},
 		}
 
-		artefact := &blackboard.Artefact{Type: "SomeType"}
-		bidType, err := engineNoFallback.determineBidType(ctx, artefact)
+		artefact := &blackboard.Artefact{Header: blackboard.ArtefactHeader{Type: "SomeType"}}
+		claim := &blackboard.Claim{ID: "test-claim", ArtefactID: artefact.ID}
+		bidType, err := engineNoFallback.determineBidType(ctx, claim, artefact)
 
 		require.NoError(t, err)
 		require.Equal(t, blackboard.BidTypeIgnore, bidType, "Should return 'ignore' when no fallback available")
@@ -151,8 +160,9 @@ echo "invalid_bid_type"
 			},
 		}
 
-		artefact := &blackboard.Artefact{Type: "SomeType"}
-		bidType, err := engineWithFallback.determineBidType(ctx, artefact)
+		artefact := &blackboard.Artefact{Header: blackboard.ArtefactHeader{Type: "SomeType"}}
+		claim := &blackboard.Claim{ID: "test-claim", ArtefactID: artefact.ID}
+		bidType, err := engineWithFallback.determineBidType(ctx, claim, artefact)
 
 		require.NoError(t, err)
 		require.Equal(t, blackboard.BidTypeReview, bidType, "Should fall back when script returns invalid bid type")
@@ -173,8 +183,9 @@ echo "  claim  "
 			},
 		}
 
-		artefact := &blackboard.Artefact{Type: "SomeType"}
-		bidType, err := engineWhitespace.determineBidType(ctx, artefact)
+		artefact := &blackboard.Artefact{Header: blackboard.ArtefactHeader{Type: "SomeType"}}
+		claim := &blackboard.Claim{ID: "test-claim", ArtefactID: artefact.ID}
+		bidType, err := engineWhitespace.determineBidType(ctx, claim, artefact)
 
 		require.NoError(t, err)
 		require.Equal(t, blackboard.BidTypeParallel, bidType, "Should trim whitespace from script output")

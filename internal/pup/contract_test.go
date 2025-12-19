@@ -10,13 +10,24 @@ import (
 // TestToolInput_JSONMarshaling verifies that ToolInput marshals to correct JSON structure
 func TestToolInput_JSONMarshaling(t *testing.T) {
 	artefact := &blackboard.Artefact{
-		ID:             "art-123",
-		LogicalID:      "log-456",
-		Version:        1,
-		StructuralType: blackboard.StructuralTypeStandard,
-		Type:           "GoalDefined",
-		Payload:        "Implement user login",
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "GoalDefined",
+			ProducedByRole:  "user",
+			ParentHashes:    []string{},
+			CreatedAtMs:     1234567890,
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "Implement user login",
+		},
 	}
+	hash, err := blackboard.ComputeArtefactHash(artefact)
+	if err != nil {
+		t.Fatalf("Failed to compute hash: %v", err)
+	}
+	artefact.ID = hash
 
 	input := &ToolInput{
 		ClaimType:      "exclusive",
@@ -45,12 +56,17 @@ func TestToolInput_JSONMarshaling(t *testing.T) {
 		t.Fatalf("target_artefact is not an object")
 	}
 
-	if targetArt["id"] != "art-123" {
-		t.Errorf("Expected target_artefact.id='art-123', got %v", targetArt["id"])
+	if targetArt["id"] != artefact.ID {
+		t.Errorf("Expected target_artefact.id='%s', got %v", artefact.ID, targetArt["id"])
 	}
 
-	if targetArt["type"] != "GoalDefined" {
-		t.Errorf("Expected target_artefact.type='GoalDefined', got %v", targetArt["type"])
+	header, ok := targetArt["header"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("target_artefact.header is not an object")
+	}
+
+	if header["type"] != "GoalDefined" {
+		t.Errorf("Expected target_artefact.header.type='GoalDefined', got %v", header["type"])
 	}
 
 	contextChain, ok := unmarshaled["context_chain"].([]interface{})

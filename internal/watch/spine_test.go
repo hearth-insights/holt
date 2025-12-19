@@ -3,6 +3,7 @@ package watch
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/hearth-insights/holt/pkg/blackboard"
@@ -21,30 +22,45 @@ func TestSpineVisibility(t *testing.T) {
 	ctx := context.Background()
 
 	// 1. Create SystemManifest
-	manifestID := "manifest-123"
 	manifestPayload := `{"config_hash": "hash123", "git_commit": "commit123"}`
 	manifest := &blackboard.Artefact{
-		ID:             manifestID,
-		LogicalID:      "log-man-1",
-		Version:        1,
-		StructuralType: blackboard.StructuralTypeSystemManifest,
-		Type:           "SystemManifest",
-		ProducedByRole: "orchestrator",
-		Payload:        manifestPayload,
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: "log-man-1",
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeSystemManifest,
+			Type:            "SystemManifest",
+			ProducedByRole:  "orchestrator",
+			ParentHashes:    []string{},
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: manifestPayload,
+		},
 	}
+	manifestHash, err := blackboard.ComputeArtefactHash(manifest)
+	require.NoError(t, err)
+	manifest.ID = manifestHash
+	manifestID := manifest.ID
 	require.NoError(t, client.CreateArtefact(ctx, manifest))
 
 	// 2. Create Anchored Artefact
 	artefact := &blackboard.Artefact{
-		ID:              "art-123",
-		LogicalID:       "log-art-1",
-		Version:        1,
-		StructuralType: blackboard.StructuralTypeStandard,
-		Type:           "GoalDefined",
-		ProducedByRole: "user",
-		Payload:        "goal",
-		SourceArtefacts: []string{manifestID},
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: "log-art-1",
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "GoalDefined",
+			ProducedByRole:  "user",
+			ParentHashes:    []string{manifestID},
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "goal",
+		},
 	}
+	hash, err := blackboard.ComputeArtefactHash(artefact)
+	require.NoError(t, err)
+	artefact.ID = hash
 	require.NoError(t, client.CreateArtefact(ctx, artefact))
 
 	// 3. Test Formatter
@@ -62,5 +78,5 @@ func TestSpineVisibility(t *testing.T) {
 	require.Contains(t, output, "✨ Artefact created")
 	require.Contains(t, output, "type=GoalDefined")
 	require.Contains(t, output, "anchored to spine=")
-	require.Contains(t, output, "manifest") // Truncated ID (manifest-123 -> manifest)
+	require.Contains(t, output, manifestID[:8]) // Truncated ID (hash)
 }

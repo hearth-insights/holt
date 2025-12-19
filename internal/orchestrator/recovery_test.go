@@ -110,10 +110,10 @@ func TestRetriggerGrant(t *testing.T) {
 	// We check the agent's event channel
 	msg, err := pubsub.ReceiveMessage(ctx)
 	require.NoError(t, err)
-	
+
 	assert.NotEmpty(t, msg.Payload)
 	assert.Equal(t, streamKey, msg.Channel)
-	
+
 	// Check payload contains "claim_type": "claim" (for parallel)
 	assert.Contains(t, msg.Payload, `"claim_type":"claim"`)
 	assert.Contains(t, msg.Payload, `"claim_id":"claim-retrigger"`)
@@ -136,7 +136,7 @@ func TestRecoverGrantQueues(t *testing.T) {
 	err = e.RecoverState(ctx)
 	require.NoError(t, err)
 
-	// Verify log output? 
+	// Verify log output?
 	// Hard to verify log output directly without capturing stdout/log hook.
 	// But we can verify that it didn't error and the queue is still there.
 	count, err := e.client.GetRedisClient().ZCard(ctx, queueKey).Result()

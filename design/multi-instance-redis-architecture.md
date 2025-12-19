@@ -107,7 +107,7 @@ No field-level TTL (cleanup on holt down)
 **Metadata Schema (JSON):**
 ```json
 {
-  "run_id": "550e8400-e29b-41d4-a716-446655440000",
+  "run_id": "0508eb36a3d0dd327c235b6d900f26455a2ee715300f1c4b78c3d3edce8dafe9",
   "workspace_path": "/absolute/path/to/project",
   "started_at": "2025-10-05T12:34:56Z",
   "orchestrator_pid": 12345

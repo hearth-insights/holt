@@ -7,9 +7,9 @@ import (
 	"log"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/hearth-insights/holt/internal/orchestrator/debug"
 	"github.com/hearth-insights/holt/pkg/blackboard"
-	"github.com/google/uuid"
 )
 
 // M4.2: Debug session management
@@ -303,15 +303,19 @@ func (e *Engine) handleManualReview(ctx context.Context, debugSess *debugSession
 	payloadJSON, _ := json.Marshal(reviewPayload)
 
 	reviewArtefact := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeReview,
-		Type:            "ManualReview",
-		Payload:         string(payloadJSON),
-		SourceArtefacts: []string{claim.ArtefactID},
-		ProducedByRole:  "user",
-		CreatedAtMs:     time.Now().UnixMilli(),
+		ID: uuid.New().String(),
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: uuid.New().String(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeReview,
+			Type:            "ManualReview",
+			ProducedByRole:  "user",
+			ParentHashes:    []string{claim.ArtefactID},
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: string(payloadJSON),
+		},
 	}
 
 	if err := e.client.CreateArtefact(ctx, reviewArtefact); err != nil {
@@ -385,12 +389,12 @@ func (e *Engine) handleTerminateClaim(ctx context.Context, debugSess *debugSessi
 		claimID, cmd.SessionID)
 
 	e.logEvent("debug_claim_terminated", map[string]interface{}{
-		"session_id":         cmd.SessionID,
-		"claim_id":           claimID,
-		"artefact_id":        claim.ArtefactID,
-		"paused_event_type":  pauseCtx.EventType,
-		"termination_reason": claim.TerminationReason,
-		"level":              "error", // Use error level for high visibility
+		"session_id":          cmd.SessionID,
+		"claim_id":            claimID,
+		"artefact_id":         claim.ArtefactID,
+		"paused_event_type":   pauseCtx.EventType,
+		"termination_reason":  claim.TerminationReason,
+		"level":               "error", // Use error level for high visibility
 		"manual_intervention": true,
 	})
 

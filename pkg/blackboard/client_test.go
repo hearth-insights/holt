@@ -2,6 +2,7 @@ package blackboard
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -68,14 +69,18 @@ func TestCreateArtefact(t *testing.T) {
 
 	t.Run("creates valid artefact", func(t *testing.T) {
 		artefact := &Artefact{
-			ID:              NewID(),
-			LogicalID:       NewID(),
-			Version:         1,
-			StructuralType:  StructuralTypeStandard,
-			Type:            "TestType",
-			ProducedByRole:  "test-agent",
-			Payload:         "test payload",
-			SourceArtefacts: []string{},
+			ID: NewID(),
+			Header: ArtefactHeader{
+				LogicalThreadID: NewID(),
+				Version:         1,
+				StructuralType:  StructuralTypeStandard,
+				Type:            "TestType",
+				ProducedByRole:  "test-agent",
+				ParentHashes:    []string{},
+			},
+			Payload: ArtefactPayload{
+				Content: "test payload",
+			},
 		}
 
 		err := client.CreateArtefact(ctx, artefact)
@@ -85,15 +90,17 @@ func TestCreateArtefact(t *testing.T) {
 		retrieved, err := client.GetArtefact(ctx, artefact.ID)
 		require.NoError(t, err)
 		assert.Equal(t, artefact.ID, retrieved.ID)
-		assert.Equal(t, artefact.Type, retrieved.Type)
-		assert.Equal(t, artefact.Payload, retrieved.Payload)
+		assert.Equal(t, artefact.Header.Type, retrieved.Header.Type)
+		assert.Equal(t, artefact.Payload.Content, retrieved.Payload.Content)
 	})
 
 	t.Run("rejects invalid artefact", func(t *testing.T) {
 		artefact := &Artefact{
-			ID:        "", // Empty ID should fail validation
-			LogicalID: NewID(),
-			Version:   1,
+			ID: "", // Empty ID should fail validation
+			Header: ArtefactHeader{
+				LogicalThreadID: NewID(),
+				Version:         1,
+			},
 		}
 
 		err := client.CreateArtefact(ctx, artefact)
@@ -109,14 +116,18 @@ func TestCreateArtefact(t *testing.T) {
 
 		// Create artefact
 		artefact := &Artefact{
-			ID:              NewID(),
-			LogicalID:       NewID(),
-			Version:         1,
-			StructuralType:  StructuralTypeStandard,
-			Type:            "EventTest",
-			ProducedByRole:  "test-agent",
-			Payload:         "event payload",
-			SourceArtefacts: []string{},
+			ID: NewID(),
+			Header: ArtefactHeader{
+				LogicalThreadID: NewID(),
+				Version:         1,
+				StructuralType:  StructuralTypeStandard,
+				Type:            "EventTest",
+				ProducedByRole:  "test-agent",
+				ParentHashes:    []string{},
+			},
+			Payload: ArtefactPayload{
+				Content: "event payload",
+			},
 		}
 
 		err = client.CreateArtefact(ctx, artefact)
@@ -126,7 +137,7 @@ func TestCreateArtefact(t *testing.T) {
 		select {
 		case receivedArtefact := <-sub.Events():
 			assert.Equal(t, artefact.ID, receivedArtefact.ID)
-			assert.Equal(t, artefact.Type, receivedArtefact.Type)
+			assert.Equal(t, artefact.Header.Type, receivedArtefact.Header.Type)
 		case <-time.After(1 * time.Second):
 			t.Fatal("timeout waiting for artefact event")
 		}
@@ -140,14 +151,18 @@ func TestGetArtefact(t *testing.T) {
 	t.Run("retrieves existing artefact", func(t *testing.T) {
 		// Create an artefact first
 		artefact := &Artefact{
-			ID:              NewID(),
-			LogicalID:       NewID(),
-			Version:         1,
-			StructuralType:  StructuralTypeStandard,
-			Type:            "TestType",
-			ProducedByRole:  "test-agent",
-			Payload:         "test payload",
-			SourceArtefacts: []string{NewID()},
+			ID: NewID(),
+			Header: ArtefactHeader{
+				LogicalThreadID: NewID(),
+				Version:         1,
+				StructuralType:  StructuralTypeStandard,
+				Type:            "TestType",
+				ProducedByRole:  "test-agent",
+				ParentHashes:    []string{NewID()},
+			},
+			Payload: ArtefactPayload{
+				Content: "test payload",
+			},
 		}
 
 		err := client.CreateArtefact(ctx, artefact)
@@ -157,13 +172,13 @@ func TestGetArtefact(t *testing.T) {
 		retrieved, err := client.GetArtefact(ctx, artefact.ID)
 		require.NoError(t, err)
 		assert.Equal(t, artefact.ID, retrieved.ID)
-		assert.Equal(t, artefact.LogicalID, retrieved.LogicalID)
-		assert.Equal(t, artefact.Version, retrieved.Version)
-		assert.Equal(t, artefact.StructuralType, retrieved.StructuralType)
-		assert.Equal(t, artefact.Type, retrieved.Type)
-		assert.Equal(t, artefact.Payload, retrieved.Payload)
-		assert.Equal(t, artefact.SourceArtefacts, retrieved.SourceArtefacts)
-		assert.Equal(t, artefact.ProducedByRole, retrieved.ProducedByRole)
+		assert.Equal(t, artefact.Header.LogicalThreadID, retrieved.Header.LogicalThreadID)
+		assert.Equal(t, artefact.Header.Version, retrieved.Header.Version)
+		assert.Equal(t, artefact.Header.StructuralType, retrieved.Header.StructuralType)
+		assert.Equal(t, artefact.Header.Type, retrieved.Header.Type)
+		assert.Equal(t, artefact.Payload.Content, retrieved.Payload.Content)
+		assert.Equal(t, artefact.Header.ParentHashes, retrieved.Header.ParentHashes)
+		assert.Equal(t, artefact.Header.ProducedByRole, retrieved.Header.ProducedByRole)
 	})
 
 	t.Run("returns redis.Nil for non-existent artefact", func(t *testing.T) {
@@ -175,14 +190,18 @@ func TestGetArtefact(t *testing.T) {
 
 	t.Run("handles empty source artefacts", func(t *testing.T) {
 		artefact := &Artefact{
-			ID:              NewID(),
-			LogicalID:       NewID(),
-			Version:         1,
-			StructuralType:  StructuralTypeStandard,
-			Type:            "TestType",
-			ProducedByRole:  "test-agent",
-			Payload:         "test",
-			SourceArtefacts: []string{},
+			ID: NewID(),
+			Header: ArtefactHeader{
+				LogicalThreadID: NewID(),
+				Version:         1,
+				StructuralType:  StructuralTypeStandard,
+				Type:            "TestType",
+				ProducedByRole:  "test-agent",
+				ParentHashes:    []string{},
+			},
+			Payload: ArtefactPayload{
+				Content: "test",
+			},
 		}
 
 		err := client.CreateArtefact(ctx, artefact)
@@ -190,8 +209,9 @@ func TestGetArtefact(t *testing.T) {
 
 		retrieved, err := client.GetArtefact(ctx, artefact.ID)
 		require.NoError(t, err)
-		assert.NotNil(t, retrieved.SourceArtefacts)
-		assert.Empty(t, retrieved.SourceArtefacts)
+		assert.NotNil(t, retrieved.Header.ParentHashes)
+		assert.Empty(t, retrieved.Header.ParentHashes)
+		assert.Equal(t, "test", retrieved.Payload.Content)
 	})
 }
 
@@ -201,14 +221,18 @@ func TestArtefactExists(t *testing.T) {
 
 	t.Run("returns true for existing artefact", func(t *testing.T) {
 		artefact := &Artefact{
-			ID:              NewID(),
-			LogicalID:       NewID(),
-			Version:         1,
-			StructuralType:  StructuralTypeStandard,
-			Type:            "TestType",
-			ProducedByRole:  "test-agent",
-			Payload:         "test",
-			SourceArtefacts: []string{},
+			ID: NewID(),
+			Header: ArtefactHeader{
+				LogicalThreadID: NewID(),
+				Version:         1,
+				StructuralType:  StructuralTypeStandard,
+				Type:            "TestType",
+				ProducedByRole:  "test-agent",
+				ParentHashes:    []string{},
+			},
+			Payload: ArtefactPayload{
+				Content: "test",
+			},
 		}
 
 		err := client.CreateArtefact(ctx, artefact)
@@ -602,14 +626,18 @@ func TestSubscribeArtefactEvents(t *testing.T) {
 
 		// Create artefact (will publish event)
 		artefact := &Artefact{
-			ID:              NewID(),
-			LogicalID:       NewID(),
-			Version:         1,
-			StructuralType:  StructuralTypeStandard,
-			Type:            "TestType",
-			ProducedByRole:  "test-agent",
-			Payload:         "test",
-			SourceArtefacts: []string{},
+			ID: NewID(),
+			Header: ArtefactHeader{
+				LogicalThreadID: NewID(),
+				Version:         1,
+				StructuralType:  StructuralTypeStandard,
+				Type:            "TestType",
+				ProducedByRole:  "test-agent",
+				ParentHashes:    []string{},
+			},
+			Payload: ArtefactPayload{
+				Content: "test",
+			},
 		}
 
 		err = client.CreateArtefact(ctx, artefact)
@@ -619,7 +647,7 @@ func TestSubscribeArtefactEvents(t *testing.T) {
 		select {
 		case received := <-sub.Events():
 			assert.Equal(t, artefact.ID, received.ID)
-			assert.Equal(t, artefact.Type, received.Type)
+			assert.Equal(t, artefact.Header.Type, received.Header.Type)
 		case <-time.After(1 * time.Second):
 			t.Fatal("timeout waiting for event")
 		}
@@ -636,14 +664,18 @@ func TestSubscribeArtefactEvents(t *testing.T) {
 
 		// Create artefact
 		artefact := &Artefact{
-			ID:              NewID(),
-			LogicalID:       NewID(),
-			Version:         1,
-			StructuralType:  StructuralTypeStandard,
-			Type:            "MultiSubTest",
-			ProducedByRole:  "test-agent",
-			Payload:         "test",
-			SourceArtefacts: []string{},
+			ID: NewID(),
+			Header: ArtefactHeader{
+				LogicalThreadID: NewID(),
+				Version:         1,
+				StructuralType:  StructuralTypeStandard,
+				Type:            "MultiSubTest",
+				ProducedByRole:  "test-agent",
+				ParentHashes:    []string{},
+			},
+			Payload: ArtefactPayload{
+				Content: "test",
+			},
 		}
 
 		err = client.CreateArtefact(ctx, artefact)
@@ -694,7 +726,6 @@ func TestSubscribeArtefactEvents(t *testing.T) {
 		}
 	})
 }
-
 
 func TestKeepAlive(t *testing.T) {
 	// Override interval for test
@@ -757,14 +788,18 @@ func TestKeepAlive(t *testing.T) {
 
 	// Create an event to verify connection is still up
 	artefact := &Artefact{
-		ID:              NewID(),
-		LogicalID:       NewID(),
-		Version:         1,
-		StructuralType:  StructuralTypeStandard,
-		Type:            "KeepAliveTest",
-		ProducedByRole:  "test-agent",
-		Payload:         "test",
-		SourceArtefacts: []string{},
+		ID: NewID(),
+		Header: ArtefactHeader{
+			LogicalThreadID: NewID(),
+			Version:         1,
+			StructuralType:  StructuralTypeStandard,
+			Type:            "KeepAliveTest",
+			ProducedByRole:  "test-agent",
+			ParentHashes:    []string{},
+		},
+		Payload: ArtefactPayload{
+			Content: "test",
+		},
 	}
 
 	err = client.CreateArtefact(ctx, artefact)
@@ -852,14 +887,18 @@ func TestInstanceNamespacing(t *testing.T) {
 
 	t.Run("artefacts are instance-isolated", func(t *testing.T) {
 		artefact := &Artefact{
-			ID:              NewID(),
-			LogicalID:       NewID(),
-			Version:         1,
-			StructuralType:  StructuralTypeStandard,
-			Type:            "TestType",
-			ProducedByRole:  "test-agent",
-			Payload:         "test",
-			SourceArtefacts: []string{},
+			ID: NewID(),
+			Header: ArtefactHeader{
+				LogicalThreadID: NewID(),
+				Version:         1,
+				StructuralType:  StructuralTypeStandard,
+				Type:            "TestType",
+				ProducedByRole:  "test-agent",
+				ParentHashes:    []string{},
+			},
+			Payload: ArtefactPayload{
+				Content: "test",
+			},
 		}
 
 		// Create in instance-1
@@ -890,14 +929,18 @@ func TestInstanceNamespacing(t *testing.T) {
 
 		// Create artefact in instance-1
 		artefact := &Artefact{
-			ID:              NewID(),
-			LogicalID:       NewID(),
-			Version:         1,
-			StructuralType:  StructuralTypeStandard,
-			Type:            "IsolationTest",
-			ProducedByRole:  "test-agent",
-			Payload:         "test",
-			SourceArtefacts: []string{},
+			ID: NewID(),
+			Header: ArtefactHeader{
+				LogicalThreadID: NewID(),
+				Version:         1,
+				StructuralType:  StructuralTypeStandard,
+				Type:            "IsolationTest",
+				ProducedByRole:  "test-agent",
+				ParentHashes:    []string{},
+			},
+			Payload: ArtefactPayload{
+				Content: "test",
+			},
 		}
 
 		err = client1.CreateArtefact(ctx, artefact)
@@ -1383,4 +1426,391 @@ func TestZSetOperations(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, []string{"claim-1", "claim-2"}, members)
 	})
+}
+
+// M5.1: Test GetDescendants with simple tree
+func TestGetDescendants_SimpleTree(t *testing.T) {
+	client, _ := setupTestClient(t)
+	ctx := context.Background()
+
+	// Build tree:
+	//   root
+	//   ├── child1
+	//   └── child2
+	// Create root first to get its hash
+	root := &Artefact{
+		Header: ArtefactHeader{
+			LogicalThreadID: NewID(), // Use valid random IDs
+			Version:         1,
+			StructuralType:  StructuralTypeStandard,
+			Type:            "Root",
+			ProducedByRole:  "test",
+			ParentHashes:    []string{},
+			Metadata:        "{}",
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: ArtefactPayload{
+			Content: "root",
+		},
+	}
+	rootHash, _ := ComputeArtefactHash(root)
+	root.ID = rootHash
+
+	child1 := &Artefact{
+		Header: ArtefactHeader{
+			LogicalThreadID: NewID(),
+			Version:         1,
+			StructuralType:  StructuralTypeStandard,
+			Type:            "Child",
+			ProducedByRole:  "test",
+			ParentHashes:    []string{root.ID},
+			Metadata:        "{}",
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: ArtefactPayload{
+			Content: "child1",
+		},
+	}
+	child1Hash, _ := ComputeArtefactHash(child1)
+	child1.ID = child1Hash
+
+	child2 := &Artefact{
+		Header: ArtefactHeader{
+			LogicalThreadID: NewID(),
+			Version:         1,
+			StructuralType:  StructuralTypeStandard,
+			Type:            "Child",
+			ProducedByRole:  "test",
+			ParentHashes:    []string{root.ID},
+			Metadata:        "{}",
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: ArtefactPayload{
+			Content: "child2",
+		},
+	}
+	child2Hash, _ := ComputeArtefactHash(child2)
+	child2.ID = child2Hash
+
+	// Create artefacts (Lua script creates reverse index)
+	require.NoError(t, client.CreateArtefact(ctx, root))
+	require.NoError(t, client.CreateArtefact(ctx, child1))
+	require.NoError(t, client.CreateArtefact(ctx, child2))
+
+	// Get descendants of root
+	descendants, err := client.GetDescendants(ctx, root.ID, 0)
+	require.NoError(t, err)
+	assert.Len(t, descendants, 2)
+
+	// Verify IDs
+	ids := []string{descendants[0].ID, descendants[1].ID}
+	assert.Contains(t, ids, child1.ID)
+	assert.Contains(t, ids, child2.ID)
+}
+
+// M5.1: Test GetDescendants with deep tree (grandchildren)
+func TestGetDescendants_DeepTree(t *testing.T) {
+	client, _ := setupTestClient(t)
+	ctx := context.Background()
+
+	// Build tree:
+	//   root
+	//   └── child
+	//       └── grandchild
+	root := &Artefact{
+		Header: ArtefactHeader{
+			LogicalThreadID: NewID(),
+			Version:         1,
+			StructuralType:  StructuralTypeStandard,
+			Type:            "Root",
+			ProducedByRole:  "test",
+			ParentHashes:    []string{},
+			Metadata:        "{}",
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: ArtefactPayload{
+			Content: "root",
+		},
+	}
+	rootHash, _ := ComputeArtefactHash(root)
+	root.ID = rootHash
+
+	child := &Artefact{
+		Header: ArtefactHeader{
+			LogicalThreadID: NewID(),
+			Version:         1,
+			StructuralType:  StructuralTypeStandard,
+			Type:            "Child",
+			ProducedByRole:  "test",
+			ParentHashes:    []string{root.ID},
+			Metadata:        "{}",
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: ArtefactPayload{
+			Content: "child",
+		},
+	}
+	childHash, _ := ComputeArtefactHash(child)
+	child.ID = childHash
+
+	grandchild := &Artefact{
+		Header: ArtefactHeader{
+			LogicalThreadID: NewID(),
+			Version:         1,
+			StructuralType:  StructuralTypeStandard,
+			Type:            "Grandchild",
+			ProducedByRole:  "test",
+			ParentHashes:    []string{child.ID},
+			Metadata:        "{}",
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: ArtefactPayload{
+			Content: "grandchild",
+		},
+	}
+	grandchildHash, _ := ComputeArtefactHash(grandchild)
+	grandchild.ID = grandchildHash
+
+	require.NoError(t, client.CreateArtefact(ctx, root))
+	require.NoError(t, client.CreateArtefact(ctx, child))
+	require.NoError(t, client.CreateArtefact(ctx, grandchild))
+
+	// Get all descendants (unlimited depth)
+	descendants, err := client.GetDescendants(ctx, root.ID, 0)
+	require.NoError(t, err)
+	assert.Len(t, descendants, 2) // child + grandchild
+
+	ids := []string{descendants[0].ID, descendants[1].ID}
+	assert.Contains(t, ids, child.ID)
+	assert.Contains(t, ids, grandchild.ID)
+}
+
+// M5.1: Test GetDescendants with max_depth limit
+func TestGetDescendants_MaxDepthLimit(t *testing.T) {
+	client, _ := setupTestClient(t)
+	ctx := context.Background()
+
+	// Same tree as above
+	root := &Artefact{
+		Header: ArtefactHeader{
+			LogicalThreadID: NewID(),
+			Version:         1,
+			StructuralType:  StructuralTypeStandard,
+			Type:            "Root",
+			ProducedByRole:  "test",
+			ParentHashes:    []string{},
+			Metadata:        "{}",
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: ArtefactPayload{
+			Content: "root",
+		},
+	}
+	rootHash, _ := ComputeArtefactHash(root)
+	root.ID = rootHash
+
+	child := &Artefact{
+		Header: ArtefactHeader{
+			LogicalThreadID: NewID(),
+			Version:         1,
+			StructuralType:  StructuralTypeStandard,
+			Type:            "Child",
+			ProducedByRole:  "test",
+			ParentHashes:    []string{root.ID},
+			Metadata:        "{}",
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: ArtefactPayload{
+			Content: "child",
+		},
+	}
+	childHash, _ := ComputeArtefactHash(child)
+	child.ID = childHash
+
+	grandchild := &Artefact{
+		Header: ArtefactHeader{
+			LogicalThreadID: NewID(),
+			Version:         1,
+			StructuralType:  StructuralTypeStandard,
+			Type:            "Grandchild",
+			ProducedByRole:  "test",
+			ParentHashes:    []string{child.ID},
+			Metadata:        "{}",
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: ArtefactPayload{
+			Content: "grandchild",
+		},
+	}
+	grandchildHash, _ := ComputeArtefactHash(grandchild)
+	grandchild.ID = grandchildHash
+
+	require.NoError(t, client.CreateArtefact(ctx, root))
+	require.NoError(t, client.CreateArtefact(ctx, child))
+	require.NoError(t, client.CreateArtefact(ctx, grandchild))
+
+	// Get descendants with max_depth=1 (only direct children)
+	descendants, err := client.GetDescendants(ctx, root.ID, 1)
+	require.NoError(t, err)
+	assert.Len(t, descendants, 1) // Only child, not grandchild
+	assert.Equal(t, child.ID, descendants[0].ID)
+}
+
+// M5.1: Test GetDescendants with cycle detection
+func TestGetDescendants_CycleDetection(t *testing.T) {
+	client, mr := setupTestClient(t)
+	ctx := context.Background()
+
+	// Create artefacts manually first to get IDs
+	root := &Artefact{
+		Header: ArtefactHeader{
+			LogicalThreadID: NewID(),
+			Version:         1,
+			StructuralType:  StructuralTypeStandard,
+			Type:            "Root",
+			ProducedByRole:  "test",
+			ParentHashes:    []string{},
+			Metadata:        "{}",
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: ArtefactPayload{
+			Content: "root",
+		},
+	}
+	rootHash, _ := ComputeArtefactHash(root)
+	root.ID = rootHash
+
+	child := &Artefact{
+		Header: ArtefactHeader{
+			LogicalThreadID: NewID(),
+			Version:         1,
+			StructuralType:  StructuralTypeStandard,
+			Type:            "Child",
+			ProducedByRole:  "test",
+			ParentHashes:    []string{root.ID},
+			Metadata:        "{}",
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: ArtefactPayload{
+			Content: "child",
+		},
+	}
+	childHash, _ := ComputeArtefactHash(child)
+	child.ID = childHash
+
+	// Manually create a cycle in the reverse index (shouldn't happen in practice)
+	// root -> child -> root (cycle)
+	mr.SAdd(ChildrenIndexKey("test-instance", root.ID), child.ID)
+	mr.SAdd(ChildrenIndexKey("test-instance", child.ID), root.ID) // Cycle!
+
+	// Store artefacts in Redis manually (bypassing CreateArtefact to avoid Lua)
+	rootMap, _ := ArtefactToHash(root)
+	childMap, _ := ArtefactToHash(child)
+
+	// Store hashes in miniredis (need to use real Redis client for proper HSET)
+	for k, v := range rootMap {
+		mr.HSet(ArtefactKey("test-instance", root.ID), k, fmt.Sprintf("%v", v))
+	}
+	for k, v := range childMap {
+		mr.HSet(ArtefactKey("test-instance", child.ID), k, fmt.Sprintf("%v", v))
+	}
+
+	// Get descendants should not infinite loop
+	descendants, err := client.GetDescendants(ctx, root.ID, 0)
+	require.NoError(t, err)
+
+	// Should visit each node only once
+	assert.Len(t, descendants, 1)
+	assert.Equal(t, child.ID, descendants[0].ID)
+}
+
+// M5.1: Test GetDescendants with empty result
+func TestGetDescendants_NoChildren(t *testing.T) {
+	client, _ := setupTestClient(t)
+	ctx := context.Background()
+
+	// Create artefact with no children
+	// Create artefact with no children
+	root := &Artefact{
+		Header: ArtefactHeader{
+			LogicalThreadID: NewID(),
+			Version:         1,
+			StructuralType:  StructuralTypeStandard,
+			Type:            "Root",
+			ProducedByRole:  "test",
+			ParentHashes:    []string{},
+			Metadata:        "{}",
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: ArtefactPayload{
+			Content: "root",
+		},
+	}
+	rootHash, _ := ComputeArtefactHash(root)
+	root.ID = rootHash
+
+	require.NoError(t, client.CreateArtefact(ctx, root))
+
+	// Get descendants
+	descendants, err := client.GetDescendants(ctx, root.ID, 0)
+	require.NoError(t, err)
+	assert.Empty(t, descendants)
+}
+
+// M5.1: Test AcquireSyncLock success
+func TestAcquireSyncLock_Success(t *testing.T) {
+	client, _ := setupTestClient(t)
+	ctx := context.Background()
+
+	// First acquisition should succeed
+	acquired, err := client.AcquireSyncLock(ctx, "ancestor-123", "Deployer")
+	require.NoError(t, err)
+	assert.True(t, acquired)
+}
+
+// M5.1: Test AcquireSyncLock failure (already held)
+func TestAcquireSyncLock_AlreadyHeld(t *testing.T) {
+	client, _ := setupTestClient(t)
+	ctx := context.Background()
+
+	// First acquisition succeeds
+	acquired1, err := client.AcquireSyncLock(ctx, "ancestor-123", "Deployer")
+	require.NoError(t, err)
+	assert.True(t, acquired1)
+
+	// Second acquisition fails (lock already held)
+	acquired2, err := client.AcquireSyncLock(ctx, "ancestor-123", "Deployer")
+	require.NoError(t, err)
+	assert.False(t, acquired2)
+}
+
+// M5.1: Test AcquireSyncLock with different agent roles
+func TestAcquireSyncLock_DifferentRoles(t *testing.T) {
+	client, _ := setupTestClient(t)
+	ctx := context.Background()
+
+	// Different roles get different locks
+	acquired1, err := client.AcquireSyncLock(ctx, "ancestor-123", "Deployer")
+	require.NoError(t, err)
+	assert.True(t, acquired1)
+
+	// Different role CAN acquire lock on same ancestor (different hash)
+	acquired2, err := client.AcquireSyncLock(ctx, "ancestor-123", "OtherAgent")
+	require.NoError(t, err)
+	assert.True(t, acquired2) // Different role hash
+}
+
+// M5.1: Test AcquireSyncLock with different ancestors
+func TestAcquireSyncLock_DifferentAncestors(t *testing.T) {
+	client, _ := setupTestClient(t)
+	ctx := context.Background()
+
+	// Same role, different ancestors
+	acquired1, err := client.AcquireSyncLock(ctx, "ancestor-123", "Deployer")
+	require.NoError(t, err)
+	assert.True(t, acquired1)
+
+	acquired2, err := client.AcquireSyncLock(ctx, "ancestor-456", "Deployer")
+	require.NoError(t, err)
+	assert.True(t, acquired2) // Different ancestor
 }

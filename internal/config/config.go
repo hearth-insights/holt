@@ -12,8 +12,8 @@ import (
 
 // OrchestratorConfig specifies orchestrator behavior settings (M3.3, M4.6)
 type OrchestratorConfig struct {
-	Image                     string `yaml:"image,omitempty"`                      // Docker image to use (default: holt-orchestrator:latest)
-	MaxReviewIterations       *int   `yaml:"max_review_iterations,omitempty"`      // How many times an artefact can be rejected and reworked (0 = unlimited, default = 3)
+	Image                     string `yaml:"image,omitempty"`                        // Docker image to use (default: holt-orchestrator:latest)
+	MaxReviewIterations       *int   `yaml:"max_review_iterations,omitempty"`        // How many times an artefact can be rejected and reworked (0 = unlimited, default = 3)
 	TimestampDriftToleranceMs *int   `yaml:"timestamp_drift_tolerance_ms,omitempty"` // M4.6: Max allowed timestamp drift in milliseconds (default = 300000 = 5 minutes)
 }
 
@@ -27,7 +27,7 @@ type HoltConfig struct {
 
 // BiddingStrategyConfig defines the agent's bidding behavior (M4.8)
 type BiddingStrategyConfig struct {
-	Type        string   `yaml:"type" json:"type"`                   // Required: review, claim, exclusive, or ignore
+	Type        string   `yaml:"type" json:"type"`                                     // Required: review, claim, exclusive, or ignore
 	TargetTypes []string `yaml:"target_types,omitempty" json:"target_types,omitempty"` // Optional: list of artefact types to bid on
 }
 
@@ -71,6 +71,9 @@ type Agent struct {
 
 	// M4.5: Docker volume mounts
 	Volumes []string `yaml:"volumes,omitempty"` // Optional: Docker volume mount specifications (e.g., "~/.config/gcloud:/root/.config/gcloud:ro")
+
+	// M5.1: Synchronization configuration for fan-in pattern
+	Synchronize *SynchronizeConfig `yaml:"synchronize,omitempty"` // Optional: Declarative fan-in synchronization
 }
 
 // BuildConfig specifies how to build an agent's container image
@@ -85,8 +88,8 @@ type WorkspaceConfig struct {
 
 // WorkerConfig specifies worker configuration for controller-worker pattern (M3.4)
 type WorkerConfig struct {
-	Image          string           `yaml:"image"`                      // Worker image (can differ from controller)
-	MaxConcurrent  int              `yaml:"max_concurrent,omitempty"`   // Default: 1
+	Image          string           `yaml:"image"`                    // Worker image (can differ from controller)
+	MaxConcurrent  int              `yaml:"max_concurrent,omitempty"` // Default: 1
 	Command        []string         `yaml:"command"`
 	Workspace      *WorkspaceConfig `yaml:"workspace,omitempty"`
 	KeepContainers bool             `yaml:"keep_containers,omitempty"` // M4.10: Retain worker containers for debugging (default: false)
@@ -115,6 +118,32 @@ type HealthCheckConfig struct {
 	Command  []string `yaml:"command"`            // Command to execute for health check
 	Interval string   `yaml:"interval,omitempty"` // Check interval (default: 30s)
 	Timeout  string   `yaml:"timeout,omitempty"`  // Command timeout (default: 5s)
+}
+
+// SynchronizeConfig defines fan-in synchronization configuration (M5.1)
+// Enables declarative waiting for multiple prerequisite artefacts from parallel workflow branches.
+type SynchronizeConfig struct {
+	// AncestorType is the artefact type to find as the common ancestor (e.g., "CodeCommit")
+	AncestorType string `yaml:"ancestor_type" json:"ancestor_type"` // Required
+
+	// WaitFor specifies the prerequisite artefacts to wait for
+	WaitFor []WaitCondition `yaml:"wait_for" json:"wait_for"` // Required: at least one condition
+
+	// MaxDepth limits descendant traversal depth (0 = unlimited)
+	MaxDepth int `yaml:"max_depth,omitempty" json:"max_depth,omitempty"` // Optional: default 0 (unlimited)
+}
+
+// WaitCondition specifies a single prerequisite artefact to wait for (M5.1)
+// Supports two patterns:
+//  1. Named pattern: Wait for exactly one artefact of this type
+//  2. Producer-Declared pattern: Wait for N artefacts where N is from metadata
+type WaitCondition struct {
+	// Type is the artefact type to wait for (e.g., "TestResult")
+	Type string `yaml:"type" json:"type"` // Required
+
+	// CountFromMetadata is the metadata key containing the expected count (Producer-Declared pattern)
+	// If empty, waits for exactly 1 artefact (Named pattern)
+	CountFromMetadata string `yaml:"count_from_metadata,omitempty" json:"count_from_metadata,omitempty"` // Optional
 }
 
 // ServicesConfig specifies service-level overrides
@@ -236,12 +265,44 @@ func (a *Agent) Validate(name string) error {
 		return fmt.Errorf("agent '%s': command is required", name)
 	}
 
-	// M3.6: Bidding strategy validation - either bid_script or bidding_strategy required
+	// M3.6: Bidding strategy validation - either bid_script or bidding_strategy or synchronize required
 	hasBidScript := len(a.BidScript) > 0
 	hasStaticStrategy := a.BiddingStrategy.Type != ""
+	hasSynchronize := a.Synchronize != nil // M5.1
 
-	if !hasBidScript && !hasStaticStrategy {
-		return fmt.Errorf("agent '%s': either bidding_strategy or bid_script must be provided", name)
+	if !hasBidScript && !hasStaticStrategy && !hasSynchronize {
+		return fmt.Errorf("agent '%s': either bidding_strategy, bid_script, or synchronize must be provided", name)
+	}
+
+	// M5.1: Validate synchronize is mutually exclusive with bidding_strategy and bid_script
+	if hasSynchronize {
+		if hasStaticStrategy {
+			return fmt.Errorf("agent '%s': synchronize and bidding_strategy are mutually exclusive", name)
+		}
+		if hasBidScript {
+			return fmt.Errorf("agent '%s': synchronize and bid_script are mutually exclusive", name)
+		}
+
+		// Validate synchronize configuration
+		if a.Synchronize.AncestorType == "" {
+			return fmt.Errorf("agent '%s': synchronize block missing ancestor_type", name)
+		}
+
+		if len(a.Synchronize.WaitFor) == 0 {
+			return fmt.Errorf("agent '%s': synchronize block has empty wait_for list", name)
+		}
+
+		// Validate each wait condition
+		for i, condition := range a.Synchronize.WaitFor {
+			if condition.Type == "" {
+				return fmt.Errorf("agent '%s': synchronize wait_for[%d] missing type", name, i)
+			}
+		}
+
+		// Validate max_depth (must be non-negative)
+		if a.Synchronize.MaxDepth < 0 {
+			return fmt.Errorf("agent '%s': synchronize max_depth must be >= 0", name)
+		}
 	}
 
 	// Validate bidding_strategy enum if provided

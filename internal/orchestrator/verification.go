@@ -10,37 +10,7 @@ import (
 	"github.com/hearth-insights/holt/pkg/blackboard"
 )
 
-// convertToVerifiableArtefact converts a V1 Artefact to V2 VerifiableArtefact for verification.
-// This is a transitional helper during M4.6 incremental implementation.
-// In the final V2 system, artefacts will be created as VerifiableArtefact from the start.
-func convertToVerifiableArtefact(a *blackboard.Artefact) *blackboard.VerifiableArtefact {
-	return &blackboard.VerifiableArtefact{
-		ID: a.ID, // Will be verified against computed hash
-		Header: blackboard.ArtefactHeader{
-			ParentHashes:    a.SourceArtefacts, // V1 called it SourceArtefacts, V2 calls it ParentHashes
-			LogicalThreadID: a.LogicalID,
-			Version:         a.Version,
-			CreatedAtMs:     a.CreatedAtMs,
-			ProducedByRole:  a.ProducedByRole,
-			StructuralType:  a.StructuralType,
-			Type:            a.Type,
-			ContextForRoles: a.ContextForRoles,
-			ClaimID:         a.ClaimID, // M4.6 Security Addendum
-		},
-		Payload: blackboard.ArtefactPayload{
-			Content: a.Payload,
-		},
-	}
-}
-
-// verifyArtefactV1 performs verification on a V1 Artefact by converting to V2.
-// This is the transitional entry point during M4.6 implementation.
-func (e *Engine) verifyArtefactV1(ctx context.Context, artefact *blackboard.Artefact) error {
-	verifiable := convertToVerifiableArtefact(artefact)
-	return e.verifyArtefact(ctx, verifiable)
-}
-
-// verifyArtefact performs comprehensive 4-stage validation on a VerifiableArtefact.
+// verifyArtefact performs comprehensive 4-stage validation on an Artefact.
 // This is the orchestrator's critical security check for M4.6 cryptographic verification.
 //
 // Validation stages (per design section 2.2 + M4.6 Security Addendum):
@@ -51,7 +21,7 @@ func (e *Engine) verifyArtefactV1(ctx context.Context, artefact *blackboard.Arte
 //
 // Returns error if validation fails. On security violations (orphan block, topology violation,
 // or hash mismatch), triggers global lockdown via the three-step alert mechanism.
-func (e *Engine) verifyArtefact(ctx context.Context, artefact *blackboard.VerifiableArtefact) error {
+func (e *Engine) verifyArtefact(ctx context.Context, artefact *blackboard.Artefact) error {
 	// STAGE 1: Parent existence check (prevent orphan blocks)
 	// Exception: Root artefacts with empty ParentHashes are valid (e.g., GoalDefined)
 	if len(artefact.Header.ParentHashes) > 0 {
@@ -97,15 +67,15 @@ func (e *Engine) verifyArtefact(ctx context.Context, artefact *blackboard.Verifi
 
 		// Create timestamp drift alert (warning, not lockdown)
 		alert := &blackboard.SecurityAlert{
-			Type:                   "timestamp_drift",
-			TimestampMs:            now,
-			ArtefactID:             artefact.ID,
-			ArtefactTimestampMs:    artefact.Header.CreatedAtMs,
+			Type:                    "timestamp_drift",
+			TimestampMs:             now,
+			ArtefactID:              artefact.ID,
+			ArtefactTimestampMs:     artefact.Header.CreatedAtMs,
 			OrchestratorTimestampMs: now,
-			DriftMs:                drift,
-			ThresholdMs:            driftToleranceMs,
-			AgentRole:              artefact.Header.ProducedByRole,
-			OrchestratorAction:     "rejected",
+			DriftMs:                 drift,
+			ThresholdMs:             driftToleranceMs,
+			AgentRole:               artefact.Header.ProducedByRole,
+			OrchestratorAction:      "rejected",
 		}
 
 		// Log to security alerts (but don't trigger lockdown)
@@ -123,15 +93,15 @@ func (e *Engine) verifyArtefact(ctx context.Context, artefact *blackboard.Verifi
 
 		// Create timestamp drift alert (warning, not lockdown)
 		alert := &blackboard.SecurityAlert{
-			Type:                   "timestamp_drift",
-			TimestampMs:            now,
-			ArtefactID:             artefact.ID,
-			ArtefactTimestampMs:    artefact.Header.CreatedAtMs,
+			Type:                    "timestamp_drift",
+			TimestampMs:             now,
+			ArtefactID:              artefact.ID,
+			ArtefactTimestampMs:     artefact.Header.CreatedAtMs,
 			OrchestratorTimestampMs: now,
-			DriftMs:                drift,
-			ThresholdMs:            driftToleranceMs,
-			AgentRole:              artefact.Header.ProducedByRole,
-			OrchestratorAction:     "rejected",
+			DriftMs:                 drift,
+			ThresholdMs:             driftToleranceMs,
+			AgentRole:               artefact.Header.ProducedByRole,
+			OrchestratorAction:      "rejected",
 		}
 
 		// Log to security alerts (but don't trigger lockdown)
@@ -158,12 +128,12 @@ func (e *Engine) verifyArtefact(ctx context.Context, artefact *blackboard.Verifi
 		if artefact.Header.ClaimID != "" {
 			// SECURITY EVENT: Root artefact with invalid topology
 			alert := &blackboard.SecurityAlert{
-				Type:                "unauthorized_topology",
-				TimestampMs:         time.Now().UnixMilli(),
-				ArtefactID:          artefact.ID,
-				AgentRole:           artefact.Header.ProducedByRole,
-				ViolationType:       "root_artefact_with_claim",
-				OrchestratorAction:  "global_lockdown",
+				Type:               "unauthorized_topology",
+				TimestampMs:        time.Now().UnixMilli(),
+				ArtefactID:         artefact.ID,
+				AgentRole:          artefact.Header.ProducedByRole,
+				ViolationType:      "root_artefact_with_claim",
+				OrchestratorAction: "global_lockdown",
 			}
 
 			if lockdownErr := e.client.TriggerGlobalLockdown(ctx, alert); lockdownErr != nil {
@@ -190,12 +160,12 @@ func (e *Engine) verifyArtefact(ctx context.Context, artefact *blackboard.Verifi
 			if len(artefact.Header.ParentHashes) != 1 {
 				// Invalid: root artefact must have exactly ONE parent (the manifest)
 				alert := &blackboard.SecurityAlert{
-					Type:                "unauthorized_topology",
-					TimestampMs:         time.Now().UnixMilli(),
-					ArtefactID:          artefact.ID,
-					AgentRole:           artefact.Header.ProducedByRole,
-					ViolationType:       "root_missing_manifest_anchor",
-					OrchestratorAction:  "global_lockdown",
+					Type:               "unauthorized_topology",
+					TimestampMs:        time.Now().UnixMilli(),
+					ArtefactID:         artefact.ID,
+					AgentRole:          artefact.Header.ProducedByRole,
+					ViolationType:      "root_missing_manifest_anchor",
+					OrchestratorAction: "global_lockdown",
 				}
 
 				if lockdownErr := e.client.TriggerGlobalLockdown(ctx, alert); lockdownErr != nil {
@@ -208,18 +178,18 @@ func (e *Engine) verifyArtefact(ctx context.Context, artefact *blackboard.Verifi
 
 			// Verify the single parent is a valid SystemManifest
 			parentHash := artefact.Header.ParentHashes[0]
-			parentManifest, err := e.client.GetVerifiableArtefact(ctx, parentHash)
+			parentManifest, err := e.client.GetArtefact(ctx, parentHash)
 			if err != nil {
 				// Parent doesn't exist - this is caught by orphan block check (Stage 1)
 				// But we provide a more specific error message here
 				alert := &blackboard.SecurityAlert{
-					Type:                "unauthorized_topology",
-					TimestampMs:         time.Now().UnixMilli(),
-					ArtefactID:          artefact.ID,
-					MissingParentHash:   parentHash,
-					AgentRole:           artefact.Header.ProducedByRole,
-					ViolationType:       "root_invalid_manifest_reference",
-					OrchestratorAction:  "global_lockdown",
+					Type:               "unauthorized_topology",
+					TimestampMs:        time.Now().UnixMilli(),
+					ArtefactID:         artefact.ID,
+					MissingParentHash:  parentHash,
+					AgentRole:          artefact.Header.ProducedByRole,
+					ViolationType:      "root_invalid_manifest_reference",
+					OrchestratorAction: "global_lockdown",
 				}
 
 				if lockdownErr := e.client.TriggerGlobalLockdown(ctx, alert); lockdownErr != nil {
@@ -232,12 +202,12 @@ func (e *Engine) verifyArtefact(ctx context.Context, artefact *blackboard.Verifi
 			// Verify parent is actually a SystemManifest
 			if parentManifest.Header.StructuralType != blackboard.StructuralTypeSystemManifest {
 				alert := &blackboard.SecurityAlert{
-					Type:                "unauthorized_topology",
-					TimestampMs:         time.Now().UnixMilli(),
-					ArtefactID:          artefact.ID,
-					AgentRole:           artefact.Header.ProducedByRole,
-					ViolationType:       "root_parent_not_manifest",
-					OrchestratorAction:  "global_lockdown",
+					Type:               "unauthorized_topology",
+					TimestampMs:        time.Now().UnixMilli(),
+					ArtefactID:         artefact.ID,
+					AgentRole:          artefact.Header.ProducedByRole,
+					ViolationType:      "root_parent_not_manifest",
+					OrchestratorAction: "global_lockdown",
 				}
 
 				if lockdownErr := e.client.TriggerGlobalLockdown(ctx, alert); lockdownErr != nil {
@@ -320,26 +290,28 @@ func (e *Engine) verifyArtefact(ctx context.Context, artefact *blackboard.Verifi
 	}
 
 	// Verify claim status (must be Active or Granted - specific status values depend on claim lifecycle)
-	// In Holt's current implementation, we check for terminal states
-	if claim.Status == blackboard.ClaimStatusComplete || claim.Status == blackboard.ClaimStatusTerminated {
-		// SECURITY EVENT: Claim is not active
-		alert := &blackboard.SecurityAlert{
-			Type:               "unauthorized_topology",
-			TimestampMs:        time.Now().UnixMilli(),
-			ArtefactID:         artefact.ID,
-			AgentRole:          artefact.Header.ProducedByRole,
-			ClaimIDProvided:    artefact.Header.ClaimID,
-			ClaimStatus:        string(claim.Status),
-			ViolationType:      "invalid_claim_reference",
-			OrchestratorAction: "global_lockdown",
-		}
+	// EXCEPTION: Terminal artefacts can reference any claim status (they signal completion)
+	if artefact.Header.StructuralType != blackboard.StructuralTypeTerminal {
+		if claim.Status == blackboard.ClaimStatusComplete || claim.Status == blackboard.ClaimStatusTerminated {
+			// SECURITY EVENT: Claim is not active
+			alert := &blackboard.SecurityAlert{
+				Type:               "unauthorized_topology",
+				TimestampMs:        time.Now().UnixMilli(),
+				ArtefactID:         artefact.ID,
+				AgentRole:          artefact.Header.ProducedByRole,
+				ClaimIDProvided:    artefact.Header.ClaimID,
+				ClaimStatus:        string(claim.Status),
+				ViolationType:      "invalid_claim_reference",
+				OrchestratorAction: "global_lockdown",
+			}
 
-		if lockdownErr := e.client.TriggerGlobalLockdown(ctx, alert); lockdownErr != nil {
-			log.Printf("[Orchestrator] CRITICAL: Failed to trigger lockdown for topology violation: %v", lockdownErr)
-		}
+			if lockdownErr := e.client.TriggerGlobalLockdown(ctx, alert); lockdownErr != nil {
+				log.Printf("[Orchestrator] CRITICAL: Failed to trigger lockdown for topology violation: %v", lockdownErr)
+			}
 
-		return fmt.Errorf("topology violation: ClaimID references non-active claim: %s (status: %s, artefact %s)",
-			artefact.Header.ClaimID, claim.Status, artefact.ID)
+			return fmt.Errorf("topology violation: ClaimID references non-active claim: %s (status: %s, artefact %s)",
+				artefact.Header.ClaimID, claim.Status, artefact.ID)
+		}
 	}
 
 	// Rule 4.5: Review Claim Enforcement (M3.3)

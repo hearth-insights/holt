@@ -46,21 +46,21 @@ func FormatTable(w io.Writer, artefacts []*blackboard.Artefact, spineInfos map[s
 			}
 			fmt.Fprintf(w, "%-10s %-5s %-10s %-18s %-8s %-10s %s\n",
 				formatID(a.ID),
-				formatVersion(a.Version),
-				formatType(a.Type),
-				formatProducedBy(a.ProducedByRole),
-				formatTimestamp(a.CreatedAtMs),
+				formatVersion(a.Header.Version),
+				formatType(a.Header.Type),
+				formatProducedBy(a.Header.ProducedByRole),
+				formatTimestamp(a.Header.CreatedAtMs),
 				spineStr,
-				formatPayload(a.Payload),
+				formatPayload(a.Payload.Content),
 			)
 		} else {
 			fmt.Fprintf(w, "%-10s %-5s %-10s %-18s %-8s %s\n",
 				formatID(a.ID),
-				formatVersion(a.Version),
-				formatType(a.Type),
-				formatProducedBy(a.ProducedByRole),
-				formatTimestamp(a.CreatedAtMs),
-				formatPayload(a.Payload),
+				formatVersion(a.Header.Version),
+				formatType(a.Header.Type),
+				formatProducedBy(a.Header.ProducedByRole),
+				formatTimestamp(a.Header.CreatedAtMs),
+				formatPayload(a.Payload.Content),
 			)
 		}
 	}

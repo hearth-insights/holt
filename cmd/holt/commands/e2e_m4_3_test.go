@@ -5,9 +5,6 @@ package commands
 
 import (
 	"context"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -29,104 +26,8 @@ func TestE2E_M4_3_ContextCachingFullLifecycle(t *testing.T) {
 
 	t.Log("=== M4.3 E2E: Context Caching Full Lifecycle ===")
 
-	// Step 0: Build caching-agent Docker image
-	projectRoot := testutil.GetProjectRoot()
-
-	// Create agent directory
-	agentDir := filepath.Join(projectRoot, "agents", "caching-agent")
-	err := os.MkdirAll(agentDir, 0755)
-	require.NoError(t, err)
-
-	// Write agent script that demonstrates context caching
-	agentScript := `#!/bin/bash
-set -e
-
-# Read stdin
-INPUT=$(cat)
-
-# Parse JSON using jq
-CLAIM_TYPE=$(echo "$INPUT" | jq -r '.claim_type')
-CONTEXT_IS_DECLARED=$(echo "$INPUT" | jq -r '.context_is_declared // false')
-TARGET_TYPE=$(echo "$INPUT" | jq -r '.target_artefact.type')
-
-# Log for debugging
-echo "[caching-agent] claim_type=$CLAIM_TYPE context_is_declared=$CONTEXT_IS_DECLARED target=$TARGET_TYPE" >&2
-
-# Always produce valid output regardless of context
-if [ "$CONTEXT_IS_DECLARED" = "false" ]; then
-	# First run - no cached context, produce checkpoint
-	echo "[caching-agent] First run - producing checkpoint with SDK docs" >&2
-
-	cat <<'EOF' >&3
-{
-	"artefact_type": "DesignSpec",
-	"artefact_payload": "Design based on first-time context discovery",
-	"summary": "Created design spec after expensive SDK discovery",
-	"checkpoints": [
-		{
-			"knowledge_name": "go-sdk-docs",
-			"knowledge_payload": "GO SDK VERSION 1.21: Key APIs include context, http, database/sql",
-			"target_roles": ["coder*"]
-		}
-	]
-}
-EOF
-else
-	# Subsequent run - cached context available, use it
-	echo "[caching-agent] Cached run - using knowledge" >&2
-
-	cat <<'EOF' >&3
-{
-	"artefact_type": "DesignSpec",
-	"artefact_payload": "Design using cached SDK docs v2",
-	"summary": "Updated design using cached knowledge (no expensive discovery)"
-}
-EOF
-fi
-`
-
-	err = os.WriteFile(filepath.Join(agentDir, "run.sh"), []byte(agentScript), 0755)
-	require.NoError(t, err)
-
-	// Write Dockerfile (multi-stage to build pup)
-	dockerfile := `# Build stage - compile the pup binary
-FROM golang:1.24-alpine AS builder
-WORKDIR /build
-COPY go.mod go.sum ./
-RUN go mod download
-COPY cmd/pup ./cmd/pup
-COPY internal/pup ./internal/pup
-COPY pkg/blackboard ./pkg/blackboard
-COPY pkg/version ./pkg/version
-COPY internal/config ./internal/config
-RUN CGO_ENABLED=0 GOOS=linux go build -o pup ./cmd/pup
-
-# Runtime stage
-FROM alpine:3.19
-RUN apk add --no-cache bash jq
-COPY --from=builder /build/pup /app/pup
-COPY agents/caching-agent/run.sh /app/run.sh
-RUN chmod +x /app/run.sh
-WORKDIR /app
-ENTRYPOINT ["/app/pup"]
-`
-
-	err = os.WriteFile(filepath.Join(agentDir, "Dockerfile"), []byte(dockerfile), 0644)
-	require.NoError(t, err)
-
-	// Build Docker image (from project root, with agent files copied)
-	t.Log("Building caching-agent Docker image...")
-	buildCmd := exec.Command("docker", "build",
-		"-t", "caching-agent:latest",
-		"-f", "agents/caching-agent/Dockerfile",
-		".") // Build from project root (needs access to go.mod, cmd/pup, etc.)
-	buildCmd.Dir = projectRoot
-	output, err := buildCmd.CombinedOutput()
-	if err != nil {
-		t.Logf("Build output:\n%s", string(output))
-	}
-	require.NoError(t, err, "Failed to build caching-agent image")
-	t.Log("✓ caching-agent image built")
+	// Step 0: Ensure shared test agent image is built
+	testutil.EnsureTestAgentImage(t)
 
 	// Setup environment with caching agent
 	holtYML := `version: "1.0"
@@ -135,8 +36,8 @@ orchestrator:
   timestamp_drift_tolerance_ms: 600000 # 10 minutes
 agents:
   CachingAgent:
-    image: "caching-agent:latest"
-    command: ["/app/run.sh"]
+    image: "holt-test-agent:latest"
+    command: ["/app/run_caching.sh"]
     bidding_strategy:
       type: "exclusive"
     workspace:
@@ -161,7 +62,7 @@ services:
 	upCmd := &cobra.Command{}
 	upInstanceName = env.InstanceName
 	upForce = false
-	err = runUp(upCmd, []string{})
+	err := runUp(upCmd, []string{})
 	require.NoError(t, err, "Failed to start instance")
 	time.Sleep(2 * time.Second)
 
@@ -182,6 +83,7 @@ services:
 		StructuralType:  blackboard.StructuralTypeStandard,
 		Type:            "GoalDefined",
 		ClaimID:         "",
+		Metadata:        "{}",
 	}, "Build SDK wrapper library")
 
 	t.Log("✓ Created GoalDefined artefact")
@@ -207,33 +109,33 @@ services:
 		require.NoError(t, err, "Should find a DesignSpec with Knowledge attached")
 	}
 
-	require.Contains(t, designSpec.Payload, "first-time context discovery")
+	require.Contains(t, designSpec.Payload.Content, "first-time context discovery")
 	t.Log("✓ First run: Agent produced DesignSpec")
 
 	// Verify Knowledge was created (already fetched above)
-	require.Equal(t, blackboard.StructuralTypeKnowledge, knowledge.StructuralType)
-	require.Contains(t, knowledge.Payload, "GO SDK VERSION 1.21")
+	require.Equal(t, blackboard.StructuralTypeKnowledge, knowledge.Header.StructuralType)
+	require.Contains(t, knowledge.Payload.Content, "GO SDK VERSION 1.21")
 	t.Log("✓ First run: Knowledge checkpoint created")
 
 	// Verify knowledge_index was populated
 	indexKey := blackboard.KnowledgeIndexKey(env.InstanceName)
 	logicalID, err := bbClient.GetRedisClient().HGet(ctx, indexKey, "go-sdk-docs").Result()
 	require.NoError(t, err)
-	require.Equal(t, knowledge.LogicalID, logicalID)
+	require.Equal(t, knowledge.Header.LogicalThreadID, logicalID)
 	t.Log("✓ First run: knowledge_index populated")
 
 	// ========== VERIFY KNOWLEDGE ATTACHMENT ==========
 	t.Log("\n=== VERIFY: Knowledge is properly attached to thread ===")
 
 	// Verify Knowledge is attached to the DesignSpec's logical thread
-	threadContextKey := blackboard.ThreadContextKey(env.InstanceName, designSpec.LogicalID)
+	threadContextKey := blackboard.ThreadContextKey(env.InstanceName, designSpec.Header.LogicalThreadID)
 	knowledgeAttached, err := bbClient.GetRedisClient().SIsMember(ctx, threadContextKey, knowledge.ID).Result()
 	require.NoError(t, err)
 	require.True(t, knowledgeAttached, "Knowledge should be attached to the work thread")
 	t.Log("✓ Knowledge attached to work thread")
 
 	// Verify Knowledge thread tracking (may have multiple versions if orchestrator created duplicates)
-	threadKey := blackboard.ThreadKey(env.InstanceName, knowledge.LogicalID)
+	threadKey := blackboard.ThreadKey(env.InstanceName, knowledge.Header.LogicalThreadID)
 	versions, err := bbClient.GetRedisClient().ZRange(ctx, threadKey, 0, -1).Result()
 	require.NoError(t, err)
 	// NOTE: Due to orchestrator potentially creating multiple DesignSpecs, we may have multiple Knowledge versions

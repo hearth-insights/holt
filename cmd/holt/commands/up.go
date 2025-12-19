@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -287,13 +288,22 @@ func createInstance(ctx context.Context, cli *client.Client, cfg *config.HoltCon
 		printer.Debug("Started Redis container: %s (port %d, auth: %v)\n", redisName, redisPort, redisConfig.Password != "")
 	}
 
-	// Step 4: Verify orchestrator image exists
+	// Step 4: Verify orchestrator image exists and display version
 	orchestratorImage := "holt-orchestrator:latest"
 	if cfg.Orchestrator != nil && cfg.Orchestrator.Image != "" {
 		orchestratorImage = cfg.Orchestrator.Image
 	}
 	if err := verifyOrchestratorImage(ctx, cli, orchestratorImage); err != nil {
 		return err
+	}
+
+	// Display orchestrator version
+	if version, commit := getOrchestratorVersion(ctx, cli, orchestratorImage); version != "" {
+		if globalDebug && commit != "" && commit != "none" {
+			printer.Info("Orchestrator version: %s (commit: %s)\n", version, commit)
+		} else {
+			printer.Info("Orchestrator version: %s\n", version)
+		}
 	}
 
 	// Step 5: Start Orchestrator container with pre-built image
@@ -372,6 +382,11 @@ func createInstance(ctx context.Context, cli *client.Client, cfg *config.HoltCon
 		// M4.4: For external Redis, we need to connect differently
 		// For now, skip this step - will be addressed in future work
 		printer.Debug("Skipping agent_images population for external Redis (not yet implemented)\n")
+	}
+
+	// Step 8: With --debug, show binary versions (after agents are started)
+	if globalDebug {
+		showBinaryVersions(ctx, cli, orchestratorResp.ID, instanceName)
 	}
 
 	return nil
@@ -513,12 +528,20 @@ func verifyOrchestratorImage(ctx context.Context, cli *client.Client, imageName 
 		return fmt.Errorf("failed to list Docker images: %w", err)
 	}
 
-	// Look for the orchestrator image
+	// Build list of acceptable image names (support both local and GHCR tags)
+	acceptableNames := []string{imageName}
+	if imageName == "holt-orchestrator:latest" {
+		acceptableNames = append(acceptableNames, "ghcr.io/hearth-insights/holt/holt-orchestrator:latest")
+	}
+
+	// Look for the orchestrator image (check all acceptable names)
 	for _, image := range images {
 		for _, tag := range image.RepoTags {
-			if tag == imageName {
-				printer.Debug("Found orchestrator image: %s\n", imageName)
-				return nil
+			for _, acceptableName := range acceptableNames {
+				if tag == acceptableName {
+					printer.Debug("Found orchestrator image: %s\n", tag)
+					return nil
+				}
 			}
 		}
 	}
@@ -650,12 +673,6 @@ func launchAgentContainerWithRedisURL(ctx context.Context, cli *client.Client, i
 		workspaceMode = agent.Workspace.Mode
 	}
 
-	// Serialize BiddingStrategyConfig to JSON (M4.8)
-	biddingStrategyJSON, err := json.Marshal(agent.BiddingStrategy)
-	if err != nil {
-		return fmt.Errorf("failed to marshal bidding strategy: %w", err)
-	}
-
 	// Build environment variables
 	// M3.7: ONLY HOLT_AGENT_NAME is set (to the role), HOLT_AGENT_ROLE removed
 	// M4.4: Use provided redisURL (may be external or managed with password)
@@ -663,7 +680,16 @@ func launchAgentContainerWithRedisURL(ctx context.Context, cli *client.Client, i
 		fmt.Sprintf("HOLT_INSTANCE_NAME=%s", instanceName),
 		fmt.Sprintf("HOLT_AGENT_NAME=%s", agentRole),
 		fmt.Sprintf("REDIS_URL=%s", redisURL),
-		fmt.Sprintf("HOLT_BIDDING_STRATEGY=%s", string(biddingStrategyJSON)), // M4.8: Serialized JSON
+	}
+
+	// M4.8: Add HOLT_BIDDING_STRATEGY only if configured
+	// M5.1: Don't set empty bidding strategy when only synchronize is configured
+	if agent.BiddingStrategy.Type != "" {
+		biddingStrategyJSON, err := json.Marshal(agent.BiddingStrategy)
+		if err != nil {
+			return fmt.Errorf("failed to marshal bidding strategy: %w", err)
+		}
+		env = append(env, fmt.Sprintf("HOLT_BIDDING_STRATEGY=%s", string(biddingStrategyJSON)))
 	}
 
 	// M3.4: Set HOLT_MODE for controller agents
@@ -687,6 +713,15 @@ func launchAgentContainerWithRedisURL(ctx context.Context, cli *client.Client, i
 			return fmt.Errorf("failed to marshal agent bid script to JSON: %w", err)
 		}
 		env = append(env, fmt.Sprintf("HOLT_AGENT_BID_SCRIPT=%s", bidScriptJSON))
+	}
+
+	// M5.1: Add HOLT_SYNCHRONIZE_CONFIG if synchronization is configured
+	if agent.Synchronize != nil {
+		synchronizeJSON, err := json.Marshal(agent.Synchronize)
+		if err != nil {
+			return fmt.Errorf("failed to marshal synchronize config to JSON: %w", err)
+		}
+		env = append(env, fmt.Sprintf("HOLT_SYNCHRONIZE_CONFIG=%s", synchronizeJSON))
 	}
 
 	// Add custom environment variables from config (with expansion)
@@ -1158,4 +1193,103 @@ func detectAndHandleStaleLock(ctx context.Context, cli *client.Client, instanceN
 			"If you're sure the orchestrator is not running, wait 30s for the lock to become stale",
 		},
 	)
+}
+
+// getOrchestratorVersion extracts version information from the orchestrator Docker image.
+// Returns (version, commit) from image labels. Returns empty strings if labels not found.
+func getOrchestratorVersion(ctx context.Context, cli *client.Client, imageName string) (string, string) {
+	// Inspect the image to get labels
+	imageInspect, _, err := cli.ImageInspectWithRaw(ctx, imageName)
+	if err != nil {
+		printer.Debug("Failed to inspect orchestrator image for version: %v\n", err)
+		return "", ""
+	}
+
+	// Extract version from OCI labels
+	version := imageInspect.Config.Labels["org.opencontainers.image.version"]
+	commit := imageInspect.Config.Labels["org.opencontainers.image.revision"]
+
+	return version, commit
+}
+
+// showBinaryVersions displays the binary versions of orchestrator and pup (--debug only).
+// This helps diagnose version mismatch issues between components.
+func showBinaryVersions(ctx context.Context, cli *client.Client, orchestratorContainerID string, instanceName string) {
+	printer.Debug("\n=== Binary Versions (--debug) ===\n")
+
+	// Get orchestrator binary version by executing --version inside the container
+	execResp, err := cli.ContainerExecCreate(ctx, orchestratorContainerID, types.ExecConfig{
+		Cmd:          []string{"/usr/local/bin/holt-orchestrator", "--version"},
+		AttachStdout: true,
+		AttachStderr: true,
+	})
+	if err != nil {
+		printer.Debug("Orchestrator binary: (failed to check: %v)\n", err)
+	} else {
+		attachResp, err := cli.ContainerExecAttach(ctx, execResp.ID, types.ExecStartCheck{})
+		if err != nil {
+			printer.Debug("Orchestrator binary: (failed to read version: %v)\n", err)
+		} else {
+			defer attachResp.Close()
+			output, _ := io.ReadAll(attachResp.Reader)
+			// Trim leading/trailing whitespace and Docker stream headers
+			outputStr := strings.TrimSpace(string(output))
+			// Docker multiplexed streams have 8-byte headers, skip if present
+			if len(outputStr) > 8 && outputStr[0] < 32 {
+				outputStr = strings.TrimSpace(outputStr[8:])
+			}
+			printer.Debug("Orchestrator binary: %s\n", outputStr)
+		}
+	}
+
+	// Get pup version from one of the agent containers (they all use the same pup binary)
+	// Find first agent container by looking for containers with agent names
+	containers, err := cli.ContainerList(ctx, container.ListOptions{
+		Filters: filters.NewArgs(
+			filters.Arg("label", fmt.Sprintf("%s=%s", dockerpkg.LabelInstanceName, instanceName)),
+		),
+	})
+	if err != nil {
+		printer.Debug("Pup binary: (failed to list containers: %v)\n", err)
+	} else {
+		// Filter to find an agent container (has agent name label)
+		var agentContainerID string
+		for _, c := range containers {
+			if _, hasAgentLabel := c.Labels[dockerpkg.LabelAgentName]; hasAgentLabel {
+				agentContainerID = c.ID
+				break
+			}
+		}
+
+		if agentContainerID == "" {
+			printer.Debug("Pup binary: (no agent containers found)\n")
+		} else {
+			// Execute pup --version in the agent container
+			execResp, err := cli.ContainerExecCreate(ctx, agentContainerID, types.ExecConfig{
+				Cmd:          []string{"/usr/local/bin/pup", "--version"},
+				AttachStdout: true,
+				AttachStderr: true,
+			})
+			if err != nil {
+				printer.Debug("Pup binary: (failed to check: %v)\n", err)
+			} else {
+				attachResp, err := cli.ContainerExecAttach(ctx, execResp.ID, types.ExecStartCheck{})
+				if err != nil {
+					printer.Debug("Pup binary: (failed to read version: %v)\n", err)
+				} else {
+					defer attachResp.Close()
+					output, _ := io.ReadAll(attachResp.Reader)
+					// Trim leading/trailing whitespace and Docker stream headers
+					outputStr := strings.TrimSpace(string(output))
+					// Docker multiplexed streams have 8-byte headers, skip if present
+					if len(outputStr) > 8 && outputStr[0] < 32 {
+						outputStr = strings.TrimSpace(outputStr[8:])
+					}
+					printer.Debug("Pup binary: %s\n", outputStr)
+				}
+			}
+		}
+	}
+
+	printer.Debug("=================================\n\n")
 }

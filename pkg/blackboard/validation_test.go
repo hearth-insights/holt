@@ -64,16 +64,17 @@ func TestPayloadValidation_NullBytes(t *testing.T) {
 
 // TestVerifiableArtefactValidation_ValidRoot verifies root artefact validation.
 func TestVerifiableArtefactValidation_ValidRoot(t *testing.T) {
-	artefact := &VerifiableArtefact{
+	artefact := &Artefact{
 		ID: strings.Repeat("a", 64), // Placeholder hash
 		Header: ArtefactHeader{
 			ParentHashes:    []string{}, // Root artefact - empty parents valid
-			LogicalThreadID: "550e8400-e29b-41d4-a716-446655440000",
+			LogicalThreadID: "0508eb36a3d0dd327c235b6d900f26455a2ee715300f1c4b78c3d3edce8dafe9",
 			Version:         1,
 			CreatedAtMs:     1704067200000,
 			ProducedByRole:  "user",
 			StructuralType:  StructuralTypeStandard,
 			Type:            "GoalDefined",
+			Metadata:        "{}",
 		},
 		Payload: ArtefactPayload{
 			Content: "test goal",
@@ -86,7 +87,7 @@ func TestVerifiableArtefactValidation_ValidRoot(t *testing.T) {
 
 // TestVerifiableArtefactValidation_EmptyLogicalThreadID verifies required field check.
 func TestVerifiableArtefactValidation_EmptyLogicalThreadID(t *testing.T) {
-	artefact := &VerifiableArtefact{
+	artefact := &Artefact{
 		ID: strings.Repeat("a", 64),
 		Header: ArtefactHeader{
 			ParentHashes:    []string{},
@@ -96,6 +97,7 @@ func TestVerifiableArtefactValidation_EmptyLogicalThreadID(t *testing.T) {
 			ProducedByRole:  "user",
 			StructuralType:  StructuralTypeStandard,
 			Type:            "GoalDefined",
+			Metadata:        "{}",
 		},
 		Payload: ArtefactPayload{
 			Content: "test",
@@ -108,16 +110,17 @@ func TestVerifiableArtefactValidation_EmptyLogicalThreadID(t *testing.T) {
 
 // TestVerifiableArtefactValidation_InvalidHash verifies hash format check.
 func TestVerifiableArtefactValidation_InvalidHash(t *testing.T) {
-	artefact := &VerifiableArtefact{
+	artefact := &Artefact{
 		ID: "not-a-valid-hash", // Too short, wrong format
 		Header: ArtefactHeader{
 			ParentHashes:    []string{},
-			LogicalThreadID: "550e8400-e29b-41d4-a716-446655440000",
+			LogicalThreadID: "0508eb36a3d0dd327c235b6d900f26455a2ee715300f1c4b78c3d3edce8dafe9",
 			Version:         1,
 			CreatedAtMs:     1704067200000,
 			ProducedByRole:  "user",
 			StructuralType:  StructuralTypeStandard,
 			Type:            "GoalDefined",
+			Metadata:        "{}",
 		},
 		Payload: ArtefactPayload{
 			Content: "test",
@@ -131,16 +134,17 @@ func TestVerifiableArtefactValidation_InvalidHash(t *testing.T) {
 
 // TestVerifiableArtefactValidation_OversizePayload verifies integrated validation.
 func TestVerifiableArtefactValidation_OversizePayload(t *testing.T) {
-	artefact := &VerifiableArtefact{
+	artefact := &Artefact{
 		ID: strings.Repeat("a", 64),
 		Header: ArtefactHeader{
 			ParentHashes:    []string{},
-			LogicalThreadID: "550e8400-e29b-41d4-a716-446655440000",
+			LogicalThreadID: "0508eb36a3d0dd327c235b6d900f26455a2ee715300f1c4b78c3d3edce8dafe9",
 			Version:         1,
 			CreatedAtMs:     1704067200000,
 			ProducedByRole:  "user",
 			StructuralType:  StructuralTypeStandard,
 			Type:            "GoalDefined",
+			Metadata:        "{}",
 		},
 		Payload: ArtefactPayload{
 			Content: strings.Repeat("A", 2*MaxPayloadSize), // 2MB - too large

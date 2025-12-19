@@ -87,3 +87,17 @@ func KnowledgeIndexKey(instanceName string) string {
 func ThreadContextKey(instanceName, logicalID string) string {
 	return fmt.Sprintf("holt:%s:thread_context:%s", instanceName, logicalID)
 }
+
+// ChildrenIndexKey returns the Redis key for the reverse index (M5.1).
+// This SET contains child artefact IDs for a given parent artefact.
+// Pattern: holt:{instance_name}:index:children:{parent_id}
+func ChildrenIndexKey(instanceName, parentID string) string {
+	return fmt.Sprintf("holt:%s:index:children:%s", instanceName, parentID)
+}
+
+// SyncDedupLockKey returns the Redis key for synchronization deduplication lock (M5.1).
+// This STRING key acts as a distributed lock to prevent duplicate bids.
+// Pattern: holt:{instance_name}:sync_dedup:{ancestor_id}:{agent_role_hash}
+func SyncDedupLockKey(instanceName, ancestorID, agentRoleHash string) string {
+	return fmt.Sprintf("holt:%s:sync_dedup:%s:%s", instanceName, ancestorID, agentRoleHash)
+}
