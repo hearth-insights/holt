@@ -106,7 +106,7 @@ func PollForClaim(ctx context.Context, client *blackboard.Client, artefactID str
 // Handles reconnection on transient failures with 2s retry interval and 60s timeout.
 //
 // If exitOnCompletion is true, exits with nil when a Terminal artefact is detected.
-// If verbose is true, shows all events including bid_received. Otherwise hides verbose events.
+// If verbose is true, shows all events including ClaimComplete artefacts. Otherwise hides verbose events.
 func StreamActivity(ctx context.Context, client *blackboard.Client, instanceName string, format OutputFormat, filters *FilterCriteria, exitOnCompletion bool, verbose bool, writer io.Writer) error {
 	// Create formatter
 	var formatter eventFormatter
@@ -704,7 +704,7 @@ type eventFormatter interface {
 type defaultFormatter struct {
 	writer  io.Writer
 	client  *blackboard.Client
-	verbose bool // Show verbose events (bid_received, etc.)
+	verbose bool // Show verbose events (ClaimComplete artefacts, etc.)
 }
 
 func (f *defaultFormatter) FormatArtefact(artefact *blackboard.Artefact) error {
@@ -721,15 +721,14 @@ func (f *defaultFormatter) FormatArtefact(artefact *blackboard.Artefact) error {
 	// Use artefact's creation timestamp, fallback to current time for live events
 	timestamp := formatTimestampMs(artefact.Header.CreatedAtMs)
 
-	// Special handling for Terminal artefacts - indicate workflow completion
+	// Hide Terminal artefacts (ClaimComplete, etc.) unless verbose mode
 	if artefact.Header.StructuralType == blackboard.StructuralTypeTerminal {
-		_, err := fmt.Fprintf(f.writer, "[%s] ✨ Artefact created: by=%s, type=%s, id=%s\n",
-			timestamp, artefact.Header.ProducedByRole, artefact.Header.Type, shortID(artefact.ID))
-		if err != nil {
-			return err
+		if !f.verbose {
+			return nil // Skip Terminal artefacts in non-verbose mode
 		}
-		_, err = fmt.Fprintf(f.writer, "[%s] 🎉 Workflow completed: Terminal artefact created (type=%s, id=%s)\n",
-			timestamp, artefact.Header.Type, shortID(artefact.ID))
+		// In verbose mode, show with clearer messaging
+		_, err := fmt.Fprintf(f.writer, "[%s] 🏁 Claim completed: agent=%s, type=%s, claim_complete_id=%s\n",
+			timestamp, artefact.Header.ProducedByRole, artefact.Header.Type, shortID(artefact.ID))
 		return err
 	}
 
@@ -917,7 +916,7 @@ func (f *defaultFormatter) FormatSecurityAlert(alert *blackboard.SecurityAlert) 
 // jsonlFormatter produces line-delimited JSON output (JSONL format)
 type jsonlFormatter struct {
 	writer  io.Writer
-	verbose bool // Show verbose events (bid_received, etc.)
+	verbose bool // Show verbose events (ClaimComplete artefacts, etc.)
 }
 
 func (f *jsonlFormatter) FormatArtefact(artefact *blackboard.Artefact) error {
