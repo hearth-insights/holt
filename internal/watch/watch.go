@@ -774,19 +774,6 @@ func (f *defaultFormatter) FormatWorkflow(event *blackboard.WorkflowEvent, times
 			timestamp, agentName, shortID(claimID), bidType)
 		return err
 
-	case "bid_received":
-		// M5.1: Verbose event - only show if --verbose flag is set
-		if !f.verbose {
-			return nil // Silently skip
-		}
-
-		agentName, _ := event.Data["agent_name"].(string)
-		claimID, _ := event.Data["claim_id"].(string)
-		bidType, _ := event.Data["bid_type"].(string)
-		_, err := fmt.Fprintf(f.writer, "[%s] 📩 Bid received: agent=%s, claim=%s, type=%s\n",
-			timestamp, agentName, shortID(claimID), bidType)
-		return err
-
 	case "claim_dormant":
 		claimID, _ := event.Data["claim_id"].(string)
 		reason, _ := event.Data["reason"].(string)
@@ -966,29 +953,8 @@ func (f *jsonlFormatter) FormatClaim(claim *blackboard.Claim, timestampMs int64)
 }
 
 func (f *jsonlFormatter) FormatWorkflow(event *blackboard.WorkflowEvent, timestampMs int64) error {
-	// M5.1: Filter verbose events unless --verbose is set
-	if !f.verbose {
-		// Skip verbose events: bid_received and any unknown events
-		if event.Event == "bid_received" {
-			return nil // Silently skip
-		}
-		// For robustness, also skip other potentially verbose/unknown events
-		// List of known non-verbose events (allow these through)
-		knownEvents := map[string]bool{
-			"artefact_created":       true,
-			"claim_created":          true,
-			"bid_submitted":          true,
-			"claim_granted":          true,
-			"review_approved":        true,
-			"review_rejected":        true,
-			"feedback_claim_created": true,
-			"artefact_reworked":      true,
-			"human_input_required":   true,
-		}
-		if !knownEvents[event.Event] {
-			return nil // Silently skip unknown events
-		}
-	}
+	// All workflow events are shown in JSONL mode
+	// (filtering is done by downstream tools like jq)
 
 	if timestampMs == 0 {
 		timestampMs = time.Now().UnixMilli()
