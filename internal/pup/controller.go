@@ -88,7 +88,8 @@ func processClaim(ctx context.Context, config *Config, bbClient *blackboard.Clie
 
 	if synchronizer != nil {
 		// Synchronizer mode: Evaluate fan-in conditions
-		decision, err := synchronizer.shouldBidOnClaim(ctx, claim, true)
+		// M5.2: Lock acquisition moved to work execution, not bidding
+		decision, err := synchronizer.shouldBidOnClaim(ctx, claim)
 		if err != nil {
 			log.Printf("[Controller] Synchronizer error: %v", err)
 			return // Skip bid on error
