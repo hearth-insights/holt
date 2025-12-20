@@ -916,9 +916,33 @@ func (d *Debugger) printClaim(claimID string) {
 }
 
 func (d *Debugger) cmdReviews() {
-	// TODO: Query Redis for pending_review claims
-	printer.Info("Listing pending reviews...\n")
-	printer.Warning("Not yet implemented\n")
+	// Query for all pending_review claims
+	claims, err := d.client.GetClaimsByStatus(d.ctx, []string{string(blackboard.ClaimStatusPendingReview)})
+	if err != nil {
+		printer.Warning("Failed to query claims: %v\n", err)
+		return
+	}
+
+	if len(claims) == 0 {
+		printer.Info("No pending reviews\n")
+		return
+	}
+
+	fmt.Println("\nPending Reviews:")
+	for i, claim := range claims {
+		// Fetch artefact to show type/version
+		artefact, err := d.client.GetArtefact(d.ctx, claim.ArtefactID)
+		if err != nil {
+			fmt.Printf("  %d. %s (artefact: %s)\n", i+1, shortID(claim.ID), shortID(claim.ArtefactID))
+			fmt.Printf("     Granted to: %v\n", claim.GrantedReviewAgents)
+			continue
+		}
+
+		fmt.Printf("  %d. %s (artefact: %s v%d)\n",
+			i+1, shortID(claim.ID), artefact.Header.Type, artefact.Header.Version)
+		fmt.Printf("     Granted to: %v\n", claim.GrantedReviewAgents)
+		fmt.Printf("     Waiting for: %d review(s)\n\n", len(claim.GrantedReviewAgents))
+	}
 }
 
 func (d *Debugger) cmdReview(args []string) {

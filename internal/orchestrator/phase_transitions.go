@@ -35,6 +35,7 @@ func (e *Engine) TransitionToNextPhase(ctx context.Context, claim *blackboard.Cl
 	// Determine next phase
 	var nextStatus blackboard.ClaimStatus
 	var nextPhase string
+	var skipGranting bool // True when transitioning to final state with no bids
 
 	switch currentClaim.Status {
 	case blackboard.ClaimStatusPendingReview:
@@ -46,10 +47,14 @@ func (e *Engine) TransitionToNextPhase(ctx context.Context, claim *blackboard.Cl
 			nextStatus = blackboard.ClaimStatusPendingExclusive
 			nextPhase = "exclusive"
 		} else {
-			// No more phases - wait for Terminal artefact
-			log.Printf("[Orchestrator] Review phase complete for claim %s, no further phases, waiting for Terminal artefact", claim.ID)
-			// Don't mark complete - wait for Terminal artefact
-			return nil
+			// No more phases - transition to pending_exclusive so agents will create Terminal
+			// This handles review-only workflows (no parallel/exclusive work)
+			log.Printf("[Orchestrator] Review phase complete for claim %s, no further phases, transitioning to pending_exclusive for Terminal creation", claim.ID)
+			nextStatus = blackboard.ClaimStatusPendingExclusive
+			nextPhase = "none" // Sentinel value to skip granting
+			skipGranting = true
+			// Note: No agents will be granted. The agent that completed review
+			// will see the status is now pending_exclusive and create Terminal
 		}
 
 	case blackboard.ClaimStatusPendingParallel:
@@ -58,10 +63,14 @@ func (e *Engine) TransitionToNextPhase(ctx context.Context, claim *blackboard.Cl
 			nextStatus = blackboard.ClaimStatusPendingExclusive
 			nextPhase = "exclusive"
 		} else {
-			// No exclusive work - wait for Terminal artefact
-			log.Printf("[Orchestrator] Parallel phase complete for claim %s, no further phases, waiting for Terminal artefact", claim.ID)
-			// Don't mark complete - wait for Terminal artefact
-			return nil
+			// No exclusive work - transition to pending_exclusive so agents will create Terminal
+			// This handles review+parallel workflows (no exclusive work)
+			log.Printf("[Orchestrator] Parallel phase complete for claim %s, no further phases, transitioning to pending_exclusive for Terminal creation", claim.ID)
+			nextStatus = blackboard.ClaimStatusPendingExclusive
+			nextPhase = "none" // Sentinel value to skip granting
+			skipGranting = true
+			// Note: No agents will be granted. The agents that completed parallel
+			// will see the status is now pending_exclusive and create Terminal
 		}
 
 	case blackboard.ClaimStatusPendingExclusive:
@@ -117,7 +126,11 @@ func (e *Engine) TransitionToNextPhase(ctx context.Context, claim *blackboard.Cl
 	}
 	currentClaim = freshClaim // Use fresh claim for subsequent operations
 
-	// Grant next phase
+	// Grant next phase (unless this is a synthetic transition to trigger Terminal creation)
+	if skipGranting {
+		log.Printf("[Orchestrator] Skipping grant for claim %s (synthetic transition to final state)", currentClaim.ID)
+		return nil
+	}
 	return e.GrantNextPhase(ctx, currentClaim, phaseState, nextPhase)
 }
 

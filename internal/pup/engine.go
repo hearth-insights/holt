@@ -149,8 +149,12 @@ func (e *Engine) claimWatcher(ctx context.Context, workQueue chan *blackboard.Cl
 				log.Printf("[WARN] Claim events channel closed")
 				return
 			}
+			// M5.2: Copy claim to prevent shared pointer mutation across subscription events
+			// The subscription channel may reuse the same claim pointer, causing race conditions
+			// when the claim is passed to workQueue and processed asynchronously
+			claimCopy := *claim
 			// Handle claim event - submit bid or handle pending_assignment
-			e.handleClaimEvent(ctx, claim, workQueue)
+			e.handleClaimEvent(ctx, &claimCopy, workQueue)
 
 		case grantMsg, ok := <-grantSub.Messages():
 			if !ok {

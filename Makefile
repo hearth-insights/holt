@@ -315,6 +315,12 @@ install: build
 		chmod +x "$$INSTALL_DIR/holt"; \
 	fi; \
 	echo "✓ Installed: $$INSTALL_DIR/holt"; \
+	if [ "$$(uname)" = "Darwin" ]; then \
+		sudo xattr -cr "$$INSTALL_DIR/holt" 2>/dev/null || true; \
+		sudo codesign --force --deep --sign - "$$INSTALL_DIR/holt" 2>/dev/null && \
+			echo "✓ Applied macOS ad-hoc code signature" || \
+			echo "⚠️  Warning: Could not sign binary (may be killed by macOS). Run: sudo codesign --force --deep --sign - $$INSTALL_DIR/holt"; \
+	fi; \
 	echo ""; \
 	if ! echo "$$PATH" | grep -q "$${INSTALL_DIR}"; then \
 		echo "⚠️  Note: $$INSTALL_DIR is not in your PATH"; \
