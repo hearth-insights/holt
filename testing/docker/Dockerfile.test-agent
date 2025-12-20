@@ -60,6 +60,13 @@ COPY testing/docker/scripts/m5_1_aggregator.sh /app/m5_1_aggregator.sh
 COPY testing/docker/scripts/m5_1_concurrent_sync.sh /app/m5_1_concurrent_sync.sh
 RUN chmod +x /app/m5_1_*.sh
 
+# Copy M5.2 E2E Scripts (review phase workflows)
+COPY testing/docker/scripts/m5_2_mapper.sh /app/m5_2_mapper.sh
+COPY testing/docker/scripts/m5_2_reviewer.sh /app/m5_2_reviewer.sh
+COPY testing/docker/scripts/m5_2_recomposer.sh /app/m5_2_recomposer.sh
+COPY testing/docker/scripts/m5_2_filter_tester.sh /app/m5_2_filter_tester.sh
+RUN chmod +x /app/m5_2_*.sh
+
 # Switch back to agent user for runtime
 USER agent
 
