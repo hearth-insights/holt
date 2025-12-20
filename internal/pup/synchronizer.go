@@ -30,26 +30,26 @@ func NewSynchronizer(cfg *SynchronizeConfig, bbClient *blackboard.Client, agentR
 }
 
 // shouldBidOnClaim checks if synchronization conditions are met for a claim.
-// M5.1: This is the main entry point for synchronizer bidding logic.
+// M5.2: Updated to only CHECK lock status during bidding, not acquire it.
+// Lock acquisition happens during work execution to prevent stuck locks.
 //
 // Returns:
-//   - true if all conditions met and lock acquired (ready to bid)
-//   - false if not ready or lock already held (skip bid)
+//   - DecisionBid if all conditions met and lock not held (ready to bid)
+//   - DecisionIgnore if not ready or lock already held (skip bid)
 //   - error if traversal/check fails
 //
 // Algorithm:
 //  1. Check if target artefact is a potential trigger
 //  2. Find common ancestor of configured type
 //  3. Verify all dependencies are met (fan-in check)
-//  4. Acquire (or check) deduplication lock
-//  5. Return true to bid
+//  4. Check (but don't acquire) deduplication lock
+//  5. Return DecisionBid to allow bidding
 //
 // Parameters:
 //   - ctx: Context
 //   - claim: The claim to evaluate
-//   - tryAcquireLock: If true, attempts to acquire the lock. If false, just checks lock status.
-func (s *Synchronizer) shouldBidOnClaim(ctx context.Context, claim *blackboard.Claim, tryAcquireLock bool) (Decision, error) {
-	log.Printf("[Synchronizer] Evaluating claim %s (tryAcquireLock=%v)", claim.ID, tryAcquireLock)
+func (s *Synchronizer) shouldBidOnClaim(ctx context.Context, claim *blackboard.Claim) (Decision, error) {
+	log.Printf("[Synchronizer] Evaluating claim %s", claim.ID)
 
 	// Load target artefact
 	log.Printf("[Synchronizer] Loading target artefact %s...", claim.ArtefactID)
@@ -102,39 +102,28 @@ func (s *Synchronizer) shouldBidOnClaim(ctx context.Context, claim *blackboard.C
 
 	log.Printf("[Synchronizer] All dependencies met for ancestor %s", ancestor.ID)
 
-	// Step 4: Handle deduplication lock
-	log.Printf("[Synchronizer] Checking deduplication lock for ancestor %s (role=%s, tryAcquire=%v)",
-		ancestor.ID[:16], s.agentRole, tryAcquireLock)
+	// M5.2 Fix: Check lock status but DON'T acquire during bidding
+	// Lock will be acquired during work execution to prevent race conditions
+	// Step 4: Check deduplication lock (peek only, no acquisition)
+	log.Printf("[Synchronizer] Checking deduplication lock for ancestor %s (role=%s)",
+		ancestor.ID[:16], s.agentRole)
 
-	if tryAcquireLock {
-		// Destructive: Acquire lock for bidding
-		lockAcquired, err := s.bbClient.AcquireSyncLock(ctx, ancestor.ID, s.agentRole)
-		if err != nil {
-			log.Printf("[Synchronizer] ❌ Error acquiring lock for ancestor %s: %v", ancestor.ID[:16], err)
-			return DecisionIgnore, fmt.Errorf("failed to acquire sync lock: %w", err)
-		}
-		if !lockAcquired {
-			log.Printf("[Synchronizer] ⚠️  Lock already held for ancestor %s by role '%s' (TTL: 10min). "+
-				"This may indicate a previous attempt failed/crashed or is still processing. Skipping bid.",
-				ancestor.ID[:16], s.agentRole)
-			return DecisionIgnore, nil
-		}
-		log.Printf("[Synchronizer] ✓ Lock acquired for ancestor %s, ready to bid", ancestor.ID[:16])
-	} else {
-		// Non-destructive: Check if lock exists (peek mode)
-		isLocked, err := s.bbClient.CheckSyncLock(ctx, ancestor.ID, s.agentRole)
-		if err != nil {
-			log.Printf("[Synchronizer] ❌ Error checking lock for ancestor %s: %v", ancestor.ID[:16], err)
-			return DecisionIgnore, fmt.Errorf("failed to check sync lock: %w", err)
-		}
-		if isLocked {
-			log.Printf("[Synchronizer] ⚠️  Lock already held for ancestor %s, ignoring trigger (peek mode)", ancestor.ID[:16])
-			return DecisionIgnore, nil
-		}
-		log.Printf("[Synchronizer] ✓ Lock available for ancestor %s, trigger valid", ancestor.ID[:16])
+	// Always use non-destructive check during bidding
+	isLocked, err := s.bbClient.CheckSyncLock(ctx, ancestor.ID, s.agentRole)
+	if err != nil {
+		log.Printf("[Synchronizer] ❌ Error checking lock for ancestor %s: %v", ancestor.ID[:16], err)
+		return DecisionIgnore, fmt.Errorf("failed to check sync lock: %w", err)
 	}
 
-	return DecisionBid, nil // Ready -> Bid
+	if isLocked {
+		log.Printf("[Synchronizer] ⚠️  Lock already held for ancestor %s, skipping bid (work in progress)",
+			ancestor.ID[:16])
+		return DecisionIgnore, nil
+	}
+
+	log.Printf("[Synchronizer] ✓ Lock available for ancestor %s, proceeding with bid", ancestor.ID[:16])
+
+	return DecisionBid, nil // Ready -> Bid (lock will be acquired during executeWork)
 }
 
 // EvaluateArtefact REMOVED - M5.1 simplified to claim-only bidding.
@@ -356,4 +345,60 @@ func (s *Synchronizer) getExpectedCountFromMetadata(artefact *blackboard.Artefac
 	}
 
 	return count, nil
+}
+
+// AcquireWorkLock attempts to acquire the synchronization lock for work execution.
+// M5.2: Called at the start of executeWork() to prevent duplicate processing.
+//
+// Returns:
+//   - ancestorID: The ID of the ancestor that was locked (for later release)
+//   - locked: true if lock was acquired, false if already held
+//   - error: if lock acquisition failed
+func (s *Synchronizer) AcquireWorkLock(ctx context.Context, targetArtefact *blackboard.Artefact) (string, bool, error) {
+	// Find the ancestor for this target artefact
+	ancestor, err := s.findCommonAncestor(ctx, targetArtefact)
+	if err != nil {
+		return "", false, fmt.Errorf("failed to find ancestor for lock: %w", err)
+	}
+	if ancestor == nil {
+		// No ancestor found - this shouldn't happen if bidding logic worked correctly
+		log.Printf("[Synchronizer] Warning: No ancestor found during work lock acquisition for artefact %s", targetArtefact.ID)
+		return "", true, nil // Allow work to proceed without lock
+	}
+
+	log.Printf("[Synchronizer] Acquiring work lock for ancestor %s", ancestor.ID[:16])
+
+	// Acquire the lock
+	acquired, err := s.bbClient.AcquireSyncLock(ctx, ancestor.ID, s.agentRole)
+	if err != nil {
+		return "", false, fmt.Errorf("failed to acquire work lock: %w", err)
+	}
+
+	if !acquired {
+		log.Printf("[Synchronizer] ❌ Work lock already held for ancestor %s - another worker is processing", ancestor.ID[:16])
+		return ancestor.ID, false, nil
+	}
+
+	log.Printf("[Synchronizer] ✓ Work lock acquired for ancestor %s", ancestor.ID[:16])
+	return ancestor.ID, true, nil
+}
+
+// ReleaseWorkLock releases the synchronization lock after work completion.
+// M5.2: Called at the end of executeWork() to allow other claims to proceed.
+func (s *Synchronizer) ReleaseWorkLock(ctx context.Context, ancestorID string) error {
+	if ancestorID == "" {
+		return nil // No lock to release
+	}
+
+	log.Printf("[Synchronizer] Releasing work lock for ancestor %s", ancestorID[:16])
+
+	// Release the lock by deleting the Redis key
+	err := s.bbClient.ReleaseSyncLock(ctx, ancestorID, s.agentRole)
+	if err != nil {
+		log.Printf("[Synchronizer] ⚠️  Failed to release work lock for ancestor %s: %v", ancestorID[:16], err)
+		return fmt.Errorf("failed to release work lock: %w", err)
+	}
+
+	log.Printf("[Synchronizer] ✓ Work lock released for ancestor %s", ancestorID[:16])
+	return nil
 }

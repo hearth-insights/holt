@@ -583,8 +583,11 @@ func (c *Client) SubscribeArtefactEvents(ctx context.Context) (*Subscription, er
 	}
 
 	// Create buffered channels for events and errors
-	eventsChan := make(chan *Artefact, 10)
-	errorsChan := make(chan error, 10)
+	// TODO: WARNING - A buffer of 1000 is a temporary fix for bursty workloads (like decomposer fan-out).
+	// If the consumer is slower than the producer for sustained periods, events will still be dropped.
+	// A more robust solution using Redis Streams or a reliable queue pattern is needed for production resilience.
+	eventsChan := make(chan *Artefact, 1000)
+	errorsChan := make(chan error, 1000)
 
 	// Create cancellation context
 	subCtx, cancelFunc := context.WithCancel(ctx)
@@ -652,8 +655,8 @@ func (c *Client) SubscribeClaimEvents(ctx context.Context) (*ClaimSubscription, 
 	}
 
 	// Create buffered channels for events and errors
-	eventsChan := make(chan *Claim, 10)
-	errorsChan := make(chan error, 10)
+	eventsChan := make(chan *Claim, 1000)
+	errorsChan := make(chan error, 1000)
 
 	// Create cancellation context
 	subCtx, cancelFunc := context.WithCancel(ctx)
@@ -721,8 +724,8 @@ func (c *Client) SubscribeWorkflowEvents(ctx context.Context) (*WorkflowSubscrip
 	}
 
 	// Create buffered channels for events and errors
-	eventsChan := make(chan *WorkflowEvent, 10)
-	errorsChan := make(chan error, 10)
+	eventsChan := make(chan *WorkflowEvent, 1000)
+	errorsChan := make(chan error, 1000)
 
 	// Create cancellation context
 	subCtx, cancelFunc := context.WithCancel(ctx)
@@ -1280,6 +1283,31 @@ func (c *Client) CheckSyncLock(ctx context.Context, ancestorID, agentRole string
 	}
 
 	return val == "1", nil
+}
+
+// ReleaseSyncLock releases a synchronization deduplication lock.
+// M5.2: Called after work completion to allow other workers to process the ancestor.
+//
+// Parameters:
+//   - ancestorID: The ID of the ancestor artefact
+//   - agentRole: The agent role that acquired the lock
+//
+// Returns:
+//   - error if Redis operation fails
+func (c *Client) ReleaseSyncLock(ctx context.Context, ancestorID, agentRole string) error {
+	// Hash agent role for lock key (must match AcquireSyncLock)
+	hash := sha256.Sum256([]byte(agentRole))
+	roleHash := hex.EncodeToString(hash[:])[:8]
+
+	lockKey := SyncDedupLockKey(c.instanceName, ancestorID, roleHash)
+
+	// DELETE key to release lock
+	err := c.rdb.Del(ctx, lockKey).Err()
+	if err != nil {
+		return fmt.Errorf("failed to release sync lock: %w", err)
+	}
+
+	return nil
 }
 
 // IsHashMismatchError checks if an error is a HashMismatchError and optionally extracts it.

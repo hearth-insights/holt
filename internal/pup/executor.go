@@ -29,11 +29,13 @@ const (
 //
 // Workflow:
 //  1. Fetch target artefact from blackboard
-//  2. Prepare tool input JSON (stdin)
-//  3. Execute tool subprocess with timeout
-//  4. Parse tool output JSON (stdout)
-//  5. Create result artefact with derivative provenance
-//  6. Publish artefact to blackboard
+//  2. M5.2: Acquire synchronization lock (if synchronizer configured)
+//  3. Prepare tool input JSON (stdin)
+//  4. Execute tool subprocess with timeout
+//  5. Parse tool output JSON (stdout)
+//  6. Create result artefact with derivative provenance
+//  7. Publish artefact to blackboard
+//  8. M5.2: Release synchronization lock
 //
 // On any failure, creates a Failure artefact and continues (never crashes).
 func (e *Engine) executeWork(ctx context.Context, claim *blackboard.Claim) {
@@ -48,6 +50,33 @@ func (e *Engine) executeWork(ctx context.Context, claim *blackboard.Claim) {
 
 	log.Printf("[INFO] Fetched target artefact: artefact_id=%s type=%s",
 		targetArtefact.ID, targetArtefact.Header.Type)
+
+	// M5.2: Acquire synchronization lock if synchronizer configured
+	// This prevents multiple workers from processing the same ancestor simultaneously
+	var syncLockAncestorID string
+	if e.synchronizer != nil {
+		ancestorID, acquired, err := e.synchronizer.AcquireWorkLock(ctx, targetArtefact)
+		if err != nil {
+			log.Printf("[ERROR] Failed to acquire work lock: %v", err)
+			e.createFailureArtefact(ctx, claim, -1, "", "", fmt.Sprintf("Failed to acquire work lock: %v", err))
+			e.createTerminalArtefact(ctx, claim, 0)
+			return
+		}
+		if !acquired {
+			// Another worker is already processing this ancestor - skip work
+			log.Printf("[INFO] Work lock already held for ancestor, another worker is processing. Creating Terminal without executing tool.")
+			e.createTerminalArtefact(ctx, claim, 0)
+			return
+		}
+		syncLockAncestorID = ancestorID
+
+		// Ensure lock is released on all exit paths
+		defer func() {
+			if err := e.synchronizer.ReleaseWorkLock(ctx, syncLockAncestorID); err != nil {
+				log.Printf("[WARN] Failed to release work lock: %v", err)
+			}
+		}()
+	}
 
 	// Prepare tool input with context assembly
 	inputJSON, err := e.prepareToolInput(ctx, claim, targetArtefact)

@@ -255,11 +255,10 @@ func (e *Engine) handleClaimEvent(ctx context.Context, claim *blackboard.Claim, 
 // 3. M2.2: Fall back to static bidding_strategy from config
 func (e *Engine) determineBidType(ctx context.Context, claim *blackboard.Claim, targetArtefact *blackboard.Artefact) (blackboard.BidType, error) {
 	// M5.1: Check synchronizer first (highest priority)
-	// M5.1: Check synchronizer first (highest priority)
-	// M5.1: If synchronizer is active, evaluate synchronization conditions
+	// M5.2: Synchronizer checks dependencies and lock status, but doesn't acquire lock during bidding
 	if e.synchronizer != nil {
 		// M5.1: Synchronizers evaluate claims for trigger types (wait_for), not ancestor type
-		decision, err := e.synchronizer.shouldBidOnClaim(ctx, claim, true)
+		decision, err := e.synchronizer.shouldBidOnClaim(ctx, claim)
 		if err != nil {
 			log.Printf("[ERROR] Synchronizer evaluation failed for claim %s: %v", claim.ID, err)
 			// Don't fall through - synchronizer errors should not silently ignore
