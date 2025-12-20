@@ -103,28 +103,35 @@ func (s *Synchronizer) shouldBidOnClaim(ctx context.Context, claim *blackboard.C
 	log.Printf("[Synchronizer] All dependencies met for ancestor %s", ancestor.ID)
 
 	// Step 4: Handle deduplication lock
+	log.Printf("[Synchronizer] Checking deduplication lock for ancestor %s (role=%s, tryAcquire=%v)",
+		ancestor.ID[:16], s.agentRole, tryAcquireLock)
+
 	if tryAcquireLock {
 		// Destructive: Acquire lock for bidding
 		lockAcquired, err := s.bbClient.AcquireSyncLock(ctx, ancestor.ID, s.agentRole)
 		if err != nil {
+			log.Printf("[Synchronizer] ❌ Error acquiring lock for ancestor %s: %v", ancestor.ID[:16], err)
 			return DecisionIgnore, fmt.Errorf("failed to acquire sync lock: %w", err)
 		}
 		if !lockAcquired {
-			log.Printf("[Synchronizer] Lock already held for ancestor %s, skipping bid (deduplication)", ancestor.ID)
+			log.Printf("[Synchronizer] ⚠️  Lock already held for ancestor %s by role '%s' (TTL: 10min). "+
+				"This may indicate a previous attempt failed/crashed or is still processing. Skipping bid.",
+				ancestor.ID[:16], s.agentRole)
 			return DecisionIgnore, nil
 		}
-		log.Printf("[Synchronizer] Lock acquired for ancestor %s, ready to bid", ancestor.ID)
+		log.Printf("[Synchronizer] ✓ Lock acquired for ancestor %s, ready to bid", ancestor.ID[:16])
 	} else {
 		// Non-destructive: Check if lock exists (peek mode)
 		isLocked, err := s.bbClient.CheckSyncLock(ctx, ancestor.ID, s.agentRole)
 		if err != nil {
+			log.Printf("[Synchronizer] ❌ Error checking lock for ancestor %s: %v", ancestor.ID[:16], err)
 			return DecisionIgnore, fmt.Errorf("failed to check sync lock: %w", err)
 		}
 		if isLocked {
-			log.Printf("[Synchronizer] Lock already held for ancestor %s, ignoring trigger", ancestor.ID)
+			log.Printf("[Synchronizer] ⚠️  Lock already held for ancestor %s, ignoring trigger (peek mode)", ancestor.ID[:16])
 			return DecisionIgnore, nil
 		}
-		log.Printf("[Synchronizer] Lock available for ancestor %s, trigger valid", ancestor.ID)
+		log.Printf("[Synchronizer] ✓ Lock available for ancestor %s, trigger valid", ancestor.ID[:16])
 	}
 
 	return DecisionBid, nil // Ready -> Bid
@@ -185,6 +192,8 @@ func (s *Synchronizer) findCommonAncestor(ctx context.Context, artefact *blackbo
 		if current.Header.Type == s.config.AncestorType {
 			return current, nil
 		}
+		
+		log.Printf("[Synchronizer] Visited node %s (Type: %s), looking for %s", current.ID, current.Header.Type, s.config.AncestorType)
 
 		// Add parents to queue (traverse upward)
 		queue = append(queue, current.Header.ParentHashes...)
@@ -224,33 +233,96 @@ func (s *Synchronizer) checkAllDependenciesMet(ctx context.Context, ancestor *bl
 
 		if condition.CountFromMetadata != "" {
 			// Producer-Declared pattern: Read expected count from metadata
-			if len(artefactsOfType) == 0 {
-				log.Printf("[Synchronizer] No artefacts of type '%s' found yet", condition.Type)
-				return false, nil
+			// M5.2 Fix: The batch_size is defined at the fan-out point (direct children of ancestor),
+			// but we might be waiting for leaf nodes (batch_size=1).
+			// We must find the metadata on the DIRECT CHILDREN of the ancestor.
+
+			log.Printf("[Synchronizer] Looking for metadata '%s' in direct children of ancestor %s",
+				condition.CountFromMetadata, ancestor.ID[:16])
+
+			expectedCount := 0
+			foundMetadata := false
+			var sourceArtefactID string
+			var sourceArtefactType string
+
+			// First pass: Identify and log all direct children
+			var directChildren []*blackboard.Artefact
+			for _, desc := range descendants {
+				isDirectChild := false
+				for _, parentID := range desc.Header.ParentHashes {
+					if parentID == ancestor.ID {
+						isDirectChild = true
+						log.Printf("[Synchronizer]   Direct child found: %s (type=%s, parent=%s)",
+							desc.ID[:16], desc.Header.Type, ancestor.ID[:16])
+						break
+					}
+				}
+
+				if isDirectChild {
+					directChildren = append(directChildren, desc)
+				}
 			}
 
-			// Read batch_size from any artefact's metadata (all siblings have same value)
-			expectedCount, err := s.getExpectedCountFromMetadata(artefactsOfType[0], condition.CountFromMetadata)
-			if err != nil {
-				log.Printf("[Synchronizer] Failed to read metadata '%s': %v", condition.CountFromMetadata, err)
-				return false, nil // Not ready (metadata missing or invalid)
+			log.Printf("[Synchronizer] Found %d direct children of ancestor %s", len(directChildren), ancestor.ID[:16])
+
+			// Second pass: Search direct children for metadata
+			for _, child := range directChildren {
+				count, err := s.getExpectedCountFromMetadata(child, condition.CountFromMetadata)
+				if err == nil {
+					expectedCount = count
+					foundMetadata = true
+					sourceArtefactID = child.ID
+					sourceArtefactType = child.Header.Type
+					log.Printf("[Synchronizer]   ✓ Found metadata '%s'=%d on direct child %s (type=%s)",
+						condition.CountFromMetadata, expectedCount, sourceArtefactID[:16], sourceArtefactType)
+					break // Found it on a direct child (all siblings share same batch_size)
+				} else {
+					log.Printf("[Synchronizer]   ✗ Direct child %s (type=%s) has no metadata '%s': %v",
+						child.ID[:16], child.Header.Type, condition.CountFromMetadata, err)
+				}
 			}
+
+			// Fallback: If no direct child has it, check the target artefacts themselves
+			if !foundMetadata && len(artefactsOfType) > 0 {
+				log.Printf("[Synchronizer] No metadata found on direct children, checking target artefacts of type '%s'", condition.Type)
+				count, err := s.getExpectedCountFromMetadata(artefactsOfType[0], condition.CountFromMetadata)
+				if err == nil {
+					expectedCount = count
+					foundMetadata = true
+					sourceArtefactID = artefactsOfType[0].ID
+					sourceArtefactType = artefactsOfType[0].Header.Type
+					log.Printf("[Synchronizer]   ✓ Found metadata '%s'=%d on target artefact %s (type=%s) [FALLBACK]",
+						condition.CountFromMetadata, expectedCount, sourceArtefactID[:16], sourceArtefactType)
+				} else {
+					log.Printf("[Synchronizer]   ✗ Target artefact %s (type=%s) has no metadata '%s': %v",
+						artefactsOfType[0].ID[:16], artefactsOfType[0].Header.Type, condition.CountFromMetadata, err)
+				}
+			}
+
+			if !foundMetadata {
+				log.Printf("[Synchronizer] ❌ Failed to read metadata '%s' from any direct child (%d checked) or target artefacts",
+					condition.CountFromMetadata, len(directChildren))
+				return false, nil // Not ready
+			}
+
+			log.Printf("[Synchronizer] Expected count determined: %d (source: %s, type=%s)",
+				expectedCount, sourceArtefactID[:16], sourceArtefactType)
 
 			if len(artefactsOfType) < expectedCount {
-				log.Printf("[Synchronizer] Type '%s': found %d of %d expected",
+				log.Printf("[Synchronizer] Status: Type '%s': found %d of %d expected (WAITING)",
 					condition.Type, len(artefactsOfType), expectedCount)
 				return false, nil
 			}
 
-			log.Printf("[Synchronizer] Type '%s': all %d artefacts present", condition.Type, expectedCount)
+			log.Printf("[Synchronizer] Status: Type '%s': all %d artefacts present (READY)", condition.Type, expectedCount)
 		} else {
 			// Named pattern: Exactly 1 required
 			if len(artefactsOfType) == 0 {
-				log.Printf("[Synchronizer] Type '%s' not found", condition.Type)
+				log.Printf("[Synchronizer] Status: Type '%s' NOT FOUND", condition.Type)
 				return false, nil
 			}
 
-			log.Printf("[Synchronizer] Type '%s': present", condition.Type)
+			log.Printf("[Synchronizer] Status: Type '%s': present (READY)", condition.Type)
 		}
 	}
 
