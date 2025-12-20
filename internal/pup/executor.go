@@ -225,12 +225,26 @@ func (e *Engine) prepareToolInput(ctx context.Context, claim *blackboard.Claim, 
 				return "", fmt.Errorf("failed to fetch descendants for synchronization: %w", err)
 			}
 
-			descendantArtefacts = make([]interface{}, len(descendants))
-			for i, desc := range descendants {
+			// M5.2: Filter descendants to only include wait_for types
+			// The agent should receive the artefacts it was waiting for, not all descendants
+			waitForTypes := make(map[string]bool)
+			for _, condition := range e.config.SynchronizeConfig.WaitFor {
+				waitForTypes[condition.Type] = true
+			}
+
+			var filteredDescendants []*blackboard.Artefact
+			for _, desc := range descendants {
+				if waitForTypes[desc.Header.Type] {
+					filteredDescendants = append(filteredDescendants, desc)
+				}
+			}
+
+			descendantArtefacts = make([]interface{}, len(filteredDescendants))
+			for i, desc := range filteredDescendants {
 				descendantArtefacts[i] = desc
 			}
-			debug.Log("Fetched %d descendants of ancestor %s for synchronization",
-				len(descendants), ancestor.ID)
+			debug.Log("Fetched %d descendants of ancestor %s for synchronization (filtered to %d wait_for types)",
+				len(descendants), ancestor.ID, len(filteredDescendants))
 		}
 	}
 
