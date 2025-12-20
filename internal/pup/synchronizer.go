@@ -60,23 +60,18 @@ func (s *Synchronizer) shouldBidOnClaim(ctx context.Context, claim *blackboard.C
 	}
 	log.Printf("[Synchronizer] Loaded target artefact %s (Type: %s)", claim.ArtefactID, targetArtefact.Header.Type)
 
-	// M5.1: Synchronizers only bid on trigger artefacts (wait_for types), not ancestors
-	// The ancestor claim should be handled by other agents (if any)
-	// Step 1: Check if target artefact is a potential trigger
-	if !s.isPotentialTrigger(targetArtefact) {
-		// Not a trigger type -> Ignore (includes ancestor type)
-		if targetArtefact.Header.Type == s.config.AncestorType {
-			log.Printf("[Synchronizer] Ignoring ancestor claim for %s (waiting for trigger types: %v)",
-				targetArtefact.ID, s.getTriggerTypes())
-		} else {
-			log.Printf("[Synchronizer] Artefact %s (type=%s) is not a potential trigger, ignoring",
-				targetArtefact.ID, targetArtefact.Header.Type)
-		}
+	// M5.2: Evaluate ALL descendant claims (not just wait_for types)
+	// Claims arrive for work artefacts (e.g., HPOMappingResult)
+	// But we wait for review artefacts (e.g., ReviewResult) to exist
+	// Ignore only ancestor claims (those are for other agents)
+	if targetArtefact.Header.Type == s.config.AncestorType {
+		log.Printf("[Synchronizer] Ignoring ancestor claim for %s (synchronizers only process descendants)",
+			targetArtefact.ID)
 		return DecisionIgnore, nil
 	}
 
-	// This is a trigger type -> find its ancestor
-	// Step 2: Find common ancestor
+	// Step 1: Find common ancestor
+	// We evaluate ANY descendant claim and check if ancestor's wait_for conditions are met
 	ancestor, err := s.findCommonAncestor(ctx, targetArtefact)
 	if err != nil {
 		log.Printf("[Synchronizer] Failed to find ancestor: %v", err)
