@@ -159,7 +159,7 @@ test-failed: build build-pup docker-orchestrator
 build:
 	@echo "Building holt CLI..."
 	@mkdir -p bin
-	@$(GO) build $(LDFLAGS) -o bin/holt ./cmd/holt
+	@$(GO) build $(LDFLAGS) -o bin/holt ./cmd/holt || { echo "❌ Failed to build holt CLI"; exit 1; }
 	@echo "✓ Built: bin/holt (version: $(VERSION), commit: $(COMMIT))"
 
 # Cross-compile for macOS ARM64 (M1/M2/M3 Macs)
@@ -194,7 +194,7 @@ build-linux-amd64:
 build-orchestrator:
 	@echo "Building orchestrator..."
 	@mkdir -p bin
-	@$(GO) build $(LDFLAGS) -o bin/holt-orchestrator ./cmd/orchestrator
+	@$(GO) build $(LDFLAGS) -o bin/holt-orchestrator ./cmd/orchestrator || { echo "❌ Failed to build orchestrator"; exit 1; }
 	@echo "✓ Built: bin/holt-orchestrator"
 
 # Build the agent pup binary
@@ -205,10 +205,10 @@ build-pup:
 	@echo "Building agent pup for Linux..."
 	@mkdir -p bin
 	@if [ "$$(uname -m)" = "aarch64" ] || [ "$$(uname -m)" = "arm64" ]; then \
-		GOOS=linux GOARCH=arm64 $(GO) build $(LDFLAGS) -o bin/holt-pup ./cmd/pup; \
+		GOOS=linux GOARCH=arm64 $(GO) build $(LDFLAGS) -o bin/holt-pup ./cmd/pup || { echo "❌ Failed to build pup binary"; exit 1; }; \
 		echo "✓ Built: bin/holt-pup (Linux ARM64)"; \
 	else \
-		GOOS=linux GOARCH=amd64 $(GO) build $(LDFLAGS) -o bin/holt-pup ./cmd/pup; \
+		GOOS=linux GOARCH=amd64 $(GO) build $(LDFLAGS) -o bin/holt-pup ./cmd/pup || { echo "❌ Failed to build pup binary"; exit 1; }; \
 		echo "✓ Built: bin/holt-pup (Linux AMD64)"; \
 	fi
 
