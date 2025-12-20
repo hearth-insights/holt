@@ -292,13 +292,22 @@ func (s *Synchronizer) checkAllDependenciesMet(ctx context.Context, ancestor *bl
 			log.Printf("[Synchronizer] Expected count determined: %d (source: %s, type=%s)",
 				expectedCount, sourceArtefactID[:16], sourceArtefactType)
 
-			if len(artefactsOfType) < expectedCount {
-				log.Printf("[Synchronizer] Status: Type '%s': found %d of %d expected (WAITING)",
-					condition.Type, len(artefactsOfType), expectedCount)
+			// M5.2: Check claim-based readiness for review workflows
+			// We need to find the "source" artefacts (parents of wait_for type)
+			// and check if their claims have completed review phase
+			readyCount, err := s.countArtefactsPastReviewPhase(ctx, artefactsOfType, descendants)
+			if err != nil {
+				log.Printf("[Synchronizer] ❌ Failed to check claim statuses: %v", err)
 				return false, nil
 			}
 
-			log.Printf("[Synchronizer] Status: Type '%s': all %d artefacts present (READY)", condition.Type, expectedCount)
+			if readyCount < expectedCount {
+				log.Printf("[Synchronizer] Status: Type '%s': found %d artefacts, but only %d have completed review (expected %d) (WAITING)",
+					condition.Type, len(artefactsOfType), readyCount, expectedCount)
+				return false, nil
+			}
+
+			log.Printf("[Synchronizer] Status: Type '%s': all %d artefacts present and past review (READY)", condition.Type, expectedCount)
 		} else {
 			// Named pattern: Exactly 1 required
 			if len(artefactsOfType) == 0 {
@@ -311,6 +320,76 @@ func (s *Synchronizer) checkAllDependenciesMet(ctx context.Context, ancestor *bl
 	}
 
 	return true, nil
+}
+
+// countArtefactsPastReviewPhase checks claim statuses to ensure reviews have completed.
+// M5.2: For review workflows, we need to wait for claims to move past review phase.
+//
+// Algorithm:
+//  1. For each wait_for artefact (e.g., ReviewResult)
+//  2. Find its parent artefact (e.g., HPOMappingResult)
+//  3. Look up the claim for the parent
+//  4. Check if claim status is >= pending_parallel (past review)
+//  5. Count how many have completed review
+//
+// Returns: Number of artefacts whose parent claims are past review phase
+func (s *Synchronizer) countArtefactsPastReviewPhase(ctx context.Context, waitForArtefacts []*blackboard.Artefact, allDescendants []*blackboard.Artefact) (int, error) {
+	// Build map of artefact ID -> artefact for quick lookups
+	artefactMap := make(map[string]*blackboard.Artefact)
+	for _, art := range allDescendants {
+		artefactMap[art.ID] = art
+	}
+
+	readyCount := 0
+
+	for _, waitArt := range waitForArtefacts {
+		// Find parent artefact (the one that was reviewed)
+		if len(waitArt.Header.ParentHashes) == 0 {
+			log.Printf("[Synchronizer]   ⚠️  Artefact %s has no parents, skipping claim check", waitArt.ID[:16])
+			continue
+		}
+
+		parentID := waitArt.Header.ParentHashes[0]
+		parent, exists := artefactMap[parentID]
+		if !exists {
+			// Parent not in descendants list, fetch it
+			var err error
+			parent, err = s.bbClient.GetArtefact(ctx, parentID)
+			if err != nil {
+				log.Printf("[Synchronizer]   ❌ Failed to fetch parent %s for artefact %s: %v",
+					parentID[:16], waitArt.ID[:16], err)
+				continue // Skip this one
+			}
+		}
+
+		// Look up claim for parent artefact
+		claim, err := s.bbClient.GetClaimByArtefactID(ctx, parent.ID)
+		if err != nil {
+			log.Printf("[Synchronizer]   ⚠️  No claim found for parent %s (type=%s): %v",
+				parent.ID[:16], parent.Header.Type, err)
+			// No claim might mean review failed/cancelled - don't count it
+			continue
+		}
+
+		// Check if claim is past review phase
+		// pending_review → still reviewing, wait
+		// pending_parallel/pending_exclusive/complete → review done, count it
+		isPastReview := claim.Status == blackboard.ClaimStatusPendingParallel ||
+			claim.Status == blackboard.ClaimStatusPendingExclusive ||
+			claim.Status == blackboard.ClaimStatusComplete
+
+		if isPastReview {
+			log.Printf("[Synchronizer]   ✓ Parent %s (type=%s) claim %s is past review (status=%s)",
+				parent.ID[:16], parent.Header.Type, claim.ID[:16], claim.Status)
+			readyCount++
+		} else {
+			log.Printf("[Synchronizer]   ⏳ Parent %s (type=%s) claim %s still in review (status=%s)",
+				parent.ID[:16], parent.Header.Type, claim.ID[:16], claim.Status)
+		}
+	}
+
+	log.Printf("[Synchronizer] Claim check: %d of %d artefacts have completed review phase", readyCount, len(waitForArtefacts))
+	return readyCount, nil
 }
 
 // getExpectedCountFromMetadata parses metadata to extract expected count.
