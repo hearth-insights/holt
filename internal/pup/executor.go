@@ -232,19 +232,33 @@ func (e *Engine) prepareToolInput(ctx context.Context, claim *blackboard.Claim, 
 				waitForTypes[condition.Type] = true
 			}
 
-			var filteredDescendants []*blackboard.Artefact
+			// Filter by type and deduplicate by LogicalThreadID (keep latest version)
+			latestByThread := make(map[string]*blackboard.Artefact)
 			for _, desc := range descendants {
-				if waitForTypes[desc.Header.Type] {
-					filteredDescendants = append(filteredDescendants, desc)
+				if !waitForTypes[desc.Header.Type] {
+					continue // Not a wait_for type, skip
 				}
+
+				threadID := desc.Header.LogicalThreadID
+				existing, exists := latestByThread[threadID]
+				if !exists || desc.Header.Version > existing.Header.Version {
+					// First occurrence or newer version - keep it
+					latestByThread[threadID] = desc
+				}
+			}
+
+			// Convert map to slice
+			filteredDescendants := make([]*blackboard.Artefact, 0, len(latestByThread))
+			for _, desc := range latestByThread {
+				filteredDescendants = append(filteredDescendants, desc)
 			}
 
 			descendantArtefacts = make([]interface{}, len(filteredDescendants))
 			for i, desc := range filteredDescendants {
 				descendantArtefacts[i] = desc
 			}
-			debug.Log("Fetched %d descendants of ancestor %s for synchronization (filtered to %d wait_for types)",
-				len(descendants), ancestor.ID, len(filteredDescendants))
+			debug.Log("Fetched %d descendants of ancestor %s for synchronization (filtered to %d wait_for types, deduplicated to %d unique threads)",
+				len(descendants), ancestor.ID, len(filteredDescendants), len(latestByThread))
 		}
 	}
 
