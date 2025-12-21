@@ -92,6 +92,7 @@ type WorkerConfig struct {
 	MaxConcurrent  int              `yaml:"max_concurrent,omitempty"` // Default: 1
 	Command        []string         `yaml:"command"`
 	Workspace      *WorkspaceConfig `yaml:"workspace,omitempty"`
+	Environment    []string         `yaml:"environment,omitempty"`     // M4.10: Custom environment variables for worker
 	KeepContainers bool             `yaml:"keep_containers,omitempty"` // M4.10: Retain worker containers for debugging (default: false)
 }
 

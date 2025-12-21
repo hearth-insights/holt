@@ -20,8 +20,11 @@ func RunWorkerMode(ctx context.Context, config *Config, bbClient *blackboard.Cli
 		return fmt.Errorf("failed to fetch claim: %w", err)
 	}
 
-	// Verify claim is granted (can be pending_exclusive or pending_assignment)
-	if claim.Status != blackboard.ClaimStatusPendingExclusive && claim.Status != blackboard.ClaimStatusPendingAssignment {
+	// Verify claim is granted (can be pending_exclusive, pending_assignment, pending_review, or pending_parallel)
+	if claim.Status != blackboard.ClaimStatusPendingExclusive &&
+		claim.Status != blackboard.ClaimStatusPendingAssignment &&
+		claim.Status != blackboard.ClaimStatusPendingReview &&
+		claim.Status != blackboard.ClaimStatusPendingParallel {
 		return fmt.Errorf("claim %s is not in valid status for worker execution (status: %s)", claimID, claim.Status)
 	}
 

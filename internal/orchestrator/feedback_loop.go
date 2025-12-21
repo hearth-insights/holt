@@ -82,6 +82,36 @@ func (e *Engine) CreateFeedbackClaim(ctx context.Context, originalClaim *blackbo
 
 	// Note: CreateClaim already published to claim_events channel
 
+	// M3.4: If the assigned agent is a controller, we must launch a worker explicitly
+	// because PendingAssignment claims bypass the bidding/granting phase where workers are usually launched.
+	if agent, exists := e.config.Agents[producerAgent]; exists && agent.Mode == "controller" {
+		if e.workerManager != nil {
+			// Check worker limit (though for rework we might want to prioritize it?)
+			// For now, respect the limit to avoid DOS.
+			if e.workerManager.IsAtWorkerLimit(producerAgent, agent.Worker.MaxConcurrent) {
+				log.Printf("[Orchestrator] Role '%s' at max_concurrent worker limit (%d), pausing feedback claim %s in grant queue",
+					producerAgent, agent.Worker.MaxConcurrent, feedbackClaim.ID)
+				
+				// Add to persistent grant queue
+				if err := e.pauseGrantForQueue(ctx, feedbackClaim, producerAgent, producerAgent); err != nil {
+					log.Printf("[Orchestrator] Failed to pause feedback claim in grant queue: %v", err)
+				}
+			} else {
+				log.Printf("[Orchestrator] Launching worker for feedback controller %s (claim %s)", producerAgent, feedbackClaim.ID)
+				if err := e.workerManager.LaunchWorker(ctx, feedbackClaim, producerAgent, agent, e.client); err != nil {
+					log.Printf("[Orchestrator] Failed to launch worker for feedback controller %s: %v", producerAgent, err)
+				}
+				// M3.9: Resolve worker image ID dynamically (pass empty string for now)
+				// Publish event for watching
+				if err := e.publishClaimGrantedEvent(ctx, feedbackClaim.ID, producerAgent, "exclusive", ""); err != nil {
+					log.Printf("[Orchestrator] Failed to publish workflow event for feedback grant to %s: %v", producerAgent, err)
+				}
+			}
+		} else {
+			log.Printf("[Orchestrator] WARN: Feedback assigned to controller %s but workerManager is nil", producerAgent)
+		}
+	}
+
 	return nil
 }
 

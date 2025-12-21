@@ -303,7 +303,6 @@ func (e *Engine) handleManualReview(ctx context.Context, debugSess *debugSession
 	payloadJSON, _ := json.Marshal(reviewPayload)
 
 	reviewArtefact := &blackboard.Artefact{
-		ID: uuid.New().String(),
 		Header: blackboard.ArtefactHeader{
 			LogicalThreadID: uuid.New().String(),
 			Version:         1,
@@ -312,11 +311,19 @@ func (e *Engine) handleManualReview(ctx context.Context, debugSess *debugSession
 			ProducedByRole:  "user",
 			ParentHashes:    []string{claim.ArtefactID},
 			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: string(payloadJSON),
 		},
 	}
+
+	// Compute hash for V2 ID
+	hash, err := blackboard.ComputeArtefactHash(reviewArtefact)
+	if err != nil {
+		return fmt.Errorf("failed to compute hash for review artefact: %w", err)
+	}
+	reviewArtefact.ID = hash
 
 	if err := e.client.CreateArtefact(ctx, reviewArtefact); err != nil {
 		return fmt.Errorf("failed to create review artefact: %w", err)

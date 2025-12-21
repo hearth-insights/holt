@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -186,6 +187,11 @@ func (wm *WorkerManager) LaunchWorker(ctx context.Context, claim *blackboard.Cla
 		env = append(env, fmt.Sprintf("HOLT_AGENT_COMMAND=%s", commandJSON))
 	}
 
+	// M4.10: Add user-defined worker environment variables
+	// Workers inherit agent-level environment by default
+	env = append(env, agent.Environment...)
+	env = append(env, agent.Worker.Environment...)
+
 	// Add HOLT_AGENT_BID_SCRIPT as JSON array
 	if len(agent.BidScript) > 0 {
 		bidScriptJSON, err := json.Marshal(agent.BidScript)
@@ -320,11 +326,11 @@ func (wm *WorkerManager) handleWorkerExit(ctx context.Context, worker *WorkerSta
 
 		// Get container logs for failure details
 		logs := wm.getWorkerLogs(ctx, worker.ContainerID)
+		sanitizedLogs := sanitizeLogs(logs)
 
 		// Create Failure artefact
-		failurePayload := fmt.Sprintf("Worker container exited with code %d\n\nLogs:\n%s", exitCode, logs)
+		failurePayload := fmt.Sprintf("Worker container exited with code %d\n\nLogs:\n%s", exitCode, sanitizedLogs)
 		failure := &blackboard.Artefact{
-			ID: uuid.New().String(),
 			Header: blackboard.ArtefactHeader{
 				LogicalThreadID: uuid.New().String(),
 				Version:         1,
@@ -333,14 +339,22 @@ func (wm *WorkerManager) handleWorkerExit(ctx context.Context, worker *WorkerSta
 				ProducedByRole:  worker.Role,
 				ParentHashes:    []string{},
 				Metadata:        "{}",
+				CreatedAtMs:     time.Now().UnixMilli(),
 			},
 			Payload: blackboard.ArtefactPayload{
 				Content: failurePayload,
 			},
 		}
 
-		if err := bbClient.CreateArtefact(ctx, failure); err != nil {
-			log.Printf("[Orchestrator] Failed to create Failure artefact: %v", err)
+		// Compute hash for V2 ID
+		hash, err := blackboard.ComputeArtefactHash(failure)
+		if err != nil {
+			log.Printf("[Orchestrator] Failed to compute hash for Failure artefact: %v", err)
+		} else {
+			failure.ID = hash
+			if err := bbClient.CreateArtefact(ctx, failure); err != nil {
+				log.Printf("[Orchestrator] Failed to create Failure artefact: %v", err)
+			}
 		}
 
 		// Terminate claim
@@ -370,7 +384,6 @@ func (wm *WorkerManager) handleWorkerError(ctx context.Context, worker *WorkerSt
 	// Create Failure artefact
 	failurePayload := fmt.Sprintf("Worker container monitoring error: %v", err)
 	failure := &blackboard.Artefact{
-		ID: uuid.New().String(),
 		Header: blackboard.ArtefactHeader{
 			LogicalThreadID: uuid.New().String(),
 			Version:         1,
@@ -379,14 +392,22 @@ func (wm *WorkerManager) handleWorkerError(ctx context.Context, worker *WorkerSt
 			ProducedByRole:  worker.Role,
 			ParentHashes:    []string{},
 			Metadata:        "{}",
+			CreatedAtMs:     time.Now().UnixMilli(),
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: failurePayload,
 		},
 	}
 
-	if createErr := bbClient.CreateArtefact(ctx, failure); createErr != nil {
-		log.Printf("[Orchestrator] Failed to create Failure artefact: %v", createErr)
+	// Compute hash for V2 ID
+	hash, createErr := blackboard.ComputeArtefactHash(failure)
+	if createErr != nil {
+		log.Printf("[Orchestrator] Failed to compute hash for Failure artefact: %v", createErr)
+	} else {
+		failure.ID = hash
+		if createErr := bbClient.CreateArtefact(ctx, failure); createErr != nil {
+			log.Printf("[Orchestrator] Failed to create Failure artefact: %v", createErr)
+		}
 	}
 
 	// Terminate claim
@@ -515,4 +536,14 @@ func (wm *WorkerManager) truncateImageID(imageID string) string {
 		return imageID[:12]
 	}
 	return imageID
+}
+
+// sanitizeLogs removes non-printable control characters from strings to ensure JSON safety
+func sanitizeLogs(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 32 && r != '\n' && r != '\r' && r != '\t' {
+			return -1 // drop control characters
+		}
+		return r
+	}, s)
 }

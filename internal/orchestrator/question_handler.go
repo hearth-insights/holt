@@ -156,6 +156,30 @@ func (e *Engine) handleQuestionArtefact(ctx context.Context, questionArtefact *b
 	// Track feedback claim for completion checking
 	e.pendingAssignmentClaims[feedbackClaim.ID] = targetArtefact.ID
 
+	// M3.4: If the assigned agent is a controller, we must launch a worker explicitly
+	if agent, exists := e.config.Agents[producerAgent]; exists && agent.Mode == "controller" {
+		if e.workerManager != nil {
+			if e.workerManager.IsAtWorkerLimit(producerAgent, agent.Worker.MaxConcurrent) {
+				log.Printf("[Orchestrator] Role '%s' at max_concurrent worker limit (%d), pausing feedback claim %s in grant queue",
+					producerAgent, agent.Worker.MaxConcurrent, feedbackClaim.ID)
+				
+				if err := e.pauseGrantForQueue(ctx, feedbackClaim, producerAgent, producerAgent); err != nil {
+					log.Printf("[Orchestrator] Failed to pause feedback claim in grant queue: %v", err)
+				}
+			} else {
+				log.Printf("[Orchestrator] Launching worker for feedback controller %s (claim %s)", producerAgent, feedbackClaim.ID)
+				if err := e.workerManager.LaunchWorker(ctx, feedbackClaim, producerAgent, agent, e.client); err != nil {
+					log.Printf("[Orchestrator] Failed to launch worker for feedback controller %s: %v", producerAgent, err)
+				}
+				if err := e.publishClaimGrantedEvent(ctx, feedbackClaim.ID, producerAgent, "exclusive", ""); err != nil {
+					log.Printf("[Orchestrator] Failed to publish workflow event for feedback grant to %s: %v", producerAgent, err)
+				}
+			}
+		} else {
+			log.Printf("[Orchestrator] WARN: Feedback assigned to controller %s but workerManager is nil", producerAgent)
+		}
+	}
+
 	// Terminate the original claim
 	originalClaim.Status = blackboard.ClaimStatusTerminated
 	originalClaim.TerminationReason = fmt.Sprintf("Agent asked a clarifying question (Question artefact: %s)", questionArtefact.ID)
