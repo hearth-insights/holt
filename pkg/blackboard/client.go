@@ -385,6 +385,59 @@ func (c *Client) SetBid(ctx context.Context, claimID string, agentName string, b
 	return nil
 }
 
+// SubmitBid submits a complete Bid struct (including metadata) for a claim.
+// M5.1.1: Used for merge bids which include metadata (ancestor_id, batch_size, etc.)
+//
+// Parameters:
+//   - ctx: Context
+//   - claimID: Claim ID to bid on
+//   - bid: Complete Bid struct with AgentName, BidType, and optional Metadata
+//
+// Returns error if bid submission fails.
+func (c *Client) SubmitBid(ctx context.Context, claimID string, bid *Bid) error {
+	// Validate bid type
+	if err := bid.BidType.Validate(); err != nil {
+		return fmt.Errorf("invalid bid type: %w", err)
+	}
+
+	// Ensure timestamp is set
+	if bid.TimestampMs == 0 {
+		bid.TimestampMs = time.Now().UnixMilli()
+	}
+
+	// Marshal to JSON
+	bidJSON, err := json.Marshal(bid)
+	if err != nil {
+		return fmt.Errorf("failed to marshal bid: %w", err)
+	}
+
+	// Write bid to Redis
+	key := ClaimBidsKey(c.instanceName, claimID)
+	debug.Log("SubmitBid writing to key: '%s' agent: '%s' type: '%s'", key, bid.AgentName, bid.BidType)
+	if err := c.rdb.HSet(ctx, key, bid.AgentName, string(bidJSON)).Err(); err != nil {
+		return fmt.Errorf("failed to write bid to Redis: %w", err)
+	}
+
+	// Publish bid_submitted event
+	eventData := map[string]interface{}{
+		"claim_id":     claimID,
+		"agent_name":   bid.AgentName,
+		"bid_type":     string(bid.BidType),
+		"timestamp_ms": bid.TimestampMs,
+	}
+
+	// Include metadata in event if present (for merge bids)
+	if len(bid.Metadata) > 0 {
+		eventData["metadata"] = bid.Metadata
+	}
+
+	if err := c.publishWorkflowEvent(ctx, "bid_submitted", eventData); err != nil {
+		return fmt.Errorf("failed to publish bid_submitted event: %w", err)
+	}
+
+	return nil
+}
+
 // GetAllBids retrieves all bids for a claim as a map of agent name to Bid struct.
 // Returns empty map if no bids exist (not an error).
 // Expects JSON-encoded bids in Redis. Fails if data is not valid JSON.

@@ -150,4 +150,20 @@ func processClaim(ctx context.Context, config *Config, bbClient *blackboard.Clie
 
 		log.Printf("[Controller] Submitted bid: claim=%s type=%s status=%s", claim.ID, bid, claim.Status)
 	}
+
+	// M5.1.1: NEW - Evaluate merge bid for Fan-In Accumulator pattern
+	// Merge bids are submitted IN ADDITION to regular bids (not mutually exclusive)
+	// The Orchestrator will process merge bids in the 4th phase (after exclusive)
+	if config.SynchronizeConfig != nil {
+		mergeBid, err := shouldBidMerge(ctx, bbClient, config.AgentName, claim, config.SynchronizeConfig)
+		if err != nil {
+			log.Printf("[Controller] Merge bid evaluation failed: %v", err)
+			// Don't return - merge bid failure shouldn't block regular bidding
+		} else if mergeBid != nil {
+			// Submit merge bid using the new Bid type with metadata
+			if err := bbClient.SubmitBid(ctx, claim.ID, mergeBid); err != nil {
+				log.Printf("[Controller] Failed to submit merge bid for claim %s: %v", claim.ID, err)
+			}
+		}
+	}
 }
