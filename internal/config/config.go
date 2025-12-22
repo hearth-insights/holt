@@ -300,6 +300,20 @@ func (a *Agent) Validate(name string) error {
 			}
 		}
 
+		// M5.1.1: Validate count_from_metadata exclusivity
+		// If ANY wait_for has count_from_metadata, there must be ONLY ONE wait_for condition
+		hasCountFromMetadata := false
+		for _, condition := range a.Synchronize.WaitFor {
+			if condition.CountFromMetadata != "" {
+				hasCountFromMetadata = true
+				break
+			}
+		}
+
+		if hasCountFromMetadata && len(a.Synchronize.WaitFor) > 1 {
+			return fmt.Errorf("agent '%s': count_from_metadata pattern requires exactly ONE wait_for condition (found %d)", name, len(a.Synchronize.WaitFor))
+		}
+
 		// Validate max_depth (must be non-negative)
 		if a.Synchronize.MaxDepth < 0 {
 			return fmt.Errorf("agent '%s': synchronize max_depth must be >= 0", name)

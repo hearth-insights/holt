@@ -46,7 +46,7 @@ func TestAgent_Validate_Synchronize(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "valid synchronize with mixed patterns",
+			name: "INVALID: mixed patterns (count_from_metadata with multiple wait_for)",
 			agent: Agent{
 				Image:   "test:latest",
 				Command: []string{"/app/run.sh"},
@@ -58,7 +58,8 @@ func TestAgent_Validate_Synchronize(t *testing.T) {
 					},
 				},
 			},
-			expectError: false,
+			expectError:   true,
+			errorContains: "count_from_metadata pattern requires exactly ONE wait_for condition",
 		},
 		{
 			name: "valid synchronize with max_depth=0 (unlimited)",
