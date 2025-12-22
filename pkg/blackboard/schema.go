@@ -96,8 +96,23 @@ func ChildrenIndexKey(instanceName, parentID string) string {
 }
 
 // SyncDedupLockKey returns the Redis key for synchronization deduplication lock (M5.1).
+// DEPRECATED: M5.1.1 removes client-side locking in favor of Orchestrator-driven accumulation.
 // This STRING key acts as a distributed lock to prevent duplicate bids.
 // Pattern: holt:{instance_name}:sync_dedup:{ancestor_id}:{agent_role_hash}
 func SyncDedupLockKey(instanceName, ancestorID, agentRoleHash string) string {
 	return fmt.Sprintf("holt:%s:sync_dedup:%s:%s", instanceName, ancestorID, agentRoleHash)
+}
+
+// ClaimAccumulatorKey returns the Redis key for a claim accumulator hash (M5.1.1).
+// The accumulator IS the Fan-In Claim - it tracks accumulated claims and lifecycle state.
+// Pattern: holt:{instance_name}:claim-accumulator:{ancestor_id}:{role}
+func ClaimAccumulatorKey(instanceName, ancestorID, role string) string {
+	return fmt.Sprintf("holt:%s:claim-accumulator:%s:%s", instanceName, ancestorID, role)
+}
+
+// ClaimAccumulatorClaimsKey returns the Redis key for accumulated claims SET (M5.1.1).
+// This SET contains claim IDs that have been accumulated into a batch.
+// Pattern: holt:{instance_name}:claim-accumulator:{ancestor_id}:{role}:claims
+func ClaimAccumulatorClaimsKey(instanceName, ancestorID, role string) string {
+	return fmt.Sprintf("holt:%s:claim-accumulator:%s:%s:claims", instanceName, ancestorID, role)
 }

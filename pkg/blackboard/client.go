@@ -2,8 +2,6 @@ package blackboard
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1225,90 +1223,10 @@ func (c *Client) GetDescendants(ctx context.Context, ancestorID string, maxDepth
 	return descendants, nil
 }
 
-// AcquireSyncLock attempts to acquire a synchronization deduplication lock.
-// M5.1: Used by Synchronizers to prevent duplicate bids when multiple workers
-// complete simultaneously.
-//
-// Parameters:
-//   - ancestorID: The ID of the ancestor artefact being synchronized on
-//   - agentRole: The agent role attempting to acquire the lock
-//
-// Returns:
-//   - true if lock acquired successfully
-//   - false if lock already held by another worker (deduplication)
-//   - error if Redis operation fails
-//
-// Implementation notes:
-//   - Uses SET NX EX for atomic lock acquisition with TTL
-//   - Lock TTL: 10 minutes (600 seconds)
-//   - Lock is NEVER explicitly released (TTL handles cleanup)
-//   - Agent role is SHA-256 hashed for key construction
-func (c *Client) AcquireSyncLock(ctx context.Context, ancestorID, agentRole string) (bool, error) {
-	// Hash agent role for lock key (first 8 chars of hex digest)
-	hash := sha256.Sum256([]byte(agentRole))
-	roleHash := hex.EncodeToString(hash[:])[:8]
-
-	lockKey := SyncDedupLockKey(c.instanceName, ancestorID, roleHash)
-
-	// SET NX EX 600 (10 minutes)
-	result, err := c.rdb.SetNX(ctx, lockKey, "1", 10*time.Minute).Result()
-	if err != nil {
-		return false, fmt.Errorf("failed to acquire sync lock: %w", err)
-	}
-
-	return result, nil
-}
-
-// CheckSyncLock checks if a synchronization deduplication lock is currently held.
-// M5.1: Non-destructive check used by synchronizers to peek at lock status without acquiring it.
-//
-// Returns:
-//   - true if the lock is held
-//   - false if the lock is not held
-//   - error if the check fails
-func (c *Client) CheckSyncLock(ctx context.Context, ancestorID, agentRole string) (bool, error) {
-	// Hash agent role for lock key
-	hash := sha256.Sum256([]byte(agentRole))
-	roleHash := hex.EncodeToString(hash[:])[:8]
-
-	lockKey := SyncDedupLockKey(c.instanceName, ancestorID, roleHash)
-
-	// GET key. If exists -> locked.
-	val, err := c.rdb.Get(ctx, lockKey).Result()
-	if err == redis.Nil {
-		return false, nil // Not locked
-	}
-	if err != nil {
-		return false, fmt.Errorf("failed to check sync lock: %w", err)
-	}
-
-	return val == "1", nil
-}
-
-// ReleaseSyncLock releases a synchronization deduplication lock.
-// M5.2: Called after work completion to allow other workers to process the ancestor.
-//
-// Parameters:
-//   - ancestorID: The ID of the ancestor artefact
-//   - agentRole: The agent role that acquired the lock
-//
-// Returns:
-//   - error if Redis operation fails
-func (c *Client) ReleaseSyncLock(ctx context.Context, ancestorID, agentRole string) error {
-	// Hash agent role for lock key (must match AcquireSyncLock)
-	hash := sha256.Sum256([]byte(agentRole))
-	roleHash := hex.EncodeToString(hash[:])[:8]
-
-	lockKey := SyncDedupLockKey(c.instanceName, ancestorID, roleHash)
-
-	// DELETE key to release lock
-	err := c.rdb.Del(ctx, lockKey).Err()
-	if err != nil {
-		return fmt.Errorf("failed to release sync lock: %w", err)
-	}
-
-	return nil
-}
+// REMOVED M5.1.1: Client-side locking methods (AcquireSyncLock, CheckSyncLock, ReleaseSyncLock)
+// have been deleted as part of the architectural transition to Orchestrator-driven accumulation.
+// The merge phase now uses kernel-managed coordination via the accumulator Lua script.
+// See: ExecuteAccumulatorScript(), GetAccumulatedClaims(), UpdateAccumulatorStatus()
 
 // IsHashMismatchError checks if an error is a HashMismatchError and optionally extracts it.
 // M4.6 Phase 4: Used by CLI verify command to distinguish hash mismatches from other errors.
@@ -1563,6 +1481,107 @@ func (c *Client) UnlockGlobalLockdown(ctx context.Context, overrideAlert Securit
 	}
 
 	return nil
+}
+
+// ExecuteAccumulatorScript atomically adds a claim to the merge accumulator and checks completion.
+// M5.1.1: Orchestrator-driven batch synchronization using deterministic Fan-In Claim IDs.
+//
+// Returns:
+//   - (true, nil) if batch is complete (triggers Fan-In grant)
+//   - (false, nil) if still accumulating
+//   - (false, err) if script execution fails
+//
+// Parameters:
+//   - ancestorID: The common ancestor artefact ID
+//   - role: Agent role name (for accumulator key)
+//   - claimID: Claim ID being accumulated
+//   - batchSize: Expected count (e.g., "15")
+//   - targetType: Type being accumulated (e.g., "HPOMappingResult")
+func (c *Client) ExecuteAccumulatorScript(ctx context.Context, ancestorID, role, claimID, batchSize, targetType string) (bool, error) {
+	script := redis.NewScript(accumulatorAddAndCheckScript)
+
+	key := ClaimAccumulatorKey(c.instanceName, ancestorID, role)
+
+	result, err := script.Run(ctx, c.rdb,
+		[]string{key},
+		claimID,
+		batchSize,
+		ancestorID, // merge_ancestor
+		targetType,
+		role, // claimer
+	).Result()
+
+	if err != nil {
+		return false, fmt.Errorf("accumulator script failed: %w", err)
+	}
+
+	// Result is 1 if batch complete, 0 if accumulating
+	complete := result.(int64) == 1
+	return complete, nil
+}
+
+// GetAccumulatedClaims retrieves all claim IDs that have been accumulated for a batch.
+// M5.1.1: Used by Orchestrator to fetch accumulated claims when granting Fan-In Claim.
+//
+// Returns empty slice if accumulator doesn't exist or has no claims yet.
+func (c *Client) GetAccumulatedClaims(ctx context.Context, ancestorID, role string) ([]string, error) {
+	key := ClaimAccumulatorClaimsKey(c.instanceName, ancestorID, role)
+
+	members, err := c.rdb.SMembers(ctx, key).Result()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get accumulated claims: %w", err)
+	}
+
+	return members, nil
+}
+
+// UpdateAccumulatorStatus updates the status field of an accumulator.
+// M5.1.1: Used by Orchestrator to mark accumulator as "granted" or "complete".
+//
+// Valid status values: "accumulating", "granted", "complete"
+func (c *Client) UpdateAccumulatorStatus(ctx context.Context, ancestorID, role, status string) error {
+	key := ClaimAccumulatorKey(c.instanceName, ancestorID, role)
+
+	// Set granted_at_ms timestamp if transitioning to granted
+	if status == "granted" {
+		nowMs := time.Now().UnixMilli()
+		if err := c.rdb.HSet(ctx, key, "granted_at_ms", nowMs).Err(); err != nil {
+			return fmt.Errorf("failed to set granted_at_ms: %w", err)
+		}
+	}
+
+	// Set completed_at_ms timestamp if transitioning to complete
+	if status == "complete" {
+		nowMs := time.Now().UnixMilli()
+		if err := c.rdb.HSet(ctx, key, "completed_at_ms", nowMs).Err(); err != nil {
+			return fmt.Errorf("failed to set completed_at_ms: %w", err)
+		}
+	}
+
+	// Update status field
+	if err := c.rdb.HSet(ctx, key, "status", status).Err(); err != nil {
+		return fmt.Errorf("failed to update accumulator status: %w", err)
+	}
+
+	return nil
+}
+
+// GetAccumulatorFanInClaimID retrieves the deterministic Fan-In Claim ID for an accumulator.
+// M5.1.1: The Fan-In Claim ID is generated by the Lua script and stored in the accumulator.
+//
+// Returns empty string if accumulator doesn't exist.
+func (c *Client) GetAccumulatorFanInClaimID(ctx context.Context, ancestorID, role string) (string, error) {
+	key := ClaimAccumulatorKey(c.instanceName, ancestorID, role)
+
+	fanInClaimID, err := c.rdb.HGet(ctx, key, "id").Result()
+	if err == redis.Nil {
+		return "", nil // Accumulator doesn't exist
+	}
+	if err != nil {
+		return "", fmt.Errorf("failed to get Fan-In Claim ID: %w", err)
+	}
+
+	return fanInClaimID, nil
 }
 
 // keepAliveInterval is the interval between PINGs to keep the connection alive.

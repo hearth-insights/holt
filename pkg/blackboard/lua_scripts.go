@@ -102,3 +102,69 @@ redis.call('PUBLISH', events_channel, artefact_json)
 
 return artefact_id
 `
+
+// accumulatorAddAndCheckScript atomically adds a claim to the merge accumulator and checks completion.
+// M5.1.1: Fan-In Accumulator pattern - Orchestrator-driven batch synchronization.
+//
+// This script implements the core merge phase accumulation logic:
+// 1. Create accumulator Hash if first claim (with deterministic Fan-In Claim ID)
+// 2. Add claim ID to accumulated set (idempotent via SADD)
+// 3. Check if batch is complete (count == batch_size)
+// 4. Return completion status
+//
+// KEYS:
+//   [1] accumulator_key - holt:{inst}:claim-accumulator:{ancestor_id}:{role}
+//
+// ARGV:
+//   [1] claim_id        - UUID of claim being accumulated
+//   [2] batch_size      - Expected count (string, e.g., "15")
+//   [3] merge_ancestor  - Ancestor artefact ID
+//   [4] target_type     - Type being accumulated (e.g., "HPOMappingResult")
+//   [5] claimer         - Agent role name
+//
+// Returns:
+//   1 - BATCH_COMPLETE (triggers grant)
+//   0 - ACCUMULATING (current count returned for logging)
+//
+// CRITICAL: This script MUST be atomic to prevent duplicate Fan-In Claims.
+// Multiple concurrent merge bids for same batch must execute serially.
+const accumulatorAddAndCheckScript = `
+-- Extract arguments
+local key = KEYS[1]
+local claim_id = ARGV[1]
+local batch_size = tonumber(ARGV[2])
+local merge_ancestor = ARGV[3]
+local target_type = ARGV[4]
+local claimer = ARGV[5]
+
+-- Check if accumulator exists
+local exists = redis.call('EXISTS', key)
+
+if exists == 0 then
+    -- First claim: Initialize accumulator Hash
+    -- Generate deterministic Fan-In Claim ID: fanin:{ancestor}:{role}
+    local fanin_claim_id = 'fanin:' .. merge_ancestor .. ':' .. claimer
+    local now_ms = redis.call('TIME')[1] .. string.sub(redis.call('TIME')[2] .. '000', 1, 3)
+
+    redis.call('HSET', key, 'id', fanin_claim_id)
+    redis.call('HSET', key, 'status', 'accumulating')
+    redis.call('HSET', key, 'claimer', claimer)
+    redis.call('HSET', key, 'merge_ancestor', merge_ancestor)
+    redis.call('HSET', key, 'batch_size', batch_size)
+    redis.call('HSET', key, 'target_type', target_type)
+    redis.call('HSET', key, 'created_at_ms', now_ms)
+end
+
+-- Add claim to accumulated set (idempotent - SADD won't duplicate)
+redis.call('SADD', key .. ':claims', claim_id)
+
+-- Get current count
+local count = redis.call('SCARD', key .. ':claims')
+
+-- Check if batch complete
+if count == batch_size then
+    return 1  -- BATCH_COMPLETE
+else
+    return 0  -- ACCUMULATING
+end
+`

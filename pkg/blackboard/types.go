@@ -195,6 +195,9 @@ const (
 	// BidTypeExclusive indicates the agent wants exclusive access to the artefact
 	BidTypeExclusive BidType = "exclusive"
 
+	// BidTypeMerge indicates the agent wants to be notified when N claims accumulate (M5.1.1)
+	BidTypeMerge BidType = "merge"
+
 	// BidTypeIgnore indicates the agent has no interest in the artefact
 	BidTypeIgnore BidType = "ignore"
 )
@@ -203,9 +206,10 @@ const (
 // Note: In Redis, bids are stored as a hash where key=agent_name, value=bid_type.
 // This struct is for in-memory representation.
 type Bid struct {
-	AgentName   string  `json:"agent_name"`   // Logical name of the agent
-	BidType     BidType `json:"bid_type"`     // Type of bid submitted
-	TimestampMs int64   `json:"timestamp_ms"` // Unix timestamp in milliseconds when bid was submitted
+	AgentName   string            `json:"agent_name"`   // Logical name of the agent
+	BidType     BidType           `json:"bid_type"`     // Type of bid submitted
+	TimestampMs int64             `json:"timestamp_ms"` // Unix timestamp in milliseconds when bid was submitted
+	Metadata    map[string]string `json:"metadata,omitempty"` // M5.1.1: For merge bids (ancestor_id, batch_size, target_type)
 }
 
 // PhaseState represents persisted phase execution state for restart resilience (M3.5).
@@ -271,7 +275,7 @@ func (cs ClaimStatus) Validate() error {
 // Validate checks if the BidType is a valid enum value.
 func (bt BidType) Validate() error {
 	switch bt {
-	case BidTypeReview, BidTypeParallel, BidTypeExclusive, BidTypeIgnore:
+	case BidTypeReview, BidTypeParallel, BidTypeExclusive, BidTypeMerge, BidTypeIgnore:
 		return nil
 	default:
 		return fmt.Errorf("unknown bid type: %q", bt)

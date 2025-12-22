@@ -51,32 +51,9 @@ func (e *Engine) executeWork(ctx context.Context, claim *blackboard.Claim) {
 	log.Printf("[INFO] Fetched target artefact: artefact_id=%s type=%s",
 		targetArtefact.ID, targetArtefact.Header.Type)
 
-	// M5.2: Acquire synchronization lock if synchronizer configured
-	// This prevents multiple workers from processing the same ancestor simultaneously
-	var syncLockAncestorID string
-	if e.synchronizer != nil {
-		ancestorID, acquired, err := e.synchronizer.AcquireWorkLock(ctx, targetArtefact)
-		if err != nil {
-			log.Printf("[ERROR] Failed to acquire work lock: %v", err)
-			e.createFailureArtefact(ctx, claim, -1, "", "", fmt.Sprintf("Failed to acquire work lock: %v", err))
-			e.createTerminalArtefact(ctx, claim, 0)
-			return
-		}
-		if !acquired {
-			// Another worker is already processing this ancestor - skip work
-			log.Printf("[INFO] Work lock already held for ancestor, another worker is processing. Creating Terminal without executing tool.")
-			e.createTerminalArtefact(ctx, claim, 0)
-			return
-		}
-		syncLockAncestorID = ancestorID
-
-		// Ensure lock is released on all exit paths
-		defer func() {
-			if err := e.synchronizer.ReleaseWorkLock(ctx, syncLockAncestorID); err != nil {
-				log.Printf("[WARN] Failed to release work lock: %v", err)
-			}
-		}()
-	}
+	// M5.1.1: Work lock acquisition removed
+	// Old M5.1 approach: Acquire/release locks to prevent duplicate processing
+	// New M5.1.1 approach: Orchestrator manages accumulation, no client-side locking needed
 
 	// Prepare tool input with context assembly
 	inputJSON, err := e.prepareToolInput(ctx, claim, targetArtefact)

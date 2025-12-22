@@ -1757,60 +1757,6 @@ func TestGetDescendants_NoChildren(t *testing.T) {
 	assert.Empty(t, descendants)
 }
 
-// M5.1: Test AcquireSyncLock success
-func TestAcquireSyncLock_Success(t *testing.T) {
-	client, _ := setupTestClient(t)
-	ctx := context.Background()
-
-	// First acquisition should succeed
-	acquired, err := client.AcquireSyncLock(ctx, "ancestor-123", "Deployer")
-	require.NoError(t, err)
-	assert.True(t, acquired)
-}
-
-// M5.1: Test AcquireSyncLock failure (already held)
-func TestAcquireSyncLock_AlreadyHeld(t *testing.T) {
-	client, _ := setupTestClient(t)
-	ctx := context.Background()
-
-	// First acquisition succeeds
-	acquired1, err := client.AcquireSyncLock(ctx, "ancestor-123", "Deployer")
-	require.NoError(t, err)
-	assert.True(t, acquired1)
-
-	// Second acquisition fails (lock already held)
-	acquired2, err := client.AcquireSyncLock(ctx, "ancestor-123", "Deployer")
-	require.NoError(t, err)
-	assert.False(t, acquired2)
-}
-
-// M5.1: Test AcquireSyncLock with different agent roles
-func TestAcquireSyncLock_DifferentRoles(t *testing.T) {
-	client, _ := setupTestClient(t)
-	ctx := context.Background()
-
-	// Different roles get different locks
-	acquired1, err := client.AcquireSyncLock(ctx, "ancestor-123", "Deployer")
-	require.NoError(t, err)
-	assert.True(t, acquired1)
-
-	// Different role CAN acquire lock on same ancestor (different hash)
-	acquired2, err := client.AcquireSyncLock(ctx, "ancestor-123", "OtherAgent")
-	require.NoError(t, err)
-	assert.True(t, acquired2) // Different role hash
-}
-
-// M5.1: Test AcquireSyncLock with different ancestors
-func TestAcquireSyncLock_DifferentAncestors(t *testing.T) {
-	client, _ := setupTestClient(t)
-	ctx := context.Background()
-
-	// Same role, different ancestors
-	acquired1, err := client.AcquireSyncLock(ctx, "ancestor-123", "Deployer")
-	require.NoError(t, err)
-	assert.True(t, acquired1)
-
-	acquired2, err := client.AcquireSyncLock(ctx, "ancestor-456", "Deployer")
-	require.NoError(t, err)
-	assert.True(t, acquired2) // Different ancestor
-}
+// REMOVED M5.1.1: Tests for AcquireSyncLock, ReleaseSyncLock, and CheckSyncLock
+// have been deleted along with the methods themselves. The new merge phase uses
+// Orchestrator-driven accumulation via Lua scripts. See: accumulator_test.go
