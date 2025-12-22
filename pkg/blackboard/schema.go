@@ -110,8 +110,23 @@ func ClaimAccumulatorKey(instanceName, ancestorID, role string) string {
 	return fmt.Sprintf("holt:%s:claim-accumulator:%s:%s", instanceName, ancestorID, role)
 }
 
+// ClaimAccumulatorCountKey returns the Redis key for COUNT mode accumulated claims SET (M5.1.1).
+// This SET contains claim IDs that have been accumulated in COUNT mode (Producer-Declared pattern).
+// Pattern: holt:{instance_name}:claim-accumulator:{ancestor_id}:{role}:count
+func ClaimAccumulatorCountKey(instanceName, ancestorID, role string) string {
+	return fmt.Sprintf("holt:%s:claim-accumulator:%s:%s:count", instanceName, ancestorID, role)
+}
+
+// ClaimAccumulatorTypesKey returns the Redis key for TYPES mode accumulated types HASH (M5.1.1).
+// This HASH maps artefact type -> claim ID for TYPES mode (Named pattern).
+// Pattern: holt:{instance_name}:claim-accumulator:{ancestor_id}:{role}:types
+func ClaimAccumulatorTypesKey(instanceName, ancestorID, role string) string {
+	return fmt.Sprintf("holt:%s:claim-accumulator:%s:%s:types", instanceName, ancestorID, role)
+}
+
 // ClaimAccumulatorClaimsKey returns the Redis key for accumulated claims SET (M5.1.1).
-// This SET contains claim IDs that have been accumulated into a batch.
+// DEPRECATED: Use ClaimAccumulatorCountKey or ClaimAccumulatorTypesKey instead.
+// This function is kept for backward compatibility but should not be used in new code.
 // Pattern: holt:{instance_name}:claim-accumulator:{ancestor_id}:{role}:claims
 func ClaimAccumulatorClaimsKey(instanceName, ancestorID, role string) string {
 	return fmt.Sprintf("holt:%s:claim-accumulator:%s:%s:claims", instanceName, ancestorID, role)

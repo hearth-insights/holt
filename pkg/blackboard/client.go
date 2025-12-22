@@ -1486,53 +1486,96 @@ func (c *Client) UnlockGlobalLockdown(ctx context.Context, overrideAlert Securit
 // ExecuteAccumulatorScript atomically adds a claim to the merge accumulator and checks completion.
 // M5.1.1: Orchestrator-driven batch synchronization using deterministic Fan-In Claim IDs.
 //
+// REFACTORED: Supports BOTH COUNT mode (Producer-Declared) and TYPES mode (Named pattern).
+//
 // Returns:
-//   - (true, nil) if batch is complete (triggers Fan-In grant)
-//   - (false, nil) if still accumulating
-//   - (false, err) if script execution fails
+//   - (true, false, nil) if batch/set is complete (triggers Fan-In grant)
+//   - (false, false, nil) if still accumulating
+//   - (false, true, nil) if duplicate type detected in TYPES mode (ERROR)
+//   - (false, false, err) if script execution fails
 //
 // Parameters:
 //   - ancestorID: The common ancestor artefact ID
 //   - role: Agent role name (for accumulator key)
 //   - claimID: Claim ID being accumulated
-//   - batchSize: Expected count (e.g., "15")
-//   - targetType: Type being accumulated (e.g., "HPOMappingResult")
-func (c *Client) ExecuteAccumulatorScript(ctx context.Context, ancestorID, role, claimID, batchSize, targetType string) (bool, error) {
+//   - mode: "count" or "types"
+//   - expectedCount: Expected count (e.g., "15")
+//   - currentArtefactType: Type of the claim being accumulated (e.g., "TestResult")
+//   - expectedTypesJSON: JSON array of expected types (only for TYPES mode, empty for COUNT)
+func (c *Client) ExecuteAccumulatorScript(ctx context.Context, ancestorID, role, claimID, mode, expectedCount, currentArtefactType, expectedTypesJSON string) (complete bool, duplicate bool, err error) {
 	script := redis.NewScript(accumulatorAddAndCheckScript)
 
 	key := ClaimAccumulatorKey(c.instanceName, ancestorID, role)
 
-	result, err := script.Run(ctx, c.rdb,
+	result, execErr := script.Run(ctx, c.rdb,
 		[]string{key},
 		claimID,
-		batchSize,
-		ancestorID, // merge_ancestor
-		targetType,
-		role, // claimer
+		mode,
+		expectedCount,
+		ancestorID,          // merge_ancestor
+		currentArtefactType, // current_artefact_type
+		role,                // claimer
+		expectedTypesJSON,   // expected_types_json
 	).Result()
 
-	if err != nil {
-		return false, fmt.Errorf("accumulator script failed: %w", err)
+	if execErr != nil {
+		return false, false, fmt.Errorf("accumulator script failed: %w", execErr)
 	}
 
-	// Result is 1 if batch complete, 0 if accumulating
-	complete := result.(int64) == 1
-	return complete, nil
+	// Parse return code
+	resultCode := result.(int64)
+	switch resultCode {
+	case 1:
+		return true, false, nil // Complete
+	case 0:
+		return false, false, nil // Accumulating
+	case -1:
+		return false, true, nil // Duplicate type error
+	default:
+		return false, false, fmt.Errorf("unexpected result code: %d", resultCode)
+	}
 }
 
 // GetAccumulatedClaims retrieves all claim IDs that have been accumulated for a batch.
 // M5.1.1: Used by Orchestrator to fetch accumulated claims when granting Fan-In Claim.
 //
+// REFACTORED: Supports both COUNT mode (:count SET) and TYPES mode (:types HASH).
+//
 // Returns empty slice if accumulator doesn't exist or has no claims yet.
 func (c *Client) GetAccumulatedClaims(ctx context.Context, ancestorID, role string) ([]string, error) {
-	key := ClaimAccumulatorClaimsKey(c.instanceName, ancestorID, role)
+	key := ClaimAccumulatorKey(c.instanceName, ancestorID, role)
 
-	members, err := c.rdb.SMembers(ctx, key).Result()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get accumulated claims: %w", err)
+	// First, determine the mode by reading from accumulator Hash
+	mode, err := c.rdb.HGet(ctx, key, "mode").Result()
+	if err == redis.Nil {
+		// Accumulator doesn't exist yet
+		return []string{}, nil
+	} else if err != nil {
+		return nil, fmt.Errorf("failed to get accumulator mode: %w", err)
 	}
 
-	return members, nil
+	// Fetch claims based on mode
+	if mode == "count" {
+		// COUNT mode: Read from :count SET
+		countKey := ClaimAccumulatorCountKey(c.instanceName, ancestorID, role)
+		members, err := c.rdb.SMembers(ctx, countKey).Result()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get accumulated claims (count mode): %w", err)
+		}
+		return members, nil
+
+	} else if mode == "types" {
+		// TYPES mode: Read from :types HASH (get all values, which are claim IDs)
+		typesKey := ClaimAccumulatorTypesKey(c.instanceName, ancestorID, role)
+		claimIDs, err := c.rdb.HVals(ctx, typesKey).Result()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get accumulated claims (types mode): %w", err)
+		}
+		return claimIDs, nil
+
+	} else {
+		return nil, fmt.Errorf("unknown accumulator mode: %s", mode)
+	}
 }
 
 // UpdateAccumulatorStatus updates the status field of an accumulator.

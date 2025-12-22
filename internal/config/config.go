@@ -314,6 +314,23 @@ func (a *Agent) Validate(name string) error {
 			return fmt.Errorf("agent '%s': count_from_metadata pattern requires exactly ONE wait_for condition (found %d)", name, len(a.Synchronize.WaitFor))
 		}
 
+		// M5.1.1 REFACTOR: Validate single wait_for without count_from_metadata is invalid (not a fan-in)
+		if len(a.Synchronize.WaitFor) == 1 && !hasCountFromMetadata {
+			return fmt.Errorf("agent '%s': single wait_for without count_from_metadata is not a valid merge (not a fan-in pattern)", name)
+		}
+
+		// M5.1.1 REFACTOR: Validate no duplicate types in TYPES mode
+		if !hasCountFromMetadata && len(a.Synchronize.WaitFor) > 1 {
+			// TYPES mode - check for duplicate types
+			typesSeen := make(map[string]bool)
+			for _, condition := range a.Synchronize.WaitFor {
+				if typesSeen[condition.Type] {
+					return fmt.Errorf("agent '%s': duplicate type '%s' in wait_for (TYPES mode requires distinct types)", name, condition.Type)
+				}
+				typesSeen[condition.Type] = true
+			}
+		}
+
 		// Validate max_depth (must be non-negative)
 		if a.Synchronize.MaxDepth < 0 {
 			return fmt.Errorf("agent '%s': synchronize max_depth must be >= 0", name)

@@ -106,25 +106,30 @@ return artefact_id
 // accumulatorAddAndCheckScript atomically adds a claim to the merge accumulator and checks completion.
 // M5.1.1: Fan-In Accumulator pattern - Orchestrator-driven batch synchronization.
 //
+// REFACTORED: Supports BOTH COUNT mode (Producer-Declared) and TYPES mode (Named pattern).
+//
 // This script implements the core merge phase accumulation logic:
 // 1. Create accumulator Hash if first claim (with deterministic Fan-In Claim ID)
-// 2. Add claim ID to accumulated set (idempotent via SADD)
-// 3. Check if batch is complete (count == batch_size)
-// 4. Return completion status
+// 2. Add claim ID to mode-specific data structure (COUNT: SET, TYPES: HASH)
+// 3. Check if batch/set is complete
+// 4. Return completion status (or error for duplicate types)
 //
 // KEYS:
 //   [1] accumulator_key - holt:{inst}:claim-accumulator:{ancestor_id}:{role}
 //
 // ARGV:
-//   [1] claim_id        - UUID of claim being accumulated
-//   [2] batch_size      - Expected count (string, e.g., "15")
-//   [3] merge_ancestor  - Ancestor artefact ID
-//   [4] target_type     - Type being accumulated (e.g., "HPOMappingResult")
-//   [5] claimer         - Agent role name
+//   [1] claim_id              - UUID of claim being accumulated
+//   [2] mode                  - "count" or "types"
+//   [3] expected_count        - Expected count (string, e.g., "15")
+//   [4] merge_ancestor        - Ancestor artefact ID
+//   [5] current_artefact_type - Type of the claim being accumulated (e.g., "TestResult")
+//   [6] claimer               - Agent role name
+//   [7] expected_types_json   - JSON array of expected types (only for TYPES mode, e.g., '["Test","Lint"]')
 //
 // Returns:
-//   1 - BATCH_COMPLETE (triggers grant)
-//   0 - ACCUMULATING (current count returned for logging)
+//    1 - COMPLETE (triggers grant)
+//    0 - ACCUMULATING (still waiting)
+//   -1 - ERROR (duplicate type in TYPES mode)
 //
 // CRITICAL: This script MUST be atomic to prevent duplicate Fan-In Claims.
 // Multiple concurrent merge bids for same batch must execute serially.
@@ -132,10 +137,12 @@ const accumulatorAddAndCheckScript = `
 -- Extract arguments
 local key = KEYS[1]
 local claim_id = ARGV[1]
-local batch_size = tonumber(ARGV[2])
-local merge_ancestor = ARGV[3]
-local target_type = ARGV[4]
-local claimer = ARGV[5]
+local mode = ARGV[2]
+local expected_count = tonumber(ARGV[3])
+local merge_ancestor = ARGV[4]
+local current_artefact_type = ARGV[5]
+local claimer = ARGV[6]
+local expected_types_json = ARGV[7]
 
 -- Check if accumulator exists
 local exists = redis.call('EXISTS', key)
@@ -148,23 +155,56 @@ if exists == 0 then
 
     redis.call('HSET', key, 'id', fanin_claim_id)
     redis.call('HSET', key, 'status', 'accumulating')
+    redis.call('HSET', key, 'mode', mode)
     redis.call('HSET', key, 'claimer', claimer)
     redis.call('HSET', key, 'merge_ancestor', merge_ancestor)
-    redis.call('HSET', key, 'batch_size', batch_size)
-    redis.call('HSET', key, 'target_type', target_type)
+    redis.call('HSET', key, 'expected_count', expected_count)
+
+    -- Mode-specific metadata
+    if mode == 'count' then
+        redis.call('HSET', key, 'target_type', current_artefact_type)
+    elseif mode == 'types' then
+        redis.call('HSET', key, 'expected_types', expected_types_json)
+    end
+
     redis.call('HSET', key, 'created_at_ms', now_ms)
 end
 
--- Add claim to accumulated set (idempotent - SADD won't duplicate)
-redis.call('SADD', key .. ':claims', claim_id)
+-- Mode-specific accumulation logic
+if mode == 'count' then
+    -- COUNT MODE: Track claims in SET
+    local count_key = key .. ':count'
+    redis.call('SADD', count_key, claim_id)
+    local count = redis.call('SCARD', count_key)
 
--- Get current count
-local count = redis.call('SCARD', key .. ':claims')
+    if count == expected_count then
+        return 1  -- BATCH_COMPLETE
+    else
+        return 0  -- ACCUMULATING
+    end
 
--- Check if batch complete
-if count == batch_size then
-    return 1  -- BATCH_COMPLETE
-else
-    return 0  -- ACCUMULATING
+elseif mode == 'types' then
+    -- TYPES MODE: Track unique types in HASH
+    local types_key = key .. ':types'
+
+    -- Check for duplicate type (STRICT VALIDATION)
+    if redis.call('HEXISTS', types_key, current_artefact_type) == 1 then
+        return -1  -- ERROR: Duplicate type detected
+    end
+
+    -- Add type -> claim_id mapping
+    redis.call('HSET', types_key, current_artefact_type, claim_id)
+
+    -- Check if all expected types present
+    local type_count = redis.call('HLEN', types_key)
+
+    if type_count == expected_count then
+        return 1  -- SET_COMPLETE
+    else
+        return 0  -- ACCUMULATING
+    end
 end
+
+-- Should never reach here (invalid mode)
+return -1
 `

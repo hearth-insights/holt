@@ -62,6 +62,38 @@ func TestAgent_Validate_Synchronize(t *testing.T) {
 			errorContains: "count_from_metadata pattern requires exactly ONE wait_for condition",
 		},
 		{
+			name: "INVALID: single wait_for without count_from_metadata (not a fan-in)",
+			agent: Agent{
+				Image:   "test:latest",
+				Command: []string{"/app/run.sh"},
+				Synchronize: &SynchronizeConfig{
+					AncestorType: "CodeCommit",
+					WaitFor: []WaitCondition{
+						{Type: "TestResult"}, // Only one type, no count_from_metadata
+					},
+				},
+			},
+			expectError:   true,
+			errorContains: "single wait_for without count_from_metadata is not a valid merge",
+		},
+		{
+			name: "INVALID: duplicate types in TYPES mode",
+			agent: Agent{
+				Image:   "test:latest",
+				Command: []string{"/app/run.sh"},
+				Synchronize: &SynchronizeConfig{
+					AncestorType: "CodeCommit",
+					WaitFor: []WaitCondition{
+						{Type: "TestResult"},
+						{Type: "LintResult"},
+						{Type: "TestResult"}, // DUPLICATE!
+					},
+				},
+			},
+			expectError:   true,
+			errorContains: "duplicate type 'TestResult' in wait_for",
+		},
+		{
 			name: "valid synchronize with max_depth=0 (unlimited)",
 			agent: Agent{
 				Image:   "test:latest",
@@ -70,6 +102,7 @@ func TestAgent_Validate_Synchronize(t *testing.T) {
 					AncestorType: "CodeCommit",
 					WaitFor: []WaitCondition{
 						{Type: "TestResult"},
+						{Type: "LintResult"}, // TYPES mode requires 2+ types
 					},
 					MaxDepth: 0, // Unlimited depth
 				},
@@ -85,6 +118,7 @@ func TestAgent_Validate_Synchronize(t *testing.T) {
 					AncestorType: "CodeCommit",
 					WaitFor: []WaitCondition{
 						{Type: "TestResult"},
+						{Type: "LintResult"}, // TYPES mode requires 2+ types
 					},
 					MaxDepth: 5,
 				},
@@ -179,7 +213,7 @@ func TestAgent_Validate_Synchronize(t *testing.T) {
 				Synchronize: &SynchronizeConfig{
 					AncestorType: "CodeCommit",
 					WaitFor: []WaitCondition{
-						{Type: "TestResult"},
+						{Type: "TestResult", CountFromMetadata: "count"}, // M5.1.1 REFACTOR: Use COUNT mode to pass single wait_for check
 					},
 					MaxDepth: -5, // Invalid!
 				},
@@ -225,20 +259,21 @@ func TestAgent_Validate_Synchronize(t *testing.T) {
 // TestAgent_Validate_Synchronize_EdgeCases tests edge cases for synchronize validation
 func TestAgent_Validate_Synchronize_EdgeCases(t *testing.T) {
 	t.Run("single wait_for condition", func(t *testing.T) {
+		// M5.1.1 REFACTOR: Single wait_for requires count_from_metadata (COUNT mode)
 		agent := Agent{
 			Image:   "test:latest",
 			Command: []string{"/app/run.sh"},
 			Synchronize: &SynchronizeConfig{
 				AncestorType: "CodeCommit",
 				WaitFor: []WaitCondition{
-					{Type: "TestResult"}, // Just one condition
+					{Type: "TestResult", CountFromMetadata: "batch_size"}, // COUNT mode
 				},
 			},
 		}
 
 		err := agent.Validate("test-agent")
 		if err != nil {
-			t.Errorf("Single wait_for should be valid, got error: %v", err)
+			t.Errorf("Single wait_for with count_from_metadata should be valid, got error: %v", err)
 		}
 	})
 
@@ -270,13 +305,15 @@ func TestAgent_Validate_Synchronize_EdgeCases(t *testing.T) {
 	})
 
 	t.Run("count_from_metadata can be empty for Named pattern", func(t *testing.T) {
+		// M5.1.1 REFACTOR: TYPES mode (Named pattern) requires 2+ types
 		agent := Agent{
 			Image:   "test:latest",
 			Command: []string{"/app/run.sh"},
 			Synchronize: &SynchronizeConfig{
 				AncestorType: "CodeCommit",
 				WaitFor: []WaitCondition{
-					{Type: "TestResult", CountFromMetadata: ""}, // Empty is valid (Named pattern)
+					{Type: "TestResult", CountFromMetadata: ""},  // Empty is valid for TYPES mode
+					{Type: "LintResult", CountFromMetadata: ""}, // Need 2+ types for valid TYPES mode
 				},
 			},
 		}
@@ -296,13 +333,14 @@ func TestAgent_Validate_Synchronize_EdgeCases(t *testing.T) {
 		}
 
 		for _, ancestorType := range testCases {
+			// M5.1.1 REFACTOR: Use COUNT mode (single wait_for with count_from_metadata)
 			agent := Agent{
 				Image:   "test:latest",
 				Command: []string{"/app/run.sh"},
 				Synchronize: &SynchronizeConfig{
 					AncestorType: ancestorType,
 					WaitFor: []WaitCondition{
-						{Type: "SomeType"},
+						{Type: "SomeType", CountFromMetadata: "count"},
 					},
 				},
 			}
@@ -323,13 +361,14 @@ func TestAgent_Validate_Synchronize_EdgeCases(t *testing.T) {
 		}
 
 		for _, waitType := range testCases {
+			// M5.1.1 REFACTOR: Use COUNT mode (single wait_for with count_from_metadata)
 			agent := Agent{
 				Image:   "test:latest",
 				Command: []string{"/app/run.sh"},
 				Synchronize: &SynchronizeConfig{
 					AncestorType: "CodeCommit",
 					WaitFor: []WaitCondition{
-						{Type: waitType},
+						{Type: waitType, CountFromMetadata: "count"},
 					},
 				},
 			}
