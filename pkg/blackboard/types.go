@@ -168,6 +168,9 @@ const (
 	// ClaimStatusPendingExclusive indicates the claim is in the exclusive execution phase
 	ClaimStatusPendingExclusive ClaimStatus = "pending_exclusive"
 
+	// ClaimStatusPendingMerge indicates the claim is in the merge phase (M5.1.1 - Fan-In Accumulator)
+	ClaimStatusPendingMerge ClaimStatus = "pending_merge"
+
 	// ClaimStatusPendingAssignment indicates a feedback claim with pre-assigned agent (M3.3)
 	ClaimStatusPendingAssignment ClaimStatus = "pending_assignment"
 
@@ -264,7 +267,7 @@ func (c *Claim) Validate() error {
 func (cs ClaimStatus) Validate() error {
 	switch cs {
 	case ClaimStatusPendingReview, ClaimStatusPendingParallel,
-		ClaimStatusPendingExclusive, ClaimStatusPendingAssignment,
+		ClaimStatusPendingExclusive, ClaimStatusPendingMerge, ClaimStatusPendingAssignment,
 		ClaimStatusComplete, ClaimStatusTerminated, ClaimStatusDormant:
 		return nil
 	default:

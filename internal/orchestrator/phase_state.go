@@ -54,6 +54,7 @@ func (ps *PhaseState) IsComplete() bool {
 }
 
 // HasBidsForPhase checks if there are any bids of a specific type in AllBids.
+// M5.1.1: Updated to support merge phase
 func HasBidsForPhase(bids map[string]blackboard.BidType, phase string) bool {
 	var bidType blackboard.BidType
 	switch phase {
@@ -63,6 +64,8 @@ func HasBidsForPhase(bids map[string]blackboard.BidType, phase string) bool {
 		bidType = blackboard.BidTypeParallel
 	case "exclusive":
 		bidType = blackboard.BidTypeExclusive
+	case "merge":
+		bidType = blackboard.BidTypeMerge
 	default:
 		return false
 	}
@@ -231,6 +234,7 @@ func (e *Engine) handleWorkerSlotAvailable(ctx context.Context, role string) {
 
 // DetermineInitialPhase determines which phase a claim should start in based on bids.
 // Returns the claim status and the list of agents to grant.
+// M5.1.1: Updated to support merge-only workflows (4th phase).
 func DetermineInitialPhase(bids map[string]blackboard.Bid) (blackboard.ClaimStatus, string) {
 	// Extract bid types for HasBidsForPhase
 	bidTypes := make(map[string]blackboard.BidType)
@@ -241,22 +245,28 @@ func DetermineInitialPhase(bids map[string]blackboard.Bid) (blackboard.ClaimStat
 	hasReviewBids := HasBidsForPhase(bidTypes, "review")
 	hasParallelBids := HasBidsForPhase(bidTypes, "parallel")
 	hasExclusiveBids := HasBidsForPhase(bidTypes, "exclusive")
+	hasMergeBids := HasBidsForPhase(bidTypes, "merge")
 
 	// Debug logging to diagnose phase determination
-	log.Printf("[DEBUG] DetermineInitialPhase: hasReview=%v, hasParallel=%v, hasExclusive=%v, bids=%v",
-		hasReviewBids, hasParallelBids, hasExclusiveBids, bids)
+	log.Printf("[DEBUG] DetermineInitialPhase: hasReview=%v, hasParallel=%v, hasExclusive=%v, hasMerge=%v, bids=%v",
+		hasReviewBids, hasParallelBids, hasExclusiveBids, hasMergeBids, bids)
 
-	// Phase skipping logic
+	// Phase skipping logic (review → parallel → exclusive → merge)
 	if !hasReviewBids {
 		if !hasParallelBids {
-			if hasExclusiveBids {
-				// Skip directly to exclusive
-				log.Printf("[DEBUG] Skipping to exclusive phase")
-				return blackboard.ClaimStatusPendingExclusive, "exclusive"
+			if !hasExclusiveBids {
+				if hasMergeBids {
+					// Skip directly to merge phase (merge-only workflow)
+					log.Printf("[DEBUG] Skipping to merge phase (merge-only workflow)")
+					return blackboard.ClaimStatusPendingMerge, "merge"
+				}
+				// No bids in any phase - claim becomes dormant
+				log.Printf("[DEBUG] No bids in any phase - dormant")
+				return blackboard.ClaimStatusPendingReview, "" // Will be logged as dormant
 			}
-			// No bids in any phase - claim becomes dormant
-			log.Printf("[DEBUG] No bids in any phase - dormant")
-			return blackboard.ClaimStatusPendingReview, "" // Will be logged as dormant
+			// Skip directly to exclusive
+			log.Printf("[DEBUG] Skipping to exclusive phase")
+			return blackboard.ClaimStatusPendingExclusive, "exclusive"
 		}
 		// Skip to parallel
 		log.Printf("[DEBUG] Skipping review, starting with parallel")

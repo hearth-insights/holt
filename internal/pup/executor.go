@@ -163,6 +163,15 @@ func (e *Engine) fetchTargetArtefact(ctx context.Context, claim *blackboard.Clai
 // M3.3: Passes claim to assembleContext for AdditionalContextIDs support.
 // M4.3: Loads Knowledge artefacts and populates context caching fields.
 func (e *Engine) prepareToolInput(ctx context.Context, claim *blackboard.Claim, targetArtefact *blackboard.Artefact) (string, error) {
+	// M5.1.1: Detect Fan-In Claim (merge phase grants)
+	// Fan-In Claim IDs have format: fanin:{ancestor_id}:{role}
+	isFanInClaim := strings.HasPrefix(claim.ID, "fanin:")
+
+	if isFanInClaim {
+		// Handle Fan-In Claim specially (no target artefact, use accumulator data)
+		return e.prepareToolInputForMerge(ctx, claim)
+	}
+
 	// Assemble context chain via BFS traversal with thread tracking
 	// M3.3: Pass claim for feedback claim context support
 	contextChain, err := e.assembleContext(ctx, targetArtefact, claim)
@@ -254,6 +263,123 @@ func (e *Engine) prepareToolInput(ctx context.Context, claim *blackboard.Claim, 
 		LoadedKnowledge:     loadedKnowledge,
 		AncestorArtefact:    ancestorArtefact,    // M5.1
 		DescendantArtefacts: descendantArtefacts, // M5.1
+	}
+
+	jsonBytes, err := json.Marshal(input)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal tool input: %w", err)
+	}
+
+	return string(jsonBytes), nil
+}
+
+// prepareToolInputForMerge creates tool input for Fan-In Claims (M5.1.1 merge phase).
+// Fan-In Claims have deterministic IDs: fanin:{ancestor_id}:{role}
+//
+// Workflow:
+//  1. Parse ancestor_id from claim ID
+//  2. Fetch accumulator to get accumulated claim IDs
+//  3. Fetch ancestor artefact
+//  4. Fetch all artefacts from accumulated claims
+//  5. Filter by wait_for types and deduplicate by LogicalThreadID
+//  6. Build tool input with ancestor + descendants
+//
+// Returns:
+//   - Tool input JSON string
+//   - error if any step fails
+func (e *Engine) prepareToolInputForMerge(ctx context.Context, claim *blackboard.Claim) (string, error) {
+	// Parse Fan-In Claim ID: fanin:{ancestor_id}:{role}
+	parts := strings.Split(claim.ID, ":")
+	if len(parts) != 3 {
+		return "", fmt.Errorf("invalid Fan-In Claim ID format: %s", claim.ID)
+	}
+	ancestorID := parts[1]
+	role := parts[2]
+
+	log.Printf("[Pup/Merge] Preparing Fan-In tool input for ancestor %.16s, role %s", ancestorID, role)
+
+	// Fetch accumulator to get accumulated claim IDs
+	accumulatedClaimIDs, err := e.bbClient.GetAccumulatedClaims(ctx, ancestorID, role)
+	if err != nil {
+		return "", fmt.Errorf("failed to get accumulated claims: %w", err)
+	}
+
+	log.Printf("[Pup/Merge] Found %d accumulated claims", len(accumulatedClaimIDs))
+
+	// Fetch ancestor artefact
+	ancestorArtefact, err := e.bbClient.GetArtefact(ctx, ancestorID)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch ancestor artefact: %w", err)
+	}
+
+	// Fetch all artefacts from accumulated claims
+	var allArtefacts []*blackboard.Artefact
+	for _, claimID := range accumulatedClaimIDs {
+		accClaim, err := e.bbClient.GetClaim(ctx, claimID)
+		if err != nil {
+			log.Printf("[WARN] Failed to fetch accumulated claim %s: %v", claimID, err)
+			continue
+		}
+
+		artefact, err := e.bbClient.GetArtefact(ctx, accClaim.ArtefactID)
+		if err != nil {
+			log.Printf("[WARN] Failed to fetch artefact %s for claim %s: %v", accClaim.ArtefactID, claimID, err)
+			continue
+		}
+
+		allArtefacts = append(allArtefacts, artefact)
+	}
+
+	log.Printf("[Pup/Merge] Fetched %d artefacts from accumulated claims", len(allArtefacts))
+
+	// M5.2: Filter descendants to only include wait_for types
+	// Build waitForTypes map
+	waitForTypes := make(map[string]bool)
+	if e.config.SynchronizeConfig != nil {
+		for _, condition := range e.config.SynchronizeConfig.WaitFor {
+			waitForTypes[condition.Type] = true
+		}
+	}
+
+	// Filter by type and deduplicate by LogicalThreadID (keep latest version)
+	latestByThread := make(map[string]*blackboard.Artefact)
+	for _, artefact := range allArtefacts {
+		if len(waitForTypes) > 0 && !waitForTypes[artefact.Header.Type] {
+			continue // Not a wait_for type, skip
+		}
+
+		threadID := artefact.Header.LogicalThreadID
+		existing, exists := latestByThread[threadID]
+		if !exists || artefact.Header.Version > existing.Header.Version {
+			// First occurrence or newer version - keep it
+			latestByThread[threadID] = artefact
+		}
+	}
+
+	// Convert map to slice
+	filteredArtefacts := make([]*blackboard.Artefact, 0, len(latestByThread))
+	for _, artefact := range latestByThread {
+		filteredArtefacts = append(filteredArtefacts, artefact)
+	}
+
+	// Convert to []interface{} for JSON marshaling
+	descendantArtefacts := make([]interface{}, len(filteredArtefacts))
+	for i, artefact := range filteredArtefacts {
+		descendantArtefacts[i] = artefact
+	}
+
+	log.Printf("[Pup/Merge] Filtered to %d descendants (wait_for types, deduplicated by thread)", len(descendantArtefacts))
+
+	// Build tool input (no target artefact, no context chain for Fan-In Claims)
+	input := &ToolInput{
+		ClaimType:           "merge", // M5.1.1: New claim type for Fan-In Claims
+		TargetArtefact:      nil,     // No target for Fan-In Claims
+		ContextChain:        []interface{}{}, // Empty context chain
+		ContextIsDeclared:   false,
+		KnowledgeBase:       map[string]string{},
+		LoadedKnowledge:     []string{}, // No knowledge for merge claims
+		AncestorArtefact:    ancestorArtefact,
+		DescendantArtefacts: descendantArtefacts,
 	}
 
 	jsonBytes, err := json.Marshal(input)

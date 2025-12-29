@@ -62,19 +62,18 @@ func TestAgent_Validate_Synchronize(t *testing.T) {
 			errorContains: "count_from_metadata pattern requires exactly ONE wait_for condition",
 		},
 		{
-			name: "INVALID: single wait_for without count_from_metadata (not a fan-in)",
+			name: "VALID: single wait_for without count_from_metadata (dependency wait pattern)",
 			agent: Agent{
 				Image:   "test:latest",
 				Command: []string{"/app/run.sh"},
 				Synchronize: &SynchronizeConfig{
 					AncestorType: "CodeCommit",
 					WaitFor: []WaitCondition{
-						{Type: "TestResult"}, // Only one type, no count_from_metadata
+						{Type: "TestResult"}, // Only one type, no count_from_metadata - dependency wait
 					},
 				},
 			},
-			expectError:   true,
-			errorContains: "single wait_for without count_from_metadata is not a valid merge",
+			expectError: false, // M5.1.1: Single wait_for is valid (uses old synchronizer logic, not merge)
 		},
 		{
 			name: "INVALID: duplicate types in TYPES mode",

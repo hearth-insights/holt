@@ -65,6 +65,11 @@ func shouldBidMerge(ctx context.Context, bbClient *blackboard.Client, agentRole 
 		mode = "count"
 	} else if !hasCountFromMetadata && len(syncConfig.WaitFor) > 1 {
 		mode = "types"
+	} else if len(syncConfig.WaitFor) == 1 && !hasCountFromMetadata {
+		// Single wait_for without count = dependency wait pattern, not a merge
+		// Use old synchronizer logic (bid exclusive when ready)
+		log.Printf("[Pup/Merge] Single wait_for detected - dependency wait pattern, not merge")
+		return nil, nil
 	} else {
 		// Invalid config (should have been caught by validation)
 		return nil, fmt.Errorf("invalid synchronize config: cannot determine mode")

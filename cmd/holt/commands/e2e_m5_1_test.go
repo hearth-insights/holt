@@ -346,14 +346,14 @@ orchestrator:
 agents:
   ConcurrentSync:
     image: holt-test-agent:latest
-    command: ["/app/m5_1_concurrent_sync.sh"]
+    command: ["/app/pup", "controller"]
+    mode: controller
     worker:
+      image: holt-test-agent:latest
+      command: ["/app/m5_1_concurrent_sync.sh"]
       workspace:
-        mode: copy
-    inputs:
-      - type: "CodeCommit"
+        mode: rw
     environment:
-      # HOLT_MODE default (traditional) is required for execution
       - "HOLT_LOG_LEVEL=debug"
     synchronize:
       ancestor_type: "CodeCommit"
@@ -361,7 +361,7 @@ agents:
         - type: "TestResult"
         - type: "LintResult"
   DummyConsumer:
-    image: "holt-test-agent:latest" # Use same image as ConcurrentSync
+    image: "holt-test-agent:latest"
     command: ["/app/pup", "controller"]
     bidding_strategy:
       type: "ignore"

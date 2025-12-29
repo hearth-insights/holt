@@ -76,13 +76,27 @@ func (e *Engine) TransitionToNextPhase(ctx context.Context, claim *blackboard.Cl
 		}
 
 	case blackboard.ClaimStatusPendingExclusive:
-		// Exclusive phase complete - do NOT mark claim as complete yet
-		// Claim will complete when agent sends Terminal artefact
-		log.Printf("[Orchestrator] Exclusive phase complete for claim %s, waiting for Terminal artefact", claim.ID)
+		// M5.1.1: Check if merge phase has bids (4th phase - Fan-In Accumulator)
+		if HasBidsForPhase(phaseState.AllBids, "merge") {
+			nextStatus = blackboard.ClaimStatusPendingMerge
+			nextPhase = "merge"
+			log.Printf("[Orchestrator] Exclusive phase complete for claim %s, transitioning to merge phase", claim.ID)
+		} else {
+			// Exclusive phase complete - do NOT mark claim as complete yet
+			// Claim will complete when agent sends Terminal artefact
+			log.Printf("[Orchestrator] Exclusive phase complete for claim %s, waiting for Terminal artefact", claim.ID)
 
-		// Keep the claim in granted_exclusive status and phaseStates
-		// The Terminal artefact handler will mark it complete
-		// Don't delete from phaseStates - needed for Terminal artefact lookup
+			// Keep the claim in granted_exclusive status and phaseStates
+			// The Terminal artefact handler will mark it complete
+			// Don't delete from phaseStates - needed for Terminal artefact lookup
+			return nil
+		}
+
+	case blackboard.ClaimStatusPendingMerge:
+		// M5.1.1: Merge phase complete
+		// Claim completes after merge phase (no Terminal artefact needed for merge-only claims)
+		log.Printf("[Orchestrator] Merge phase complete for claim %s", claim.ID)
+		// Claim was already marked complete by GrantMergePhase
 		return nil
 
 	default:

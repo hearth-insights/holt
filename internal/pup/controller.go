@@ -82,33 +82,45 @@ func RunControllerMode(ctx context.Context, config *Config, bbClient *blackboard
 
 // processClaim handles a single claim for bidding
 func processClaim(ctx context.Context, config *Config, bbClient *blackboard.Client, synchronizer *Synchronizer, claim *blackboard.Claim) {
-	// M5.1: Use synchronizer logic if configured
+	// M5.1.1: Synchronizer mode now ONLY uses merge bidding, not exclusive bidding
+	// The old synchronizer exclusive bidding is deprecated
 	var shouldBid bool
 	var bid blackboard.BidType
 
 	if synchronizer != nil {
-		// Synchronizer mode: Evaluate fan-in conditions
-		// M5.2: Lock acquisition moved to work execution, not bidding
-		decision, err := synchronizer.shouldBidOnClaim(ctx, claim)
-		if err != nil {
-			log.Printf("[Controller] Synchronizer error: %v", err)
-			return // Skip bid on error
-		}
+		// M5.1.1: Check if this is a merge pattern or dependency wait pattern
+		// Merge patterns (COUNT/TYPES) use merge bidding
+		// Dependency wait patterns (single wait_for) use old synchronizer logic
 
-		switch decision {
-		case DecisionBid:
-			shouldBid = true
-			bid = blackboard.BidTypeExclusive
-		case DecisionIgnore:
-			// M5.1: Explicitly bid IGNORE if irrelevant or error occurred
-			shouldBid = true
-			bid = blackboard.BidTypeIgnore
-			log.Printf("[Controller] Synchronizer decided IGNORE for claim %s", claim.ID)
-		default:
-			// Should never happen - all Decision values handled above
-			log.Printf("[Controller] ERROR: Unexpected synchronizer decision: %v", decision)
+		// Try merge bid first to detect pattern type
+		testMergeBid, _ := shouldBidMerge(ctx, bbClient, config.AgentName, claim, config.SynchronizeConfig)
+
+		if testMergeBid != nil {
+			// Merge pattern detected - bid IGNORE, merge bids handled separately
 			shouldBid = true
 			bid = blackboard.BidTypeIgnore
+			log.Printf("[Controller] Merge pattern detected: bidding IGNORE (merge bids handled separately)")
+		} else {
+			// Dependency wait pattern - use old synchronizer logic
+			decision, err := synchronizer.shouldBidOnClaim(ctx, claim)
+			if err != nil {
+				log.Printf("[Controller] Synchronizer error: %v", err)
+				return // Skip bid on error
+			}
+
+			switch decision {
+			case DecisionBid:
+				shouldBid = true
+				bid = blackboard.BidTypeExclusive
+			case DecisionIgnore:
+				shouldBid = true
+				bid = blackboard.BidTypeIgnore
+				log.Printf("[Controller] Synchronizer decided IGNORE for claim %s", claim.ID)
+			default:
+				log.Printf("[Controller] ERROR: Unexpected synchronizer decision: %v", decision)
+				shouldBid = true
+				bid = blackboard.BidTypeIgnore
+			}
 		}
 	} else {
 		// Traditional bidding logic (M4.8)

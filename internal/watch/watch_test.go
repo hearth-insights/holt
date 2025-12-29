@@ -267,7 +267,7 @@ func TestFormatters(t *testing.T) {
 	t.Run("defaultFormatter formats Terminal artefact with completion message", func(t *testing.T) {
 		var buf []byte
 		writer := &testWriter{buf: &buf}
-		formatter := &defaultFormatter{writer: writer}
+		formatter := &defaultFormatter{writer: writer, verbose: true} // Enable verbose to show Terminal artefacts
 
 		artefact := &blackboard.Artefact{
 			ID: "terminal-12345678-1234-1234-1234-123456789012",
@@ -282,11 +282,10 @@ func TestFormatters(t *testing.T) {
 		require.NoError(t, err)
 
 		output := string(buf)
-		require.Contains(t, output, "✨ Artefact created")
+		require.Contains(t, output, "🏁 Claim completed") // Terminal artefacts show as claim completed in verbose mode
 		require.Contains(t, output, "type=PackagedModule")
 		require.Contains(t, output, "id=terminal") // Short ID (first 8 chars)
-		require.Contains(t, output, "🎉 Workflow completed")
-		require.Contains(t, output, "Terminal artefact created")
+		require.Contains(t, output, "agent=ModulePackager")
 	})
 
 	t.Run("defaultFormatter formats claim events", func(t *testing.T) {

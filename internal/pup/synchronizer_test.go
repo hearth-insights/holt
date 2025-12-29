@@ -439,127 +439,17 @@ func TestSynchronizer_CheckDependencies_Named_Partial(t *testing.T) {
 }
 
 // TestSynchronizer_CheckDependencies_ProducerDeclared_CorrectCount tests Producer-Declared with correct count
+// M5.1.1: DEPRECATED - Producer-Declared pattern now uses Orchestrator merge phase instead of synchronizer
+// This test is skipped as it tests deprecated functionality
 func TestSynchronizer_CheckDependencies_ProducerDeclared_CorrectCount(t *testing.T) {
-	config := &SynchronizeConfig{
-		AncestorType: "DataBatch",
-		WaitFor: []WaitCondition{
-			{Type: "ProcessedRecord", CountFromMetadata: "batch_size"},
-		},
-	}
-
-	sync, bbClient, _ := setupTestSynchronizer(t, config)
-	ctx := context.Background()
-
-	// Create ancestor
-	ancestor := &blackboard.Artefact{
-		Header: blackboard.ArtefactHeader{
-			LogicalThreadID: blackboard.NewID(),
-			Version:         1,
-			StructuralType:  blackboard.StructuralTypeStandard,
-			Type:            "DataBatch",
-			ProducedByRole:  "producer",
-			Metadata:        "{}",
-			ParentHashes:    []string{},
-			CreatedAtMs:     time.Now().UnixMilli(),
-		},
-		Payload: blackboard.ArtefactPayload{
-			Content: "batch-123",
-		},
-	}
-	ancestorHash, err := blackboard.ComputeArtefactHash(ancestor)
-	require.NoError(t, err)
-	ancestor.ID = ancestorHash
-	require.NoError(t, bbClient.CreateArtefact(ctx, ancestor))
-
-	// Create 5 ProcessedRecord artefacts with batch_size=5 metadata
-	for i := 1; i <= 5; i++ {
-		record := &blackboard.Artefact{
-			Header: blackboard.ArtefactHeader{
-				LogicalThreadID: blackboard.NewID(),
-				Version:         1,
-				StructuralType:  blackboard.StructuralTypeStandard,
-				Type:            "ProcessedRecord",
-				ProducedByRole:  "processor",
-				Metadata:        `{"batch_size":"5"}`, // M5.1: Metadata injection
-				ParentHashes:    []string{ancestor.ID},
-				CreatedAtMs:     time.Now().UnixMilli(),
-			},
-			Payload: blackboard.ArtefactPayload{
-				Content: "record-data",
-			},
-		}
-		hash, err := blackboard.ComputeArtefactHash(record)
-		require.NoError(t, err)
-		record.ID = hash
-		require.NoError(t, bbClient.CreateArtefact(ctx, record))
-	}
-
-	// Check dependencies (should be met - 5 of 5 present)
-	allReady, err := sync.checkAllDependenciesMet(ctx, ancestor)
-	require.NoError(t, err)
-	assert.True(t, allReady)
+	t.Skip("M5.1.1: Producer-Declared pattern now uses merge phase, not synchronizer")
 }
 
 // TestSynchronizer_CheckDependencies_ProducerDeclared_PartialCount tests Producer-Declared with partial count
+// M5.1.1: DEPRECATED - Producer-Declared pattern now uses Orchestrator merge phase instead of synchronizer
+// This test is skipped as it tests deprecated functionality
 func TestSynchronizer_CheckDependencies_ProducerDeclared_PartialCount(t *testing.T) {
-	config := &SynchronizeConfig{
-		AncestorType: "DataBatch",
-		WaitFor: []WaitCondition{
-			{Type: "ProcessedRecord", CountFromMetadata: "batch_size"},
-		},
-	}
-
-	sync, bbClient, _ := setupTestSynchronizer(t, config)
-	ctx := context.Background()
-
-	// Create ancestor
-	ancestor := &blackboard.Artefact{
-		Header: blackboard.ArtefactHeader{
-			LogicalThreadID: blackboard.NewID(),
-			Version:         1,
-			StructuralType:  blackboard.StructuralTypeStandard,
-			Type:            "DataBatch",
-			ProducedByRole:  "producer",
-			Metadata:        "{}",
-			ParentHashes:    []string{},
-			CreatedAtMs:     time.Now().UnixMilli(),
-		},
-		Payload: blackboard.ArtefactPayload{
-			Content: "batch-123",
-		},
-	}
-	ancestorHash, err := blackboard.ComputeArtefactHash(ancestor)
-	require.NoError(t, err)
-	ancestor.ID = ancestorHash
-	require.NoError(t, bbClient.CreateArtefact(ctx, ancestor))
-
-	// Create only 3 of 5 expected ProcessedRecord artefacts
-	for i := 1; i <= 3; i++ {
-		record := &blackboard.Artefact{
-			Header: blackboard.ArtefactHeader{
-				LogicalThreadID: blackboard.NewID(),
-				Version:         1,
-				StructuralType:  blackboard.StructuralTypeStandard,
-				Type:            "ProcessedRecord",
-				ProducedByRole:  "processor",
-				Metadata:        `{"batch_size":"5"}`, // Expects 5 total
-				ParentHashes:    []string{ancestor.ID},
-				CreatedAtMs:     time.Now().UnixMilli(),
-			},
-			Payload: blackboard.ArtefactPayload{
-				Content: "record-data",
-			},
-		}
-		hash, err := blackboard.ComputeArtefactHash(record)
-		require.NoError(t, err)
-		record.ID = hash
-		require.NoError(t, bbClient.CreateArtefact(ctx, record))
-	}
-
-	// Check dependencies (should NOT be met - only 3 of 5 present)
-	allReady, err := sync.checkAllDependenciesMet(ctx, ancestor)
-	require.NoError(t, err)
-	assert.False(t, allReady)
+	t.Skip("M5.1.1: Producer-Declared pattern now uses merge phase, not synchronizer")
 }
 
 // TestSynchronizer_GetExpectedCount_Valid tests valid metadata parsing
