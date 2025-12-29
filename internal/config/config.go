@@ -55,7 +55,7 @@ type Agent struct {
 	Command         []string              `yaml:"command"`
 	BidScript       []string              `yaml:"bid_script,omitempty"`
 	Workspace       *WorkspaceConfig      `yaml:"workspace,omitempty"`
-	Replicas        *int                  `yaml:"replicas,omitempty"`
+	// Replicas        *int                  `yaml:"replicas,omitempty"` // DEPRECATED: Use mode: "controller" with worker.max_concurrent instead (M3.4)
 	Strategy        string                `yaml:"strategy,omitempty"`
 	BiddingStrategy BiddingStrategyConfig `yaml:"bidding_strategy"` // Required: review, claim, exclusive, or ignore
 	Environment     []string              `yaml:"environment,omitempty"`
@@ -314,12 +314,10 @@ func (a *Agent) Validate(name string) error {
 			return fmt.Errorf("agent '%s': count_from_metadata pattern requires exactly ONE wait_for condition (found %d)", name, len(a.Synchronize.WaitFor))
 		}
 
-		// M5.1.1 REFACTOR: Validate single wait_for without count_from_metadata is invalid (not a fan-in)
-		if len(a.Synchronize.WaitFor) == 1 && !hasCountFromMetadata {
-			return fmt.Errorf("agent '%s': single wait_for without count_from_metadata is not a valid merge (not a fan-in pattern)", name)
-		}
+		// M5.1.1: Single wait_for without count_from_metadata is allowed (dependency wait pattern)
+		// Only multi-type waits (TYPES mode) need duplicate validation
 
-		// M5.1.1 REFACTOR: Validate no duplicate types in TYPES mode
+		// M5.1.1 REFACTOR: Validate no duplicate types in TYPES mode (2+ wait_for entries)
 		if !hasCountFromMetadata && len(a.Synchronize.WaitFor) > 1 {
 			// TYPES mode - check for duplicate types
 			typesSeen := make(map[string]bool)

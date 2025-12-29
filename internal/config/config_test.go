@@ -261,7 +261,6 @@ agents:
       context: ` + buildContext + `
     workspace:
       mode: "ro"
-    replicas: 3
     strategy: "reuse"
     environment:
       - "API_KEY=secret"
@@ -305,8 +304,7 @@ services:
 	assert.Equal(t, buildContext, designer.Build.Context)
 	assert.NotNil(t, designer.Workspace)
 	assert.Equal(t, "ro", designer.Workspace.Mode)
-	assert.NotNil(t, designer.Replicas)
-	assert.Equal(t, 3, *designer.Replicas)
+	// Replicas field deprecated (M3.4) - use mode: "controller" with worker.max_concurrent instead
 	assert.Equal(t, "reuse", designer.Strategy)
 	assert.Len(t, designer.Environment, 2)
 	assert.NotNil(t, designer.Resources)

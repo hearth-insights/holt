@@ -1025,8 +1025,9 @@ func populateAgentImages(ctx context.Context, cli *client.Client, cfg *config.Ho
 
 	// Iterate through agents
 	for agentRole, agent := range cfg.Agents {
-		// Skip worker-only agents (they're not running yet)
-		if agent.Mode == "controller" || agent.Replicas == nil || *agent.Replicas == 1 {
+		// Only track controller agents and traditional single-instance agents
+		// Workers are launched dynamically and tracked separately
+		if agent.Mode == "controller" || agent.Mode == "" {
 			// Get container name
 			containerName := dockerpkg.AgentContainerName(instanceName, agentRole)
 
