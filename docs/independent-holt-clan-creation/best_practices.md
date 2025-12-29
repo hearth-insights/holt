@@ -46,6 +46,19 @@ For critical tasks, pair a "Doer" agent with multiple specialized "Reviewer" age
         *   **Empty JSON (`{}` or `[]`)**: **Approval**. The workflow proceeds.
         *   **Non-Empty**: **Rejection**. The workflow loops back for rework.
 
+**⚠️ Review Loop Limits**
+
+The orchestrator automatically terminates workflows after **3 failed review attempts** (default). When the limit is exceeded, a `Failure` artefact is created and the workflow stops.
+
+Configure in `holt.yaml`:
+```yaml
+orchestrator:
+  max_review_iterations: 5  # Increase for complex workflows
+  # max_review_iterations: 0  # Unlimited (use cautiously)
+```
+
+See [Agent Definition - Orchestrator Configuration](./agent_definition.md#2-orchestrator-configuration) for details.
+
 **Example**:
 *   `Coder` agent writes a function.
 *   Multiple specialized reviewers check the work:
