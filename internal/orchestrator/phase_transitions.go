@@ -212,6 +212,22 @@ func (e *Engine) GrantNextPhase(ctx context.Context, claim *blackboard.Claim, ph
 		}
 		return e.GrantExclusivePhase(ctx, claim, bids)
 
+	case "merge":
+		// M5.1.1: Reconstruct map[string]Bid from PhaseState data for merge phase
+		bids := make(map[string]blackboard.Bid)
+		for agent, bidType := range phaseState.AllBids {
+			timestamp := int64(0)
+			if ts, ok := phaseState.BidTimestamps[agent]; ok {
+				timestamp = ts
+			}
+			bids[agent] = blackboard.Bid{
+				AgentName:   agent,
+				BidType:     bidType,
+				TimestampMs: timestamp,
+			}
+		}
+		return e.GrantMergePhase(ctx, claim, bids)
+
 	default:
 		return fmt.Errorf("unknown next phase: %s", nextPhase)
 	}

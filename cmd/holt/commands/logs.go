@@ -3,7 +3,6 @@ package commands
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/docker/docker/api/types/container"
 	dockerclient "github.com/docker/docker/client"
@@ -121,9 +120,10 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	}
 	defer reader.Close()
 
-	// Copy logs to stdout (demultiplex Docker's stream format)
-	// Send both container's stdout and stderr to our stdout for easier piping
-	_, err = stdcopy.StdCopy(os.Stdout, os.Stdout, reader)
+	// Copy logs to command output (demultiplex Docker's stream format)
+	// Send both container's stdout and stderr to command output for easier piping
+	out := cmd.OutOrStdout()
+	_, err = stdcopy.StdCopy(out, out, reader)
 	if err != nil {
 		return fmt.Errorf("error streaming logs: %w", err)
 	}
