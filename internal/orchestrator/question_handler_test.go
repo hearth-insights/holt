@@ -5,9 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
 
-	"github.com/hearth-insights/holt/pkg/blackboard"
 	"github.com/google/uuid"
+	"github.com/hearth-insights/holt/pkg/blackboard"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -19,18 +20,24 @@ func TestHandleQuestionArtefact_Success(t *testing.T) {
 
 	// Create target artefact (what's being questioned)
 	targetArtefact := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "DesignSpec",
-		Payload:         "Build an API",
-		ProducedByRole:  "Coder",
-		SourceArtefacts: []string{},
-		CreatedAtMs:     1000,
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "Code",
+			ProducedByRole:  "Coder",
+			ParentHashes:    []string{},
+			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "code",
+		},
 	}
-	err := client.CreateArtefact(ctx, targetArtefact)
+	targetHash, err := blackboard.ComputeArtefactHash(targetArtefact)
 	require.NoError(t, err)
+	targetArtefact.ID = targetHash
+	require.NoError(t, client.CreateArtefact(ctx, targetArtefact))
 
 	// Create claim for target artefact
 	targetClaim := &blackboard.Claim{
@@ -49,22 +56,28 @@ func TestHandleQuestionArtefact_Success(t *testing.T) {
 	}
 	payloadJSON, _ := json.Marshal(questionPayload)
 
-	questionArtefact := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeQuestion,
-		Type:            "ClarificationNeeded",
-		Payload:         string(payloadJSON),
-		ProducedByRole:  "Reviewer",
-		SourceArtefacts: []string{targetArtefact.ID},
-		CreatedAtMs:     2000,
+	question := &blackboard.Artefact{
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeQuestion,
+			Type:            "Clarification",
+			ProducedByRole:  "Reviewer",
+			ParentHashes:    []string{targetArtefact.ID},
+			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: string(payloadJSON),
+		},
 	}
-	err = client.CreateArtefact(ctx, questionArtefact)
+	qHash, err := blackboard.ComputeArtefactHash(question)
 	require.NoError(t, err)
+	question.ID = qHash
+	require.NoError(t, client.CreateArtefact(ctx, question))
 
 	// Handle the Question
-	err = engine.handleQuestionArtefact(ctx, questionArtefact)
+	err = engine.handleQuestionArtefact(ctx, question)
 	require.NoError(t, err)
 
 	// Verify: Original claim should be terminated
@@ -85,7 +98,7 @@ func TestHandleQuestionArtefact_Success(t *testing.T) {
 	assert.Equal(t, blackboard.ClaimStatusPendingAssignment, feedbackClaim.Status)
 	assert.Equal(t, "Coder", feedbackClaim.GrantedExclusiveAgent)
 	assert.Equal(t, targetArtefact.ID, feedbackClaim.ArtefactID)
-	assert.Contains(t, feedbackClaim.AdditionalContextIDs, questionArtefact.ID)
+	assert.Contains(t, feedbackClaim.AdditionalContextIDs, question.ID)
 }
 
 // TestHandleQuestionArtefact_InvalidJSON tests malformed Question payload handling
@@ -94,22 +107,28 @@ func TestHandleQuestionArtefact_InvalidJSON(t *testing.T) {
 	ctx := context.Background()
 
 	// Create Question with invalid JSON payload
-	questionArtefact := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeQuestion,
-		Type:            "ClarificationNeeded",
-		Payload:         "not valid json {{{",
-		ProducedByRole:  "Reviewer",
-		SourceArtefacts: []string{},
-		CreatedAtMs:     1000,
+	question := &blackboard.Artefact{
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeQuestion,
+			Type:            "Clarification",
+			ProducedByRole:  "Reviewer",
+			ParentHashes:    []string{},
+			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "not valid json {{{",
+		},
 	}
-	err := client.CreateArtefact(ctx, questionArtefact)
+	hash, err := blackboard.ComputeArtefactHash(question)
 	require.NoError(t, err)
+	question.ID = hash
+	require.NoError(t, client.CreateArtefact(ctx, question))
 
 	// Handle should not crash - just skip
-	err = engine.handleQuestionArtefact(ctx, questionArtefact)
+	err = engine.handleQuestionArtefact(ctx, question)
 	assert.NoError(t, err) // Should return nil (skip gracefully)
 
 	// Verify no feedback claims created
@@ -128,22 +147,28 @@ func TestHandleQuestionArtefact_MissingTargetID(t *testing.T) {
 	}
 	payloadJSON, _ := json.Marshal(questionPayload)
 
-	questionArtefact := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeQuestion,
-		Type:            "ClarificationNeeded",
-		Payload:         string(payloadJSON),
-		ProducedByRole:  "Reviewer",
-		SourceArtefacts: []string{},
-		CreatedAtMs:     1000,
+	question := &blackboard.Artefact{
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeQuestion,
+			Type:            "Clarification",
+			ProducedByRole:  "Reviewer",
+			ParentHashes:    []string{},
+			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: string(payloadJSON),
+		},
 	}
-	err := client.CreateArtefact(ctx, questionArtefact)
+	hash, err := blackboard.ComputeArtefactHash(question)
 	require.NoError(t, err)
+	question.ID = hash
+	require.NoError(t, client.CreateArtefact(ctx, question))
 
 	// Handle should skip
-	err = engine.handleQuestionArtefact(ctx, questionArtefact)
+	err = engine.handleQuestionArtefact(ctx, question)
 	assert.NoError(t, err)
 
 	// Verify no feedback claims created
@@ -155,7 +180,7 @@ func TestHandleQuestionArtefact_TargetNotFound(t *testing.T) {
 	engine, client := setupTestEngineWithMaxIterations(t, 3)
 	ctx := context.Background()
 
-	nonExistentID := uuid.New().String()
+	nonExistentID := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" // Valid hash format
 
 	// Create Question referencing non-existent artefact
 	questionPayload := QuestionPayload{
@@ -164,22 +189,28 @@ func TestHandleQuestionArtefact_TargetNotFound(t *testing.T) {
 	}
 	payloadJSON, _ := json.Marshal(questionPayload)
 
-	questionArtefact := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeQuestion,
-		Type:            "ClarificationNeeded",
-		Payload:         string(payloadJSON),
-		ProducedByRole:  "Reviewer",
-		SourceArtefacts: []string{nonExistentID},
-		CreatedAtMs:     1000,
+	question := &blackboard.Artefact{
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeQuestion,
+			Type:            "Clarification",
+			ProducedByRole:  "Reviewer",
+			ParentHashes:    []string{nonExistentID},
+			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: string(payloadJSON),
+		},
 	}
-	err := client.CreateArtefact(ctx, questionArtefact)
+	hash, err := blackboard.ComputeArtefactHash(question)
 	require.NoError(t, err)
+	question.ID = hash
+	require.NoError(t, client.CreateArtefact(ctx, question))
 
 	// Handle should create Failure artefact
-	err = engine.handleQuestionArtefact(ctx, questionArtefact)
+	err = engine.handleQuestionArtefact(ctx, question)
 	require.NoError(t, err)
 
 	// Verify Failure artefact was created
@@ -194,18 +225,24 @@ func TestHandleQuestionArtefact_IterationLimitExceeded(t *testing.T) {
 
 	// Create target artefact at version 3 (iteration count = 2, at limit)
 	targetArtefact := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         3, // version - 1 = 2 iterations
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "DesignSpec",
-		Payload:         "Build an API v3",
-		ProducedByRole:  "Coder",
-		SourceArtefacts: []string{},
-		CreatedAtMs:     3000,
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         3, // version - 1 = 2 iterations
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "DesignSpec",
+			ProducedByRole:  "Coder",
+			ParentHashes:    []string{},
+			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "Build an API v3",
+		},
 	}
-	err := client.CreateArtefact(ctx, targetArtefact)
+	targetHash, err := blackboard.ComputeArtefactHash(targetArtefact)
 	require.NoError(t, err)
+	targetArtefact.ID = targetHash
+	require.NoError(t, client.CreateArtefact(ctx, targetArtefact))
 
 	// Create claim for target artefact
 	targetClaim := &blackboard.Claim{
@@ -224,22 +261,28 @@ func TestHandleQuestionArtefact_IterationLimitExceeded(t *testing.T) {
 	}
 	payloadJSON, _ := json.Marshal(questionPayload)
 
-	questionArtefact := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeQuestion,
-		Type:            "ClarificationNeeded",
-		Payload:         string(payloadJSON),
-		ProducedByRole:  "Reviewer",
-		SourceArtefacts: []string{targetArtefact.ID},
-		CreatedAtMs:     4000,
+	question := &blackboard.Artefact{
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeQuestion,
+			Type:            "Clarification",
+			ProducedByRole:  "Reviewer",
+			ParentHashes:    []string{targetArtefact.ID},
+			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: string(payloadJSON),
+		},
 	}
-	err = client.CreateArtefact(ctx, questionArtefact)
+	qHash, err := blackboard.ComputeArtefactHash(question)
 	require.NoError(t, err)
+	question.ID = qHash
+	require.NoError(t, client.CreateArtefact(ctx, question))
 
 	// Handle should terminate due to iteration limit
-	err = engine.handleQuestionArtefact(ctx, questionArtefact)
+	err = engine.handleQuestionArtefact(ctx, question)
 	require.NoError(t, err)
 
 	// Verify: Claim should be terminated
@@ -261,18 +304,24 @@ func TestHandleQuestionArtefact_UserRole(t *testing.T) {
 
 	// Create target artefact produced by "user"
 	targetArtefact := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "GoalDefined",
-		Payload:         "Build an API",
-		ProducedByRole:  "user", // User role
-		SourceArtefacts: []string{},
-		CreatedAtMs:     1000,
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "GoalDefined",
+			ProducedByRole:  "user", // User role
+			ParentHashes:    []string{},
+			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "Build an API",
+		},
 	}
-	err := client.CreateArtefact(ctx, targetArtefact)
+	targetHash, err := blackboard.ComputeArtefactHash(targetArtefact)
 	require.NoError(t, err)
+	targetArtefact.ID = targetHash
+	require.NoError(t, client.CreateArtefact(ctx, targetArtefact))
 
 	// Create claim for an agent working on this goal
 	targetClaim := &blackboard.Claim{
@@ -291,19 +340,25 @@ func TestHandleQuestionArtefact_UserRole(t *testing.T) {
 	}
 	payloadJSON, _ := json.Marshal(questionPayload)
 
-	questionArtefact := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeQuestion,
-		Type:            "ClarificationNeeded",
-		Payload:         string(payloadJSON),
-		ProducedByRole:  "Coder",
-		SourceArtefacts: []string{targetArtefact.ID},
-		CreatedAtMs:     2000,
+	question := &blackboard.Artefact{
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeQuestion,
+			Type:            "Clarification",
+			ProducedByRole:  "Coder",
+			ParentHashes:    []string{targetArtefact.ID},
+			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: string(payloadJSON),
+		},
 	}
-	err = client.CreateArtefact(ctx, questionArtefact)
+	qHash, err := blackboard.ComputeArtefactHash(question)
 	require.NoError(t, err)
+	question.ID = qHash
+	require.NoError(t, client.CreateArtefact(ctx, question))
 
 	// Subscribe BEFORE action to catch the event
 	streamKey := fmt.Sprintf("holt:%s:workflow_events", engine.instanceName)
@@ -314,7 +369,7 @@ func TestHandleQuestionArtefact_UserRole(t *testing.T) {
 	require.NoError(t, err)
 
 	// Handle the Question - should publish event and return nil (no feedback claim)
-	err = engine.handleQuestionArtefact(ctx, questionArtefact)
+	err = engine.handleQuestionArtefact(ctx, question)
 	require.NoError(t, err)
 
 	// Verify: Claim should be terminated (question asked)
@@ -329,7 +384,7 @@ func TestHandleQuestionArtefact_UserRole(t *testing.T) {
 	// Verify: human_input_required event published
 	msg, err := pubsub.ReceiveMessage(ctx)
 	require.NoError(t, err)
-	
+
 	// The payload is the JSON of WorkflowEvent struct
 	assert.Contains(t, msg.Payload, "human_input_required")
 }
@@ -341,18 +396,24 @@ func TestFindClaimByProducedArtefact(t *testing.T) {
 
 	// Create root artefact
 	rootArtefact := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "GoalDefined",
-		Payload:         "Build feature",
-		ProducedByRole:  "user",
-		SourceArtefacts: []string{},
-		CreatedAtMs:     1000,
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "GoalDefined",
+			ProducedByRole:  "user",
+			ParentHashes:    []string{},
+			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "Build feature",
+		},
 	}
-	err := client.CreateArtefact(ctx, rootArtefact)
+	rootHash, err := blackboard.ComputeArtefactHash(rootArtefact)
 	require.NoError(t, err)
+	rootArtefact.ID = rootHash
+	require.NoError(t, client.CreateArtefact(ctx, rootArtefact))
 
 	// Create claim for root
 	rootClaim := &blackboard.Claim{
@@ -366,18 +427,24 @@ func TestFindClaimByProducedArtefact(t *testing.T) {
 
 	// Create derived artefact (Question)
 	derivedArtefact := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeQuestion,
-		Type:            "ClarificationNeeded",
-		Payload:         `{"question_text": "test", "target_artefact_id": "x"}`,
-		ProducedByRole:  "Coder",
-		SourceArtefacts: []string{rootArtefact.ID}, // Derived from root
-		CreatedAtMs:     2000,
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeQuestion,
+			Type:            "Clarification",
+			ProducedByRole:  "Coder",
+			ParentHashes:    []string{rootArtefact.ID}, // Derived from root
+			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: `{"question_text": "test", "target_artefact_id": "x"}`,
+		},
 	}
-	err = client.CreateArtefact(ctx, derivedArtefact)
+	derivedHash, err := blackboard.ComputeArtefactHash(derivedArtefact)
 	require.NoError(t, err)
+	derivedArtefact.ID = derivedHash
+	require.NoError(t, client.CreateArtefact(ctx, derivedArtefact))
 
 	// Find claim by derived artefact
 	claim, err := engine.findClaimByProducedArtefact(ctx, derivedArtefact.ID)

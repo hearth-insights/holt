@@ -209,14 +209,16 @@ func runProvision(cmd *cobra.Command, args []string) error {
 	}
 
 	// Print success message
-	action := "created"
-	if knowledge.Version > 1 {
-		action = fmt.Sprintf("updated to v%d", knowledge.Version)
+	var message string
+	if knowledge.Header.Version > 1 {
+		message = fmt.Sprintf("Updated %s from version %d -> %d", provisionName, knowledge.Header.Version-1, knowledge.Header.Version)
+	} else {
+		message = fmt.Sprintf("Initialized %s (version %d)", provisionName, knowledge.Header.Version)
 	}
 
-	fmt.Printf("✓ Knowledge '%s' %s successfully\n", provisionName, action)
+	fmt.Printf("✅ %s\n", message)
 	fmt.Printf("  ID: %s\n", knowledge.ID)
-	fmt.Printf("  Version: %d\n", knowledge.Version)
+	fmt.Printf("  Version: %d\n", knowledge.Header.Version)
 	fmt.Printf("  Target roles: %v\n", targetRoles)
 	fmt.Printf("  Content size: %d bytes\n", len(content))
 

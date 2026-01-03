@@ -13,9 +13,13 @@ import (
 func TestRun_AutoApprove(t *testing.T) {
 	input := Input{
 		TargetArtefact: Artefact{
-			Type:    "TestArtefact",
-			Version: 1,
-			Payload: "test payload",
+			Header: ArtefactHeader{
+				Type:    "TestArtefact",
+				Version: 1,
+			},
+			Payload: ArtefactPayload{
+				Content: "test payload",
+			},
 		},
 	}
 	inputJSON, _ := json.Marshal(input)
@@ -41,13 +45,17 @@ func TestRun_AutoApprove(t *testing.T) {
 func TestRun_Approve(t *testing.T) {
 	input := Input{
 		TargetArtefact: Artefact{
-			Type:    "TestArtefact",
-			Version: 1,
-			Payload: "test payload",
+			Header: ArtefactHeader{
+				Type:    "TestArtefact",
+				Version: 1,
+			},
+			Payload: ArtefactPayload{
+				Content: "test payload",
+			},
 		},
 	}
 	inputJSON, _ := json.Marshal(input)
-	
+
 	// Simulate user typing "y"
 	stdin := strings.NewReader(string(inputJSON) + "y\n")
 	var stdout, stderr bytes.Buffer
@@ -68,13 +76,17 @@ func TestRun_Approve(t *testing.T) {
 func TestRun_RejectWithFeedback(t *testing.T) {
 	input := Input{
 		TargetArtefact: Artefact{
-			Type:    "TestArtefact",
-			Version: 1,
-			Payload: "test payload",
+			Header: ArtefactHeader{
+				Type:    "TestArtefact",
+				Version: 1,
+			},
+			Payload: ArtefactPayload{
+				Content: "test payload",
+			},
 		},
 	}
 	inputJSON, _ := json.Marshal(input)
-	
+
 	// Simulate user typing "n" then "bad code"
 	stdin := strings.NewReader(string(inputJSON) + "n\nbad code\n")
 	var stdout, stderr bytes.Buffer
@@ -90,7 +102,7 @@ func TestRun_RejectWithFeedback(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "Review", output.StructuralType)
 	assert.Equal(t, "Rejected by human reviewer", output.Summary)
-	
+
 	var payload ReviewPayload
 	err = json.Unmarshal([]byte(output.ArtefactPayload), &payload)
 	assert.NoError(t, err)
@@ -100,17 +112,21 @@ func TestRun_RejectWithFeedback(t *testing.T) {
 func TestRun_Timeout(t *testing.T) {
 	input := Input{
 		TargetArtefact: Artefact{
-			Type:    "TestArtefact",
-			Version: 1,
-			Payload: "test payload",
+			Header: ArtefactHeader{
+				Type:    "TestArtefact",
+				Version: 1,
+			},
+			Payload: ArtefactPayload{
+				Content: "test payload",
+			},
 		},
 	}
 	inputJSON, _ := json.Marshal(input)
-	
+
 	// Use a pipe to simulate blocking input
 	r, w := io.Pipe()
 	defer w.Close()
-	
+
 	// Write input JSON then keep pipe open but silent to simulate waiting for user input
 	go func() {
 		w.Write(inputJSON)

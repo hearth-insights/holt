@@ -5,17 +5,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"time"
 
-	"github.com/hearth-insights/holt/pkg/blackboard"
 	"github.com/google/uuid"
+	"github.com/hearth-insights/holt/pkg/blackboard"
 )
 
 // QuestionPayload represents the JSON structure stored in Question artefact payloads.
 // M4.1: This schema is defined in the design document section 2.1.
 type QuestionPayload struct {
-	QuestionText      string `json:"question_text"`
-	TargetArtefactID  string `json:"target_artefact_id"`
-	Routing           string `json:"routing,omitempty"` // "auto" (default) or "human"
+	QuestionText     string `json:"question_text"`
+	TargetArtefactID string `json:"target_artefact_id"`
+	Routing          string `json:"routing,omitempty"` // "auto" (default) or "human"
 }
 
 // handleQuestionArtefact processes a Question artefact by terminating the original claim
@@ -24,7 +25,7 @@ type QuestionPayload struct {
 func (e *Engine) handleQuestionArtefact(ctx context.Context, questionArtefact *blackboard.Artefact) error {
 	// Parse Question payload
 	var payload QuestionPayload
-	if err := json.Unmarshal([]byte(questionArtefact.Payload), &payload); err != nil {
+	if err := json.Unmarshal([]byte(questionArtefact.Payload.Content), &payload); err != nil {
 		log.Printf("[Orchestrator] Failed to parse Question payload (artefact: %s): %v", questionArtefact.ID, err)
 		e.logEvent("question_parse_error", map[string]interface{}{
 			"question_id": questionArtefact.ID,
@@ -67,7 +68,7 @@ func (e *Engine) handleQuestionArtefact(ctx context.Context, questionArtefact *b
 	}
 
 	// Check iteration limit using target artefact version
-	iterationCount := targetArtefact.Version - 1
+	iterationCount := targetArtefact.Header.Version - 1
 	maxIterations := *e.config.Orchestrator.MaxReviewIterations
 
 	if maxIterations > 0 && iterationCount >= maxIterations {
@@ -75,21 +76,10 @@ func (e *Engine) handleQuestionArtefact(ctx context.Context, questionArtefact *b
 		return e.terminateQuestionIterationLimit(ctx, originalClaim, targetArtefact, questionArtefact, iterationCount)
 	}
 
-	// Terminate the original claim (agent asked a question)
-	originalClaim.Status = blackboard.ClaimStatusTerminated
-	originalClaim.TerminationReason = fmt.Sprintf("Agent asked a clarifying question (Question artefact: %s)", questionArtefact.ID)
-
-	if err := e.client.UpdateClaim(ctx, originalClaim); err != nil {
-		return fmt.Errorf("failed to terminate original claim: %w", err)
-	}
-
-	e.logEvent("claim_terminated_question", map[string]interface{}{
-		"claim_id":    originalClaim.ID,
-		"question_id": questionArtefact.ID,
-		"target_artefact_id": payload.TargetArtefactID,
-	})
-
-	log.Printf("[Orchestrator] Claim %s terminated: agent asked question %s", originalClaim.ID, questionArtefact.ID)
+	// Don't terminate the claim here - the Terminal artefact (ClaimComplete) will handle it
+	// The orchestrator's handleTerminalArtefact() will detect the Question sibling and terminate
+	log.Printf("[Orchestrator] Question artefact %s produced for claim %s (will be terminated via Terminal artefact)",
+		questionArtefact.ID, originalClaim.ID)
 
 	// M4.11: Production Gatekeeper - Direct to Human routing
 	// If the agent explicitly requests human routing, we bypass the producer feedback loop.
@@ -99,22 +89,38 @@ func (e *Engine) handleQuestionArtefact(ctx context.Context, questionArtefact *b
 			log.Printf("[Orchestrator] Failed to publish human_input_required event: %v", err)
 			return fmt.Errorf("failed to publish human_input_required event: %w", err)
 		}
+
+		// Terminate the original claim as the question interrupts the flow
+		originalClaim.Status = blackboard.ClaimStatusTerminated
+		originalClaim.TerminationReason = fmt.Sprintf("Agent asked a clarifying question (Question artefact: %s) with direct-to-human routing", questionArtefact.ID)
+		if err := e.client.UpdateClaim(ctx, originalClaim); err != nil {
+			return fmt.Errorf("failed to terminate original claim (human routing): %w", err)
+		}
+
 		// Bypass feedback claim creation
 		return nil
 	}
 
 	// M4.1: Special handling for questions targeting "user" (legacy implicit routing)
-	if targetArtefact.ProducedByRole == "user" {
+	if targetArtefact.Header.ProducedByRole == "user" {
 		if err := e.publishHumanInputRequiredEvent(ctx, questionArtefact.ID, payload.QuestionText, targetArtefact.ID); err != nil {
 			log.Printf("[Orchestrator] Failed to publish human_input_required event: %v", err)
 		}
+
+		// Terminate the original claim as the question interrupts the flow
+		originalClaim.Status = blackboard.ClaimStatusTerminated
+		originalClaim.TerminationReason = fmt.Sprintf("Agent asked a clarifying question (Question artefact: %s)", questionArtefact.ID)
+		if err := e.client.UpdateClaim(ctx, originalClaim); err != nil {
+			return fmt.Errorf("failed to terminate original claim (user target): %w", err)
+		}
+
 		// For user targets, we don't create a feedback claim or look up an agent.
 		// The event signals external intervention is needed.
 		return nil
 	}
 
 	// Find the agent that produced the target artefact
-	producerAgent, err := e.findAgentByRole(targetArtefact.ProducedByRole)
+	producerAgent, err := e.findAgentByRole(targetArtefact.Header.ProducedByRole)
 	if err != nil {
 		// Agent no longer exists in config
 		return e.terminateMissingAgent(ctx, originalClaim, targetArtefact)
@@ -123,7 +129,7 @@ func (e *Engine) handleQuestionArtefact(ctx context.Context, questionArtefact *b
 	// Create feedback claim assigned to the original author
 	feedbackClaim := &blackboard.Claim{
 		ID:                    uuid.New().String(),
-		ArtefactID:            targetArtefact.ID,             // Target is the questioned artefact
+		ArtefactID:            targetArtefact.ID, // Target is the questioned artefact
 		Status:                blackboard.ClaimStatusPendingAssignment,
 		GrantedExclusiveAgent: producerAgent,
 		AdditionalContextIDs:  []string{questionArtefact.ID}, // Inject Question into context
@@ -150,6 +156,37 @@ func (e *Engine) handleQuestionArtefact(ctx context.Context, questionArtefact *b
 	// Track feedback claim for completion checking
 	e.pendingAssignmentClaims[feedbackClaim.ID] = targetArtefact.ID
 
+	// M3.4: If the assigned agent is a controller, we must launch a worker explicitly
+	if agent, exists := e.config.Agents[producerAgent]; exists && agent.Mode == "controller" {
+		if e.workerManager != nil {
+			if e.workerManager.IsAtWorkerLimit(producerAgent, agent.Worker.MaxConcurrent) {
+				log.Printf("[Orchestrator] Role '%s' at max_concurrent worker limit (%d), pausing feedback claim %s in grant queue",
+					producerAgent, agent.Worker.MaxConcurrent, feedbackClaim.ID)
+				
+				if err := e.pauseGrantForQueue(ctx, feedbackClaim, producerAgent, producerAgent); err != nil {
+					log.Printf("[Orchestrator] Failed to pause feedback claim in grant queue: %v", err)
+				}
+			} else {
+				log.Printf("[Orchestrator] Launching worker for feedback controller %s (claim %s)", producerAgent, feedbackClaim.ID)
+				if err := e.workerManager.LaunchWorker(ctx, feedbackClaim, producerAgent, agent, e.client); err != nil {
+					log.Printf("[Orchestrator] Failed to launch worker for feedback controller %s: %v", producerAgent, err)
+				}
+				if err := e.publishClaimGrantedEvent(ctx, feedbackClaim.ID, producerAgent, "exclusive", ""); err != nil {
+					log.Printf("[Orchestrator] Failed to publish workflow event for feedback grant to %s: %v", producerAgent, err)
+				}
+			}
+		} else {
+			log.Printf("[Orchestrator] WARN: Feedback assigned to controller %s but workerManager is nil", producerAgent)
+		}
+	}
+
+	// Terminate the original claim
+	originalClaim.Status = blackboard.ClaimStatusTerminated
+	originalClaim.TerminationReason = fmt.Sprintf("Agent asked a clarifying question (Question artefact: %s)", questionArtefact.ID)
+	if err := e.client.UpdateClaim(ctx, originalClaim); err != nil {
+		return fmt.Errorf("failed to terminate original claim: %w", err)
+	}
+
 	return nil
 }
 
@@ -164,7 +201,7 @@ func (e *Engine) findClaimByProducedArtefact(ctx context.Context, artefactID str
 
 	// The artefact's source should contain the target artefact of the claim
 	// Find a claim whose ArtefactID matches any of the source artefacts
-	for _, sourceID := range artefact.SourceArtefacts {
+	for _, sourceID := range artefact.Header.ParentHashes {
 		claim, err := e.client.GetClaimByArtefactID(ctx, sourceID)
 		if err != nil {
 			if blackboard.IsNotFound(err) {
@@ -189,21 +226,31 @@ func (e *Engine) terminateQuestionIterationLimit(ctx context.Context, claim *bla
 
 	// Parse question text for better error message
 	var payload QuestionPayload
-	_ = json.Unmarshal([]byte(questionArtefact.Payload), &payload)
+	_ = json.Unmarshal([]byte(questionArtefact.Payload.Content), &payload)
 
 	failurePayload := fmt.Sprintf("Max review iterations (%d) exceeded for artefact %s (version %d). Latest question: %s",
-		maxIterations, artefact.ID, artefact.Version, payload.QuestionText)
+		maxIterations, artefact.ID, artefact.Header.Version, payload.QuestionText)
 
 	failure := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeFailure,
-		Type:            "MaxIterationsExceeded",
-		Payload:         failurePayload,
-		SourceArtefacts: []string{artefact.ID, questionArtefact.ID},
-		ProducedByRole:  "orchestrator",
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeFailure,
+			Type:            "MaxIterationsExceeded",
+			ProducedByRole:  "orchestrator",
+			ParentHashes:    []string{artefact.ID, questionArtefact.ID},
+			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: failurePayload,
+		},
 	}
+	failureHash, err := blackboard.ComputeArtefactHash(failure)
+	if err != nil {
+		return fmt.Errorf("failed to compute hash for Failure artefact: %w", err)
+	}
+	failure.ID = failureHash
 
 	if err := e.client.CreateArtefact(ctx, failure); err != nil {
 		return fmt.Errorf("failed to create Failure artefact: %w", err)
@@ -232,15 +279,25 @@ func (e *Engine) createTargetNotFoundFailure(ctx context.Context, questionArtefa
 	failurePayload := fmt.Sprintf("Cannot process Question: target artefact '%s' not found in Redis.", targetArtefactID)
 
 	failure := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeFailure,
-		Type:            "TargetArtefactNotFound",
-		Payload:         failurePayload,
-		SourceArtefacts: []string{questionArtefact.ID},
-		ProducedByRole:  "orchestrator",
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(), // Use NewID for thread
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeFailure,
+			Type:            "TargetArtefactNotFound",
+			ProducedByRole:  "orchestrator",
+			ParentHashes:    []string{questionArtefact.ID},
+			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: failurePayload,
+		},
 	}
+	failureHash, err := blackboard.ComputeArtefactHash(failure)
+	if err != nil {
+		return fmt.Errorf("failed to compute hash for Failure artefact: %w", err)
+	}
+	failure.ID = failureHash
 
 	if err := e.client.CreateArtefact(ctx, failure); err != nil {
 		return fmt.Errorf("failed to create Failure artefact: %w", err)

@@ -37,13 +37,13 @@ func evaluateBreakpoint(
 		if artefact == nil {
 			return false
 		}
-		return evaluateGlobPattern(bp.Pattern, artefact.Type)
+		return evaluateGlobPattern(bp.Pattern, artefact.Header.Type)
 
 	case ConditionArtefactStructuralType:
 		if artefact == nil {
 			return false
 		}
-		return evaluateGlobPattern(bp.Pattern, string(artefact.StructuralType))
+		return evaluateGlobPattern(bp.Pattern, string(artefact.Header.StructuralType))
 
 	case ConditionClaimStatus:
 		if claim == nil {
@@ -55,7 +55,7 @@ func evaluateBreakpoint(
 		if artefact == nil {
 			return false
 		}
-		return evaluateGlobPattern(bp.Pattern, artefact.ProducedByRole)
+		return evaluateGlobPattern(bp.Pattern, artefact.Header.ProducedByRole)
 
 	case ConditionEventType:
 		return evaluateGlobPattern(bp.Pattern, string(eventType))

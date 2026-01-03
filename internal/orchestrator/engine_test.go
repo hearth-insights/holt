@@ -15,7 +15,7 @@ import (
 func TestProcessArtefact(t *testing.T) {
 	// Setup miniredis
 	s := miniredis.RunT(t)
-	
+
 	// Setup blackboard client
 	client, err := blackboard.NewClient(&redis.Options{Addr: s.Addr()}, "test-instance")
 	require.NoError(t, err)
@@ -40,21 +40,23 @@ func TestProcessArtefact(t *testing.T) {
 
 		for _, st := range nonClaimableTypes {
 			artefact := &blackboard.Artefact{
-				LogicalID:      "logical-" + string(st),
-				Version:        1,
-				StructuralType: st,
-				Type:           "TestType",
-				ProducedByRole: "user",
-				CreatedAtMs:    time.Now().UnixMilli(),
-				SourceArtefacts: []string{}, // Must be empty for root
+				Header: blackboard.ArtefactHeader{
+					LogicalThreadID: "logical-" + string(st),
+					Version:         1,
+					StructuralType:  st,
+					Type:            "TestType",
+					ProducedByRole:  "user",
+					CreatedAtMs:     time.Now().UnixMilli(),
+					ParentHashes:    []string{},
+				},
+				Payload: blackboard.ArtefactPayload{Content: "test payload"},
 			}
-			
+
 			// Compute valid hash
-			verifiable := convertToVerifiableArtefact(artefact)
-			hash, err := blackboard.ComputeArtefactHash(verifiable)
+			hash, err := blackboard.ComputeArtefactHash(artefact)
 			require.NoError(t, err)
 			artefact.ID = hash
-			
+
 			err = engine.processArtefact(ctx, artefact)
 			assert.NoError(t, err)
 
@@ -62,7 +64,7 @@ func TestProcessArtefact(t *testing.T) {
 			exists, err := client.ClaimExists(ctx, "claim-for-"+artefact.ID)
 			assert.NoError(t, err)
 			assert.False(t, exists)
-			
+
 			// Verify no claim index
 			claim, err := client.GetClaimByArtefactID(ctx, artefact.ID)
 			assert.Error(t, err)
@@ -74,18 +76,21 @@ func TestProcessArtefact(t *testing.T) {
 	// Scenario 2: Successful claim creation for Standard artefact
 	t.Run("CreateClaim", func(t *testing.T) {
 		artefact := &blackboard.Artefact{
-			LogicalID:      "logical-standard",
-			Version:        1,
-			StructuralType: blackboard.StructuralTypeStandard,
-			Type:           "Code",
-			ProducedByRole: "user",
-			CreatedAtMs:    time.Now().UnixMilli(),
-			SourceArtefacts: []string{},
+			Header: blackboard.ArtefactHeader{
+				LogicalThreadID: "logical-standard",
+				Version:         1,
+				StructuralType:  blackboard.StructuralTypeStandard,
+				Type:            "Code",
+				ProducedByRole:  "user",
+				CreatedAtMs:     time.Now().UnixMilli(),
+				ParentHashes:    []string{},
+			},
+			Payload: blackboard.ArtefactPayload{Content: "some code content"},
 		}
-		
+
 		// Compute valid hash
-		verifiable := convertToVerifiableArtefact(artefact)
-		hash, err := blackboard.ComputeArtefactHash(verifiable)
+
+		hash, err := blackboard.ComputeArtefactHash(artefact)
 		require.NoError(t, err)
 		artefact.ID = hash
 
@@ -103,18 +108,21 @@ func TestProcessArtefact(t *testing.T) {
 	// Scenario 3: Idempotency (Duplicate artefact)
 	t.Run("Idempotency", func(t *testing.T) {
 		artefact := &blackboard.Artefact{
-			LogicalID:      "logical-duplicate",
-			Version:        1,
-			StructuralType: blackboard.StructuralTypeStandard,
-			Type:           "Code",
-			ProducedByRole: "user",
-			CreatedAtMs:    time.Now().UnixMilli(),
-			SourceArtefacts: []string{},
+			Header: blackboard.ArtefactHeader{
+				LogicalThreadID: "logical-duplicate",
+				Version:         1,
+				StructuralType:  blackboard.StructuralTypeStandard,
+				Type:            "Code",
+				ProducedByRole:  "user",
+				CreatedAtMs:     time.Now().UnixMilli(),
+				ParentHashes:    []string{},
+			},
+			Payload: blackboard.ArtefactPayload{Content: "duplicate code content"},
 		}
-		
+
 		// Compute valid hash
-		verifiable := convertToVerifiableArtefact(artefact)
-		hash, err := blackboard.ComputeArtefactHash(verifiable)
+
+		hash, err := blackboard.ComputeArtefactHash(artefact)
 		require.NoError(t, err)
 		artefact.ID = hash
 

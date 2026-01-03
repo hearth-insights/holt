@@ -219,10 +219,12 @@ func TestEvaluateBreakpoints_MultipleBreakpoints(t *testing.T) {
 
 	// Create artefact
 	artefact := &blackboard.Artefact{
-		ID:             "art-123",
-		Type:           "CodeCommit",
-		StructuralType: blackboard.StructuralTypeStandard,
-		ProducedByRole: "coder-agent",
+		ID: "art-123",
+		Header: blackboard.ArtefactHeader{
+			Type:           "CodeCommit",
+			StructuralType: blackboard.StructuralTypeStandard,
+			ProducedByRole: "coder-agent",
+		},
 	}
 
 	claim := &blackboard.Claim{
@@ -261,9 +263,11 @@ func TestEvaluateBreakpoints_NoMatch(t *testing.T) {
 	ctx := context.Background()
 
 	artefact := &blackboard.Artefact{
-		ID:             "art-123",
-		Type:           "CodeCommit",
-		StructuralType: blackboard.StructuralTypeStandard,
+		ID: "art-123",
+		Header: blackboard.ArtefactHeader{
+			Type:           "CodeCommit",
+			StructuralType: blackboard.StructuralTypeStandard,
+		},
 	}
 
 	breakpoints := []*Breakpoint{

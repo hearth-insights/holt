@@ -19,10 +19,10 @@ import (
 // SystemIdentity represents the cryptographic identity of a Holt instance.
 // This identity is used to detect configuration drift across orchestrator restarts.
 type SystemIdentity struct {
-	Strategy     string `json:"strategy"`               // "local" or "external"
-	ConfigHash   string `json:"config_hash,omitempty"`  // SHA-256 of holt.yml (local only)
-	GitCommit    string `json:"git_commit,omitempty"`   // Git HEAD commit (local only)
-	ComputedAtMs int64  `json:"computed_at_ms"`         // Timestamp
+	Strategy     string `json:"strategy"`                // "local" or "external"
+	ConfigHash   string `json:"config_hash,omitempty"`   // SHA-256 of holt.yml (local only)
+	GitCommit    string `json:"git_commit,omitempty"`    // Git HEAD commit (local only)
+	ComputedAtMs int64  `json:"computed_at_ms"`          // Timestamp
 	ExternalData string `json:"external_data,omitempty"` // Raw JSON from external file (external only)
 }
 

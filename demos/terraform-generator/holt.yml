@@ -2,6 +2,8 @@ version: "1.0"
 
 # M3.8 Terraform Module Generator Demo
 # Demonstrates hybrid LLM-and-tool workflow with 6 specialized agents
+orchestrator:
+  max_review_iterations: 5  # Allow 5 rework attempts (default is 3)
 
 agents:
   TerraformDrafter:

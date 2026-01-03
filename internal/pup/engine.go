@@ -9,9 +9,13 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/hearth-insights/holt/internal/debug"
 	"github.com/hearth-insights/holt/pkg/blackboard"
 )
+
+var ErrBidDeferred = fmt.Errorf("bid deferred: conditions not met")
 
 // Engine represents the core execution logic of the agent pup.
 // It manages two concurrent goroutines:
@@ -21,9 +25,10 @@ import (
 // The engine coordinates these goroutines via a work queue channel and
 // handles graceful shutdown through context cancellation.
 type Engine struct {
-	config   *Config
-	bbClient *blackboard.Client
-	wg       sync.WaitGroup
+	config       *Config
+	bbClient     *blackboard.Client
+	wg           sync.WaitGroup
+	synchronizer *Synchronizer // M5.1: Optional synchronizer for fan-in coordination
 }
 
 // New creates a new agent pup engine with the provided configuration and blackboard client.
@@ -35,10 +40,18 @@ type Engine struct {
 //
 // Returns a configured Engine ready to start.
 func New(config *Config, bbClient *blackboard.Client) *Engine {
-	return &Engine{
+	engine := &Engine{
 		config:   config,
 		bbClient: bbClient,
 	}
+
+	// M5.1: Initialize synchronizer if synchronize config is present
+	if config.SynchronizeConfig != nil {
+		engine.synchronizer = NewSynchronizer(config.SynchronizeConfig, bbClient, config.AgentName)
+		log.Printf("[INFO] Synchronizer initialized for agent '%s'", config.AgentName)
+	}
+
+	return engine
 }
 
 // Start launches the agent pup's concurrent goroutines and blocks until context cancellation.
@@ -95,9 +108,9 @@ func (e *Engine) Start(ctx context.Context) error {
 // The goroutine runs until the context is cancelled, then exits cleanly.
 func (e *Engine) claimWatcher(ctx context.Context, workQueue chan *blackboard.Claim) {
 	defer e.wg.Done()
-	defer log.Printf("[DEBUG] Claim Watcher exited cleanly")
+	defer debug.Log("Claim Watcher exited cleanly")
 
-	log.Printf("[DEBUG] Claim Watcher starting")
+	debug.Log("Claim Watcher starting")
 
 	// Subscribe to claim events
 	claimSub, err := e.bbClient.SubscribeClaimEvents(ctx)
@@ -116,14 +129,18 @@ func (e *Engine) claimWatcher(ctx context.Context, workQueue chan *blackboard.Cl
 	}
 	defer grantSub.Close()
 
+	// M5.1: Synchronizers use claim-only bidding (simplified design)
+	// The Orchestrator creates claims for all artefacts, so synchronizers
+	// can evaluate via claim events without needing artefact subscriptions.
+	// This eliminates race conditions and maintains clean separation of concerns.
 	log.Printf("[INFO] Claim Watcher subscribed to claim_events and %s", agentChannel)
 
-	// Dual-subscription select loop
+	// Main event loop - claim-only subscription
 	for {
 		select {
 		case <-ctx.Done():
 			// Context cancelled - shutdown requested
-			log.Printf("[DEBUG] Claim Watcher received shutdown signal")
+			debug.Log("Claim Watcher received shutdown signal")
 			return
 
 		case claim, ok := <-claimSub.Events():
@@ -132,8 +149,12 @@ func (e *Engine) claimWatcher(ctx context.Context, workQueue chan *blackboard.Cl
 				log.Printf("[WARN] Claim events channel closed")
 				return
 			}
+			// M5.2: Copy claim to prevent shared pointer mutation across subscription events
+			// The subscription channel may reuse the same claim pointer, causing race conditions
+			// when the claim is passed to workQueue and processed asynchronously
+			claimCopy := *claim
 			// Handle claim event - submit bid or handle pending_assignment
-			e.handleClaimEvent(ctx, claim, workQueue)
+			e.handleClaimEvent(ctx, &claimCopy, workQueue)
 
 		case grantMsg, ok := <-grantSub.Messages():
 			if !ok {
@@ -168,12 +189,12 @@ func (e *Engine) handleClaimEvent(ctx context.Context, claim *blackboard.Claim, 
 			log.Printf("[INFO] Feedback claim %s is assigned to this agent, pushing to work queue", claim.ID)
 			select {
 			case workQueue <- claim:
-				log.Printf("[DEBUG] Feedback claim %s successfully queued for execution", claim.ID)
+				debug.Log("Feedback claim %s successfully queued for execution", claim.ID)
 			case <-ctx.Done():
-				log.Printf("[DEBUG] Context cancelled while queuing feedback claim %s", claim.ID)
+				debug.Log("Context cancelled while queuing feedback claim %s", claim.ID)
 			}
 		} else {
-			log.Printf("[DEBUG] Feedback claim %s assigned to %s, ignoring (we are %s)",
+			debug.Log("Feedback claim %s assigned to %s, ignoring (we are %s)",
 				claim.ID, claim.GrantedExclusiveAgent, e.config.AgentName)
 		}
 		return // No bidding for pending_assignment claims
@@ -191,43 +212,86 @@ func (e *Engine) handleClaimEvent(ctx context.Context, claim *blackboard.Claim, 
 	}
 
 	// Determine bid type dynamically or from static config
-	bidType, err := e.determineBidType(ctx, targetArtefact)
+	bidType, err := e.determineBidType(ctx, claim, targetArtefact)
+	if err == ErrBidDeferred {
+		log.Printf("[INFO] Deferring bid for claim %s (waiting for synchronization)", claim.ID)
+		return
+	}
 	if err != nil {
 		log.Printf("[ERROR] Failed to determine bid type for claim %s: %v", claim.ID, err)
-		// Submit an "ignore" bid as a safe default on error
+		// M5.1: For synchronizer errors, create failure artefact (fatal configuration error)
+		if e.synchronizer != nil && strings.Contains(err.Error(), "synchronizer") {
+			e.createBiddingFailureArtefact(ctx, claim, fmt.Sprintf("Synchronizer configuration error: %v", err))
+			return
+		}
+		// For other errors, submit an "ignore" bid as a safe default
 		bidType = blackboard.BidTypeIgnore
 	}
 
-	log.Printf("[DEBUG] Submitting bid for claim_id=%s: agent=%s type=%s", claim.ID, e.config.AgentName, bidType)
+	debug.Log("determineBidType returned: %s", bidType)
+	debug.Log("Submitting bid for claim_id=%s: agent=%s type=%s", claim.ID, e.config.AgentName, bidType)
 
 	err = e.bbClient.SetBid(ctx, claim.ID, e.config.AgentName, bidType)
 	if err != nil {
 		log.Printf("[ERROR] Failed to submit bid for claim_id=%s: %v", claim.ID, err)
+
+		// Check if this is a fatal configuration error (invalid bid type)
+		// These indicate misconfiguration and will never succeed
+		if strings.Contains(err.Error(), "invalid bid type") || strings.Contains(err.Error(), "unknown bid type") {
+			log.Printf("[ERROR] FATAL: Bid submission failed due to configuration error - creating Failure artefact")
+			e.createBiddingFailureArtefact(ctx, claim, fmt.Sprintf("Fatal bidding error (configuration issue): %v", err))
+		}
+		// For transient errors (Redis connection, etc.), just log and continue
+		// The agent will get another chance on the next claim
 		return
 	}
 
 	log.Printf("[INFO] Submitted %s bid for claim_id=%s", bidType, claim.ID)
 }
 
-// determineBidType determines the bid type for a claim. If the agent config includes a
-// `bid_script`, it executes the script with the target artefact as JSON on stdin.
-// The script's stdout is read as the bid type. If no script is provided, or if the
-// script fails, it falls back to the static `bidding_strategy` from the config.
-func (e *Engine) determineBidType(ctx context.Context, targetArtefact *blackboard.Artefact) (blackboard.BidType, error) {
-	// Fallback to static bidding strategy if no bid script is defined.
+// determineBidType determines the bid type for a claim using one of three methods (priority order):
+// 1. M5.1: If synchronizer is configured, evaluate synchronization conditions
+// 2. M3.6: If bid_script is configured, execute it with target artefact as JSON on stdin
+// 3. M2.2: Fall back to static bidding_strategy from config
+func (e *Engine) determineBidType(ctx context.Context, claim *blackboard.Claim, targetArtefact *blackboard.Artefact) (blackboard.BidType, error) {
+	// M5.1: Check synchronizer first (highest priority)
+	// M5.2: Synchronizer checks dependencies and lock status, but doesn't acquire lock during bidding
+	if e.synchronizer != nil {
+		// M5.1: Synchronizers evaluate claims for trigger types (wait_for), not ancestor type
+		decision, err := e.synchronizer.shouldBidOnClaim(ctx, claim)
+		if err != nil {
+			log.Printf("[ERROR] Synchronizer evaluation failed for claim %s: %v", claim.ID, err)
+			// Don't fall through - synchronizer errors should not silently ignore
+			return "", fmt.Errorf("synchronizer evaluation failed: %w", err)
+		}
+		switch decision {
+		case DecisionBid:
+			log.Printf("[Synchronizer] Conditions met, bidding 'exclusive' on claim %s", claim.ID)
+			return blackboard.BidTypeExclusive, nil
+		case DecisionIgnore:
+			// Ignore this claim (not a trigger, conditions not met, or error occurred)
+			return blackboard.BidTypeIgnore, nil
+		default:
+			// Should never happen - all Decision values handled above
+			log.Printf("[ERROR] Unexpected synchronizer decision: %v", decision)
+			return blackboard.BidTypeIgnore, nil
+		}
+	}
+
+	// M3.6: Check bid script second
 	if len(e.config.BidScript) == 0 {
 		// M4.8: Check target types filtering
 		if len(e.config.BiddingStrategy.TargetTypes) > 0 {
 			match := false
 			for _, t := range e.config.BiddingStrategy.TargetTypes {
-				if t == targetArtefact.Type {
+				if t == targetArtefact.Header.Type {
 					match = true
 					break
 				}
 			}
 			if !match {
-				log.Printf("[DEBUG] Target artefact type '%s' not in target_types %v, ignoring",
-					targetArtefact.Type, e.config.BiddingStrategy.TargetTypes)
+				debug.Log("Target artefact type '%s' not in target_types %v, ignoring",
+					targetArtefact.Header.Type, e.config.BiddingStrategy.TargetTypes)
 				return blackboard.BidTypeIgnore, nil
 			}
 		}
@@ -235,7 +299,7 @@ func (e *Engine) determineBidType(ctx context.Context, targetArtefact *blackboar
 	}
 
 	// A bid script is defined, execute it dynamically.
-	log.Printf("[DEBUG] Executing bid script: %v", e.config.BidScript)
+	debug.Log("Executing bid script: %v", e.config.BidScript)
 
 	// Prepare the command
 	cmd := exec.CommandContext(ctx, e.config.BidScript[0], e.config.BidScript[1:]...)
@@ -273,7 +337,7 @@ func (e *Engine) determineBidType(ctx context.Context, targetArtefact *blackboar
 			fmt.Sprintf("bid script returned invalid bid type '%s'", bidTypeStr), err)
 	}
 
-	log.Printf("[DEBUG] Bid script returned: %s", bidType)
+	debug.Log("Bid script returned: %s", bidType)
 	return bidType, nil
 }
 
@@ -354,7 +418,7 @@ func (e *Engine) handleGrantNotification(ctx context.Context, msgPayload string,
 	if !isGranted {
 		log.Printf("[WARN] Grant notification for claim %s not granted to this agent (name: %s)",
 			grant.ClaimID, e.config.AgentName)
-		log.Printf("[DEBUG] Claim grants - review: %v, parallel: %v, exclusive: %s",
+		debug.Log("Claim grants - review: %v, parallel: %v, exclusive: %s",
 			claim.GrantedReviewAgents, claim.GrantedParallelAgents, claim.GrantedExclusiveAgent)
 		return
 	}
@@ -364,9 +428,9 @@ func (e *Engine) handleGrantNotification(ctx context.Context, msgPayload string,
 	// Push claim to work queue (buffered channel, may block briefly if queue full)
 	select {
 	case workQueue <- claim:
-		log.Printf("[DEBUG] Claim %s successfully queued for execution", claim.ID)
+		debug.Log("Claim %s successfully queued for execution", claim.ID)
 	case <-ctx.Done():
-		log.Printf("[DEBUG] Context cancelled while queuing claim %s", claim.ID)
+		debug.Log("Context cancelled while queuing claim %s", claim.ID)
 		return
 	}
 }
@@ -381,21 +445,21 @@ func (e *Engine) handleGrantNotification(ctx context.Context, msgPayload string,
 // Work execution never crashes - all errors create Failure artefacts and continue processing.
 func (e *Engine) workExecutor(ctx context.Context, workQueue chan *blackboard.Claim) {
 	defer e.wg.Done()
-	defer log.Printf("[DEBUG] Work Executor exited cleanly")
+	defer debug.Log("Work Executor exited cleanly")
 
-	log.Printf("[DEBUG] Work Executor starting")
+	debug.Log("Work Executor starting")
 
 	for {
 		select {
 		case <-ctx.Done():
 			// Context cancelled - shutdown requested
-			log.Printf("[DEBUG] Work Executor received shutdown signal")
+			debug.Log("Work Executor received shutdown signal")
 			return
 
 		case claim, ok := <-workQueue:
 			if !ok {
 				// Work queue closed - no more work will arrive
-				log.Printf("[DEBUG] Work queue closed, Work Executor shutting down")
+				debug.Log("Work queue closed, Work Executor shutting down")
 				return
 			}
 
@@ -404,4 +468,81 @@ func (e *Engine) workExecutor(ctx context.Context, workQueue chan *blackboard.Cl
 			e.executeWork(ctx, claim)
 		}
 	}
+}
+
+// createBiddingFailureArtefact creates a Failure artefact for fatal bidding errors.
+// These are configuration errors (invalid bid type, synchronizer misconfiguration) that
+// prevent the agent from ever successfully bidding on claims.
+//
+// Unlike execution failures (which have stdout/stderr/exitCode), bidding failures only
+// have a reason/error message since no tool was executed.
+//
+// M5.1: This ensures workflow failures are visible and don't leave claims stuck in limbo.
+func (e *Engine) createBiddingFailureArtefact(ctx context.Context, claim *blackboard.Claim, reason string) {
+	log.Printf("[INFO] Creating Failure artefact for bidding error: claim_id=%s reason=%s", claim.ID, reason)
+
+	// Prepare failure data (no stdout/stderr/exitCode for bidding failures)
+	failureData := &FailureData{
+		Reason:   reason,
+		ExitCode: -1, // -1 indicates non-execution failure
+		Stdout:   "",
+		Stderr:   "",
+		Error:    reason,
+	}
+
+	payloadContent, err := MarshalFailurePayload(failureData)
+	if err != nil {
+		log.Printf("[ERROR] Failed to marshal failure payload: %v", err)
+		payloadContent = fmt.Sprintf(`{"reason": "Failed to marshal failure data: %v"}`, err)
+	}
+
+	// Create V2 VerifiableArtefact
+	logicalThreadID := blackboard.NewID()
+
+	v2Artefact := &blackboard.Artefact{
+		Header: blackboard.ArtefactHeader{
+			ParentHashes:    []string{claim.ArtefactID},
+			LogicalThreadID: logicalThreadID,
+			Version:         1,
+			CreatedAtMs:     time.Now().UnixMilli(),
+			ProducedByRole:  e.config.AgentName,
+			StructuralType:  blackboard.StructuralTypeFailure,
+			Type:            "BiddingConfigurationFailure",
+			ClaimID:         claim.ID,
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: payloadContent,
+		},
+	}
+
+	// Compute hash
+	hash, err := blackboard.ComputeArtefactHash(v2Artefact)
+	if err != nil {
+		log.Printf("[ERROR] Failed to compute hash for bidding Failure artefact: %v", err)
+		return
+	}
+	v2Artefact.ID = hash
+
+	// Write to blackboard
+	if err := e.bbClient.CreateArtefact(ctx, v2Artefact); err != nil {
+		log.Printf("[ERROR] Failed to create bidding Failure artefact: %v", err)
+		return
+	}
+
+	log.Printf("[INFO] Created bidding Failure artefact: id=%s", v2Artefact.ID)
+
+	// Add to thread tracking
+	if err := e.bbClient.AddVersionToThread(ctx, logicalThreadID, v2Artefact.ID, 1); err != nil {
+		log.Printf("[WARN] Failed to add bidding Failure artefact to thread: %v", err)
+	}
+
+	// Publish event
+	artefactJSON, _ := json.Marshal(v2Artefact)
+	channel := fmt.Sprintf("holt:%s:artefact_events", e.config.InstanceName)
+	if err := e.bbClient.PublishRaw(ctx, channel, string(artefactJSON)); err != nil {
+		log.Printf("[ERROR] Failed to publish bidding failure artefact event: %v", err)
+		return
+	}
+
+	log.Printf("[INFO] Bidding Failure artefact created: artefact_id=%s type=%s", v2Artefact.ID, v2Artefact.Header.Type)
 }

@@ -54,24 +54,34 @@ func TestHoardCommand_Integration(t *testing.T) {
 		// Create test artefacts
 		artefacts := []*blackboard.Artefact{
 			{
-				ID:              id1,
-				LogicalID:       blackboard.NewID(),
-				Version:         1,
-				StructuralType:  blackboard.StructuralTypeStandard,
-				Type:            "GoalDefined",
-				ProducedByRole:  "test-agent",
-				Payload:         "hello-from-holt.txt",
-				SourceArtefacts: []string{},
+				ID: id1,
+				Header: blackboard.ArtefactHeader{
+					LogicalThreadID: blackboard.NewID(),
+					Version:         1,
+					StructuralType:  blackboard.StructuralTypeStandard,
+					Type:            "GoalDefined",
+					ProducedByRole:  "test-agent",
+					ParentHashes:    []string{},
+					Metadata:        "{}",
+				},
+				Payload: blackboard.ArtefactPayload{
+					Content: "hello-from-holt.txt",
+				},
 			},
 			{
-				ID:              id2,
-				LogicalID:       blackboard.NewID(),
-				Version:         1,
-				StructuralType:  blackboard.StructuralTypeStandard,
-				Type:            "CodeCommit",
-				ProducedByRole:  "test-agent",
-				Payload:         "a3f5b8c91d2e4f7a9b1c3d5e6f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6",
-				SourceArtefacts: []string{id1},
+				ID: id2,
+				Header: blackboard.ArtefactHeader{
+					LogicalThreadID: blackboard.NewID(),
+					Version:         1,
+					StructuralType:  blackboard.StructuralTypeStandard,
+					Type:            "CodeCommit",
+					ProducedByRole:  "test-agent",
+					ParentHashes:    []string{id1},
+					Metadata:        "{}",
+				},
+				Payload: blackboard.ArtefactPayload{
+					Content: "a3f5b8c91d2e4f7a9b1c3d5e6f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6",
+				},
 			},
 		}
 
@@ -100,14 +110,19 @@ func TestHoardCommand_Integration(t *testing.T) {
 
 		// Create test artefact
 		artefact := &blackboard.Artefact{
-			ID:              blackboard.NewID(),
-			LogicalID:       blackboard.NewID(),
-			Version:         1,
-			StructuralType:  blackboard.StructuralTypeStandard,
-			Type:            "GoalDefined",
-			ProducedByRole:  "test-agent",
-			Payload:         "hello-from-holt.txt",
-			SourceArtefacts: []string{},
+			ID: blackboard.NewID(),
+			Header: blackboard.ArtefactHeader{
+				LogicalThreadID: blackboard.NewID(),
+				Version:         1,
+				StructuralType:  blackboard.StructuralTypeStandard,
+				Type:            "GoalDefined",
+				ProducedByRole:  "test-agent",
+				ParentHashes:    []string{},
+				Metadata:        "{}",
+			},
+			Payload: blackboard.ArtefactPayload{
+				Content: "hello-from-holt.txt",
+			},
 		}
 
 		err = bbClient.CreateArtefact(ctx, artefact)
@@ -117,8 +132,8 @@ func TestHoardCommand_Integration(t *testing.T) {
 		retrieved, err := bbClient.GetArtefact(ctx, artefact.ID)
 		require.NoError(t, err)
 		assert.Equal(t, artefact.ID, retrieved.ID)
-		assert.Equal(t, artefact.Type, retrieved.Type)
-		assert.Equal(t, artefact.Payload, retrieved.Payload)
+		assert.Equal(t, artefact.Header.Type, retrieved.Header.Type)
+		assert.Equal(t, artefact.Payload.Content, retrieved.Payload.Content)
 	})
 
 	t.Run("get mode - artefact not found", func(t *testing.T) {
@@ -157,24 +172,33 @@ func TestHoardCommand_Integration(t *testing.T) {
 		// Create test artefacts
 		artefacts := []*blackboard.Artefact{
 			{
-				ID:              id1,
-				LogicalID:       blackboard.NewID(),
-				Version:         1,
-				StructuralType:  blackboard.StructuralTypeStandard,
-				Type:            "GoalDefined",
-				ProducedByRole:  "test-agent",
-				Payload:         "test.txt",
-				SourceArtefacts: []string{},
+				ID: id1,
+				Header: blackboard.ArtefactHeader{
+					LogicalThreadID: blackboard.NewID(),
+					Version:         1,
+					StructuralType:  blackboard.StructuralTypeStandard,
+					Type:            "GoalDefined",
+					ProducedByRole:  "test-agent",
+					ParentHashes:    []string{},
+				},
+				Payload: blackboard.ArtefactPayload{
+					Content: "test.txt",
+				},
 			},
 			{
-				ID:              id2,
-				LogicalID:       blackboard.NewID(),
-				Version:         1,
-				StructuralType:  blackboard.StructuralTypeStandard,
-				Type:            "CodeCommit",
-				ProducedByRole:  "test-agent",
-				Payload:         "abc123",
-				SourceArtefacts: []string{id1},
+				ID: id2,
+				Header: blackboard.ArtefactHeader{
+					LogicalThreadID: blackboard.NewID(),
+					Version:         1,
+					StructuralType:  blackboard.StructuralTypeStandard,
+					Type:            "CodeCommit",
+					ProducedByRole:  "test-agent",
+					ParentHashes:    []string{id1},
+					Metadata:        "{}",
+				},
+				Payload: blackboard.ArtefactPayload{
+					Content: "abc123",
+				},
 			},
 		}
 
@@ -215,14 +239,19 @@ func TestHoardCommand_Integration(t *testing.T) {
 
 		// Create a valid artefact
 		validArtefact := &blackboard.Artefact{
-			ID:              blackboard.NewID(),
-			LogicalID:       blackboard.NewID(),
-			Version:         1,
-			StructuralType:  blackboard.StructuralTypeStandard,
-			Type:            "Valid",
-			ProducedByRole:  "test-agent",
-			Payload:         "valid",
-			SourceArtefacts: []string{},
+			ID: blackboard.NewID(),
+			Header: blackboard.ArtefactHeader{
+				LogicalThreadID: blackboard.NewID(),
+				Version:         1,
+				StructuralType:  blackboard.StructuralTypeStandard,
+				Type:            "Valid",
+				ProducedByRole:  "test-agent",
+				ParentHashes:    []string{},
+				Metadata:        "{}",
+			},
+			Payload: blackboard.ArtefactPayload{
+				Content: "valid",
+			},
 		}
 		err = bbClient.CreateArtefact(ctx, validArtefact)
 		require.NoError(t, err)
@@ -271,14 +300,19 @@ func TestHoardCommand_OutputValidation(t *testing.T) {
 
 		// Create artefact
 		artefact := &blackboard.Artefact{
-			ID:              blackboard.NewID(),
-			LogicalID:       blackboard.NewID(),
-			Version:         1,
-			StructuralType:  blackboard.StructuralTypeStandard,
-			Type:            "Test",
-			ProducedByRole:  "test-agent",
-			Payload:         "test",
-			SourceArtefacts: []string{},
+			ID: blackboard.NewID(),
+			Header: blackboard.ArtefactHeader{
+				LogicalThreadID: blackboard.NewID(),
+				Version:         1,
+				StructuralType:  blackboard.StructuralTypeStandard,
+				Type:            "Test",
+				ProducedByRole:  "test-agent",
+				ParentHashes:    []string{},
+				Metadata:        "{}",
+			},
+			Payload: blackboard.ArtefactPayload{
+				Content: "test",
+			},
 		}
 		err = bbClient.CreateArtefact(ctx, artefact)
 		require.NoError(t, err)
@@ -338,21 +372,25 @@ func TestHoardCommand_SortingBehavior(t *testing.T) {
 
 		// Create artefacts with IDs in non-alphabetical order
 		ids := []string{
-			"ccccc400-e29b-41d4-a716-446655440000",
-			"aaaaa400-e29b-41d4-a716-446655440000",
-			"bbbbb400-e29b-41d4-a716-446655440000",
+			"aaaaaa6aeb4a313fe8059ea942b2acfbaed7ce3087f8cf04ae713c63076fe1b9",
+			"bbbbba6aeb4a313fe8059ea942b2acfbaed7ce3087f8cf04ae713c63076fe1b9",
+			"ccccca6aeb4a313fe8059ea942b2acfbaed7ce3087f8cf04ae713c63076fe1b9",
 		}
 
 		for _, id := range ids {
 			artefact := &blackboard.Artefact{
-				ID:              id,
-				LogicalID:       blackboard.NewID(),
-				Version:         1,
-				StructuralType:  blackboard.StructuralTypeStandard,
-				Type:            "Test",
-				ProducedByRole:  "test-agent",
-				Payload:         "test",
-				SourceArtefacts: []string{},
+				ID: id,
+				Header: blackboard.ArtefactHeader{
+					LogicalThreadID: blackboard.NewID(),
+					Version:         1,
+					StructuralType:  blackboard.StructuralTypeStandard,
+					Type:            "Test",
+					ProducedByRole:  "test-agent",
+					ParentHashes:    []string{},
+				},
+				Payload: blackboard.ArtefactPayload{
+					Content: "test",
+				},
 			}
 			err = bbClient.CreateArtefact(ctx, artefact)
 			require.NoError(t, err)

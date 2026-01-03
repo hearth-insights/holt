@@ -596,7 +596,7 @@ func (d *Debugger) RunInteractivePrompt() {
 		defer d.wg.Done()
 		// Stream events with no filters (show all events)
 		// Use default format (human-readable with timestamps and emojis)
-		err := watch.StreamActivity(d.ctx, d.client, d.instanceName, watch.OutputFormatDefault, nil, false, os.Stdout)
+		err := watch.StreamActivity(d.ctx, d.client, d.instanceName, watch.OutputFormatDefault, nil, false, false, os.Stdout)
 		if err != nil && err != context.Canceled {
 			// Don't show error on clean shutdown
 			log.Printf("Event stream ended: %v", err)
@@ -821,20 +821,20 @@ func (d *Debugger) cmdPrint(artefactID string) {
 	fmt.Println("\n" + strings.Repeat("─", 60))
 	fmt.Printf("Artefact %s\n", shortID(artefact.ID))
 	fmt.Println(strings.Repeat("─", 60))
-	fmt.Printf("  Type:             %s\n", artefact.Type)
-	fmt.Printf("  Structural Type:  %s\n", artefact.StructuralType)
-	fmt.Printf("  Produced By:      %s\n", artefact.ProducedByRole)
-	fmt.Printf("  Version:          %d\n", artefact.Version)
-	fmt.Printf("  Payload:          %s\n", artefact.Payload)
-	if len(artefact.SourceArtefacts) > 0 {
+	fmt.Printf("  Type:             %s\n", artefact.Header.Type)
+	fmt.Printf("  Structural Type:  %s\n", artefact.Header.StructuralType)
+	fmt.Printf("  Produced By:      %s\n", artefact.Header.ProducedByRole)
+	fmt.Printf("  Version:          %d\n", artefact.Header.Version)
+	fmt.Printf("  Payload:          %s\n", artefact.Payload.Content)
+	if len(artefact.Header.ParentHashes) > 0 {
 		// Show short IDs for source artefacts
-		shortSources := make([]string, len(artefact.SourceArtefacts))
-		for i, src := range artefact.SourceArtefacts {
+		shortSources := make([]string, len(artefact.Header.ParentHashes))
+		for i, src := range artefact.Header.ParentHashes {
 			shortSources[i] = shortID(src)
 		}
 		fmt.Printf("  Source Artefacts: %v\n", shortSources)
 	}
-	fmt.Printf("  Created:          %d ms\n", artefact.CreatedAtMs)
+	fmt.Printf("  Created:          %d ms\n", artefact.Header.CreatedAtMs)
 	fmt.Println(strings.Repeat("─", 60) + "\n")
 }
 
@@ -863,7 +863,7 @@ func (d *Debugger) printClaim(claimID string) {
 	fmt.Printf("Claim %s\n", shortID(claim.ID))
 	fmt.Println(strings.Repeat("─", 60))
 	fmt.Printf("  Status:           %s\n", claim.Status)
-	fmt.Printf("  Artefact:         %s (v%d)\n", artefact.Type, artefact.Version)
+	fmt.Printf("  Artefact:         %s (v%d)\n", artefact.Header.Type, artefact.Header.Version)
 	fmt.Printf("  Artefact ID:      %s\n", shortID(claim.ArtefactID))
 
 	// Show bids grouped by type
@@ -911,14 +911,38 @@ func (d *Debugger) printClaim(claimID string) {
 	}
 
 	fmt.Println(strings.Repeat("─", 60))
-	fmt.Printf("\nArtefact payload: %s\n", artefact.Payload)
+	fmt.Printf("\nArtefact payload: %s\n", artefact.Payload.Content)
 	fmt.Println()
 }
 
 func (d *Debugger) cmdReviews() {
-	// TODO: Query Redis for pending_review claims
-	printer.Info("Listing pending reviews...\n")
-	printer.Warning("Not yet implemented\n")
+	// Query for all pending_review claims
+	claims, err := d.client.GetClaimsByStatus(d.ctx, []string{string(blackboard.ClaimStatusPendingReview)})
+	if err != nil {
+		printer.Warning("Failed to query claims: %v\n", err)
+		return
+	}
+
+	if len(claims) == 0 {
+		printer.Info("No pending reviews\n")
+		return
+	}
+
+	fmt.Println("\nPending Reviews:")
+	for i, claim := range claims {
+		// Fetch artefact to show type/version
+		artefact, err := d.client.GetArtefact(d.ctx, claim.ArtefactID)
+		if err != nil {
+			fmt.Printf("  %d. %s (artefact: %s)\n", i+1, shortID(claim.ID), shortID(claim.ArtefactID))
+			fmt.Printf("     Granted to: %v\n", claim.GrantedReviewAgents)
+			continue
+		}
+
+		fmt.Printf("  %d. %s (artefact: %s v%d)\n",
+			i+1, shortID(claim.ID), artefact.Header.Type, artefact.Header.Version)
+		fmt.Printf("     Granted to: %v\n", claim.GrantedReviewAgents)
+		fmt.Printf("     Waiting for: %d review(s)\n\n", len(claim.GrantedReviewAgents))
+	}
 }
 
 func (d *Debugger) cmdReview(args []string) {
@@ -948,7 +972,7 @@ func (d *Debugger) cmdForage(args []string) {
 	}
 
 	// Create GoalDefined artefact using V2 content addressing
-	v2Artefact := &blackboard.VerifiableArtefact{
+	artefact := &blackboard.Artefact{
 		Header: blackboard.ArtefactHeader{
 			ParentHashes:    []string{},
 			LogicalThreadID: blackboard.NewID(),
@@ -958,45 +982,32 @@ func (d *Debugger) cmdForage(args []string) {
 			StructuralType:  blackboard.StructuralTypeStandard,
 			Type:            "GoalDefined",
 			ClaimID:         "", // Root artefact
+			Metadata:        "{}",
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: goal,
 		},
 	}
 
-	hash, err := blackboard.ComputeArtefactHash(v2Artefact)
+	hash, err := blackboard.ComputeArtefactHash(artefact)
 	if err != nil {
 		printer.Error("failed to compute hash", err.Error(), nil)
 		return
 	}
-	v2Artefact.ID = hash
+	artefact.ID = hash
 
-	// Convert to V1 for creation
-	v1Artefact := &blackboard.Artefact{
-		ID:              v2Artefact.ID,
-		LogicalID:       v2Artefact.Header.LogicalThreadID,
-		Version:         v2Artefact.Header.Version,
-		StructuralType:  v2Artefact.Header.StructuralType,
-		Type:            v2Artefact.Header.Type,
-		Payload:         v2Artefact.Payload.Content,
-		SourceArtefacts: v2Artefact.Header.ParentHashes,
-		ProducedByRole:  v2Artefact.Header.ProducedByRole,
-		CreatedAtMs:     v2Artefact.Header.CreatedAtMs,
-		ClaimID:         v2Artefact.Header.ClaimID,
-	}
-
-	if err := d.client.CreateArtefact(d.ctx, v1Artefact); err != nil {
+	if err := d.client.CreateArtefact(d.ctx, artefact); err != nil {
 		printer.Error("failed to create artefact", err.Error(), []string{"Ensure instance is running and Redis is accessible"})
 		return
 	}
 
 	// Show success with both short and full ID
-	shortID := v1Artefact.ID
+	shortID := artefact.ID
 	if len(shortID) > 8 {
 		shortID = shortID[:8] + "..."
 	}
 	printer.Success("✓ GoalDefined artefact created: %s\n", shortID)
-	printer.Info("Full ID: %s\n", v1Artefact.ID)
+	printer.Info("Full ID: %s\n", artefact.ID)
 
 	// Auto-continue if we're paused (workflow should start immediately)
 	d.mu.RLock()

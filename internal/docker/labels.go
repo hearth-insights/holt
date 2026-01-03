@@ -67,12 +67,19 @@ func AgentContainerName(instanceName, agentRole string) string {
 
 // WorkerContainerName returns the worker container name for controller-worker pattern
 // M3.7: Role-based naming for ephemeral workers
+// M5.1.1: Sanitize claim ID to handle Fan-In claim IDs (fanin:ancestor:role)
 func WorkerContainerName(instanceName, agentRole, claimID string) string {
 	// Use first 8 chars of claim ID for readability
 	shortClaimID := claimID
 	if len(claimID) > 8 {
 		shortClaimID = claimID[:8]
 	}
+
+	// Sanitize claim ID to ensure valid Docker container name
+	// Docker only allows [a-zA-Z0-9][a-zA-Z0-9_.-]
+	// Replace colons and other invalid characters with dashes
+	shortClaimID = strings.ReplaceAll(shortClaimID, ":", "-")
+
 	return fmt.Sprintf("holt-%s-%s-worker-%s", instanceName, agentRole, shortClaimID)
 }
 

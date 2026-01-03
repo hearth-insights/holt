@@ -10,9 +10,9 @@
 For any non-trivial task, load this core set of documents to understand the project's high-level architecture, goals, and current state.
 
 - **`README.md`** (~2,000 tokens) - Project overview, quick start, and links to key documents.
-- **`ROADMAP.md`** (~500 tokens) - The official 6-phase project roadmap.
-- **`docs/PROJECT_CONTEXT.md`** (~1,500 tokens) - The project's core philosophy and architectural principles.
-- **`docs/QUICK_REFERENCE.md`** (~1,000 tokens) - Essential data structures, CLI commands, and Redis patterns.
+- **`ROADMAP.md`** (~500 tokens) - The official project roadmap.
+- **`docs/reference/architecture.md`** (~1,500 tokens) - The project's core philosophy, architectural principles, and component design.
+- **`docs/reference/cli.md`** (~1,000 tokens) - Essential CLI command reference and usage.
 
 ---
 
@@ -23,7 +23,7 @@ To supplement the core context, select from the lists below based on your specif
 ### **Topic: Independent Holt Deployment (No Source Code)**
 - **`docs/independent-holt-clan-creation/`** - Complete guide for users who want to create Holt configurations and agents WITHOUT the full source code
   - `README.md` - Overview and getting started
-  - `agent_interface.md` - The pup contract (stdin/stdout, logging)
+  - `agent_interface.md` - The pup contract (stdin/stdout, logging, **bidding types**)
   - `agent_definition.md` - How to define agents in holt.yml
   - `best_practices.md` - Agent design patterns and anti-patterns
   - `cli_reference.md` - Complete CLI command reference
@@ -31,26 +31,35 @@ To supplement the core context, select from the lists below based on your specif
 
 ### **Topic: Onboarding & Contributing**
 - **`CONTRIBUTING.md`** (~1,000 tokens) - How to set up the environment and contribute.
-- **`docs/DEVELOPMENT_PROCESS.md`** (~2,000 tokens) - The mandatory design-first development lifecycle.
+- **`docs/reference/development-process.md`** (~2,000 tokens) - The mandatory design-first development lifecycle.
+
+### **Topic: Agent Development**
+- **`docs/guides/agent-development.md`** - General guide for building agents.
+- **`docs/guides/logging.md`** - (M4.10) Guide to the FD 3 Return architecture for agent logging.
+- **`docs/guides/debugging.md`** - Strategies for debugging agents and workflows.
+
+### **Topic: Advanced Coordination**
+- **`docs/guides/fan-out-in-synchronization.md`** - (M5.1) Guide to fan-in/fan-out workflows and synchronizer agents.
 
 ### **Topic: Enterprise & Compliance Features**
 - **`docs/compliance/ENTERPRISE.md`** (~1,000 tokens) - Explains built-in security, data sovereignty, and air-gap capabilities.
 - **`docs/compliance/CONTROLS_MAP.md`** (~1,500 tokens) - Maps Holt features to HIPAA, SOC 2, and ISO 27001 technical controls.
-- **`docs/compliance/AUDIT_DEFENSE.md`** (~1,200 tokens) - Articulates the forensic argument for Internal Audit, explaining how deterministic orchestration resolves the "Audit Paradox".
+- **`docs/compliance/AUDIT_DEFENSE.md`** (~1,200 tokens) - Articulates the forensic argument for Internal Audit.
+- **`docs/reference/system-spine.md`** - (M4.7) Documentation on Configuration Drift Detection and the SystemManifest.
 
-### **Topic: Learning by Example**
-- **`docs/HOW_TO_1_BUILD_A_SIMPLE_AGENT.md`** - Walkthrough of the basic file-creation agent.
-- **`docs/HOW_TO_2_BUILD_A_MULTI_AGENT_WORKFLOW.md`** - Deep dive into the collaborative recipe-generator demo.
-- **`docs/HOW_TO_3_BUILD_AN_IAC_AGENT.md`** - Guide to the advanced Terraform agent.
+### **Topic: Learning by Example (Tutorials)**
+- **`docs/tutorials/simple-agent.md`** - Walkthrough of the basic file-creation agent.
+- **`docs/tutorials/multi-agent-workflow.md`** - Deep dive into the collaborative recipe-generator demo.
+- **`docs/tutorials/iac-agent.md`** - Guide to the advanced Terraform agent.
 
 ### **Topic: Core Architecture Deep Dive**
-- **`design/holt-system-specification.md`** (~5,000 tokens) - The complete technical architecture.
-- **`design/holt-orchestrator-component.md`** (~3,000 tokens) - The Orchestrator's internal logic.
-- **`design/agent-pup.md`** (~3,000 tokens) - The `pup` architecture and tool execution contract.
+- **`docs/reference/architecture.md`** - The complete technical architecture.
+- **`docs/reference/cryptography.md`** - Technical specification of the Merkle DAG and verification.
+- **`docs/reference/system-spine.md`** - System integrity and configuration ledger details.
 
 ### **Topic: Designing a New Feature**
-- **`DEVELOPMENT_PROCESS.md`** (~2,000 tokens) - The three-stage development lifecycle.
-- **`design/holt-feature-design-template.md`** (~3,500 tokens) - The required template for all new feature designs.
+- **`docs/reference/development-process.md`** (~2,000 tokens) - The three-stage development lifecycle.
+- **`docs/reference/architecture.md`** - Reference the current system architecture before designing changes.
 
 ---
 
@@ -60,16 +69,21 @@ To supplement the core context, select from the lists below based on your specif
   - → `docs/compliance/ENTERPRISE.md`
   - → `docs/compliance/CONTROLS_MAP.md`
   - → `docs/compliance/AUDIT_DEFENSE.md`
+  - → `docs/reference/system-spine.md`
 
 - **Goal: "Learn how to build my first agent."**
-  - → `docs/HOW_TO_1_BUILD_A_SIMPLE_AGENT.md`
-  - → `docs/QUICK_REFERENCE.md` (for data structures)
+  - → `docs/tutorials/simple-agent.md`
+  - → `docs/guides/logging.md` (Crucial for output handling)
+  - → `docs/reference/cli.md`
+  - → `docs/independent-holt-clan-creation/agent_interface.md` (for Bidding Types)
 
-- **Goal: "Design a new feature for Phase 4."**
-  - → `ROADMAP.md` (to understand Phase 4 goals)
-  - → `docs/DEVELOPMENT_PROCESS.md` (to understand the process)
-  - → `design/holt-feature-design-template.md` (to create the design document)
+- **Goal: "Understand how the Orchestrator grants claims (Grant Order)."**
+  - → `docs/reference/architecture.md` (Section: Phased Execution)
+
+- **Goal: "Design a new feature."**
+  - → `ROADMAP.md` (to understand current phase goals)
+  - → `docs/reference/development-process.md` (to understand the standardized process)
 
 - **Goal: "Fix a bug in the Orchestrator."**
-  - → `design/holt-orchestrator-component.md` (to understand the logic)
-  - → `docs/QUICK_REFERENCE.md` (for Redis patterns)
+  - → `docs/reference/architecture.md` (to understand the logic)
+  - → `docs/guides/debugging.md`

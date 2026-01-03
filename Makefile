@@ -49,7 +49,7 @@ help:
 	@echo ""
 	@echo "Development:"
 	@echo "  build-orchestrator  - Build orchestrator binary (for debugging only)"
-	@echo "  build-pup           - Build agent pup binary"
+	@echo "  build-pup           - Build agent pup binary (Linux, matches host arch)"
 	@echo "  cleanup-docker      - Remove all Holt Docker containers and networks"
 	@echo "  install             - Install holt binary to user bin directory"
 	@echo "                        (tries /usr/local/bin, ~/.local/bin, or GOPATH/bin)"
@@ -159,7 +159,7 @@ test-failed: build build-pup docker-orchestrator
 build:
 	@echo "Building holt CLI..."
 	@mkdir -p bin
-	@$(GO) build $(LDFLAGS) -o bin/holt ./cmd/holt
+	@$(GO) build $(LDFLAGS) -o bin/holt ./cmd/holt || { echo "❌ Failed to build holt CLI"; exit 1; }
 	@echo "✓ Built: bin/holt (version: $(VERSION), commit: $(COMMIT))"
 
 # Cross-compile for macOS ARM64 (M1/M2/M3 Macs)
@@ -194,15 +194,23 @@ build-linux-amd64:
 build-orchestrator:
 	@echo "Building orchestrator..."
 	@mkdir -p bin
-	@$(GO) build $(LDFLAGS) -o bin/holt-orchestrator ./cmd/orchestrator
+	@$(GO) build $(LDFLAGS) -o bin/holt-orchestrator ./cmd/orchestrator || { echo "❌ Failed to build orchestrator"; exit 1; }
 	@echo "✓ Built: bin/holt-orchestrator"
 
 # Build the agent pup binary
+# Note: Builds for Linux by default since pups run inside Docker containers
+# Detects host architecture to match Docker's default platform
+# Use build-pup-darwin-* targets if you need a native macOS binary for testing
 build-pup:
-	@echo "Building agent pup..."
+	@echo "Building agent pup for Linux..."
 	@mkdir -p bin
-	@$(GO) build $(LDFLAGS) -o bin/holt-pup ./cmd/pup
-	@echo "✓ Built: bin/holt-pup"
+	@if [ "$$(uname -m)" = "aarch64" ] || [ "$$(uname -m)" = "arm64" ]; then \
+		GOOS=linux GOARCH=arm64 $(GO) build $(LDFLAGS) -o bin/holt-pup ./cmd/pup || { echo "❌ Failed to build pup binary"; exit 1; }; \
+		echo "✓ Built: bin/holt-pup (Linux ARM64)"; \
+	else \
+		GOOS=linux GOARCH=amd64 $(GO) build $(LDFLAGS) -o bin/holt-pup ./cmd/pup || { echo "❌ Failed to build pup binary"; exit 1; }; \
+		echo "✓ Built: bin/holt-pup (Linux AMD64)"; \
+	fi
 
 # Cross-compile pup for macOS ARM64
 build-pup-darwin-arm64:
@@ -270,29 +278,49 @@ build-all: build build-pup docker-orchestrator
 	@echo ""
 	@echo "✓ Build complete!"
 	@echo "  - CLI binary: bin/holt"
-	@echo "  - Pup binary: bin/holt-pup"
+	@echo "  - Pup binary: bin/holt-pup (Linux, for Docker)"
 	@echo "  - Orchestrator image: holt-orchestrator:latest"
 	@echo ""
 	@echo "Ready to use: ./bin/holt up"
 
 # Install holt binary to user bin directory
-# Supports: /usr/local/bin (default, requires sudo), ~/.local/bin, or custom PREFIX
+# Default: /usr/local/bin (recommended for macOS, may require sudo)
+# Fallback: ~/.local/bin or GOPATH/bin
+# Override with: make install PREFIX=/custom/path
 install: build
 	@echo "Installing holt..."
 	@if [ -n "$(PREFIX)" ]; then \
 		INSTALL_DIR="$(PREFIX)/bin"; \
-	elif [ -w /usr/local/bin ]; then \
+		mkdir -p "$$INSTALL_DIR" 2>/dev/null || true; \
+		cp bin/holt "$$INSTALL_DIR/holt"; \
+		chmod +x "$$INSTALL_DIR/holt"; \
+	elif [ -d "/usr/local/bin" ]; then \
 		INSTALL_DIR="/usr/local/bin"; \
+		echo "Installing to: $$INSTALL_DIR (may require sudo)"; \
+		if [ -w "$$INSTALL_DIR" ]; then \
+			cp bin/holt "$$INSTALL_DIR/holt"; \
+			chmod +x "$$INSTALL_DIR/holt"; \
+		else \
+			sudo cp bin/holt "$$INSTALL_DIR/holt"; \
+			sudo chmod +x "$$INSTALL_DIR/holt"; \
+		fi; \
 	elif [ -d "$$HOME/.local/bin" ]; then \
 		INSTALL_DIR="$$HOME/.local/bin"; \
+		cp bin/holt "$$INSTALL_DIR/holt"; \
+		chmod +x "$$INSTALL_DIR/holt"; \
 	else \
 		INSTALL_DIR="$$($(GO) env GOPATH)/bin"; \
 		mkdir -p "$$INSTALL_DIR"; \
+		cp bin/holt "$$INSTALL_DIR/holt"; \
+		chmod +x "$$INSTALL_DIR/holt"; \
 	fi; \
-	echo "Installing to: $$INSTALL_DIR"; \
-	cp bin/holt "$$INSTALL_DIR/holt"; \
-	chmod +x "$$INSTALL_DIR/holt"; \
 	echo "✓ Installed: $$INSTALL_DIR/holt"; \
+	if [ "$$(uname)" = "Darwin" ]; then \
+		sudo xattr -cr "$$INSTALL_DIR/holt" 2>/dev/null || true; \
+		sudo codesign --force --deep --sign - "$$INSTALL_DIR/holt" 2>/dev/null && \
+			echo "✓ Applied macOS ad-hoc code signature" || \
+			echo "⚠️  Warning: Could not sign binary (may be killed by macOS). Run: sudo codesign --force --deep --sign - $$INSTALL_DIR/holt"; \
+	fi; \
 	echo ""; \
 	if ! echo "$$PATH" | grep -q "$${INSTALL_DIR}"; then \
 		echo "⚠️  Note: $$INSTALL_DIR is not in your PATH"; \

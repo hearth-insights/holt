@@ -1154,18 +1154,436 @@ EOF
 
 ---
 
+---
+
+## Synchronizer Agents (M5.1+)
+
+**New in Phase 5:** Synchronizer agents use declarative fan-in coordination to wait for multiple parallel branches to complete before executing.
+
+### When to Use Synchronizers
+
+Use synchronizers when you need to:
+- **Merge parallel branches** - Deploy only after tests + linting + security scan
+- **Aggregate dynamic results** - Collect N sharded outputs (N unknown at design time)
+- **Coordinate without race conditions** - Atomic coordination with deduplication locks
+
+**Don't use traditional bidding logic for fan-in** - it's error-prone and complex. Use synchronizers instead.
+
+---
+
+### Synchronizer Configuration
+
+⚠️ **IMPORTANT: `synchronize` is MUTUALLY EXCLUSIVE with `bidding_strategy` and `bid_script`**
+
+Synchronizers use the `synchronize` block **instead of** `bidding_strategy` or `bid_script`. You cannot use both.
+
+```yaml
+agents:
+  deployer:
+    role: "Deployer"
+    image: "deployer:latest"
+    command: ["/app/deploy.sh"]
+
+    # Synchronize block (mutually exclusive with bidding_strategy)
+    synchronize:
+      # Wait for descendants of this ancestor type
+      ancestor_type: "CodeCommit"
+
+      # Wait for these specific types (Named pattern)
+      wait_for:
+        - type: "TestResult"
+        - type: "LintResult"
+        - type: "SecurityScan"
+
+      # Optional: Limit descendant search depth
+      max_depth: 10
+
+    workspace:
+      mode: ro
+```
+
+**Key differences from standard agents:**
+- ❌ **Cannot use** `bidding_strategy` or `bid_script` (mutually exclusive)
+- ✅ **Must use** `synchronize` block instead
+- ✅ Pup handles bidding logic automatically
+- ✅ Agent only executes when ALL conditions met
+
+**Configuration Validation:**
+```yaml
+# ❌ INVALID: Using both synchronize and bidding_strategy
+agents:
+  bad-deployer:
+    bidding_strategy: "eager"  # ERROR!
+    synchronize:
+      ancestor_type: "CodeCommit"
+      wait_for:
+        - type: "TestResult"
+
+# ✅ VALID: Using only synchronize
+agents:
+  good-deployer:
+    synchronize:
+      ancestor_type: "CodeCommit"
+      wait_for:
+        - type: "TestResult"
+```
+
+---
+
+### Synchronization Patterns
+
+#### Named Pattern
+
+Wait for specific, known artefact types.
+
+**Example:** Deployer waits for 3 distinct types.
+
+```yaml
+synchronize:
+  ancestor_type: "CodeCommit"
+  wait_for:
+    - type: "TestResult"
+    - type: "LintResult"
+    - type: "SecurityScan"
+```
+
+**Behavior:** Bids when exactly ONE of each type exists.
+
+---
+
+#### Producer-Declared Pattern
+
+Wait for N artefacts of the same type, where N is determined at runtime.
+
+**Example:** Aggregator waits for N sharded records.
+
+```yaml
+synchronize:
+  ancestor_type: "DataBatch"
+  wait_for:
+    - type: "ProcessedRecord"
+      count_from_metadata: "batch_size"
+```
+
+**Behavior:** Reads expected count from artefact metadata, waits until N exist.
+
+**Metadata injection (automatic):** When a producer agent outputs multiple artefacts, the pup injects `{"batch_size": "N"}` into each artefact's metadata.
+
+---
+
+### Synchronizer Input Format
+
+Synchronizers receive additional fields in stdin:
+
+```json
+{
+  "claim_type": "exclusive",
+  "target_artefact": { /* the final trigger artefact */ },
+  "context_chain": [ /* historical context */ ],
+
+  // Synchronizer-specific fields:
+  "ancestor_artefact": { /* the common ancestor */ },
+  "descendant_artefacts": [ /* ALL matched descendants */ ]
+}
+```
+
+**Accessing in shell script:**
+```bash
+#!/bin/sh
+input=$(cat)
+
+# Standard fields
+target=$(echo "$input" | jq -r '.target_artefact')
+context=$(echo "$input" | jq -r '.context_chain')
+
+# Synchronizer-specific fields
+ancestor=$(echo "$input" | jq -r '.ancestor_artefact')
+descendants=$(echo "$input" | jq -r '.descendant_artefacts')
+
+# Extract ancestor payload (e.g., CodeCommit hash)
+commit_hash=$(echo "$ancestor" | jq -r '.payload')
+
+# Iterate through descendants
+echo "$descendants" | jq -c '.[]' | while read -r desc; do
+  type=$(echo "$desc" | jq -r '.type')
+  payload=$(echo "$desc" | jq -r '.payload')
+  echo "Descendant: $type = $payload" >&2
+done
+```
+
+---
+
+### Example: CI/CD Deployer (Named Pattern)
+
+**holt.yml:**
+```yaml
+agents:
+  deployer:
+    role: "Deployer"
+    image: "deployer:latest"
+    command: ["/app/deploy.sh"]
+
+    synchronize:
+      ancestor_type: "CodeCommit"
+      wait_for:
+        - type: "TestResult"
+        - type: "LintResult"
+        - type: "SecurityScan"
+```
+
+**deploy.sh:**
+```bash
+#!/bin/sh
+set -e
+
+input=$(cat)
+
+# Extract ancestor (CodeCommit)
+ancestor=$(echo "$input" | jq -r '.ancestor_artefact')
+commit_hash=$(echo "$ancestor" | jq -r '.payload')
+
+# Extract descendants (prerequisites)
+descendants=$(echo "$input" | jq -r '.descendant_artefacts')
+
+test_result=$(echo "$descendants" | jq -r '.[] | select(.type=="TestResult") | .payload')
+lint_result=$(echo "$descendants" | jq -r '.[] | select(.type=="LintResult") | .payload')
+scan_result=$(echo "$descendants" | jq -r '.[] | select(.type=="SecurityScan") | .payload')
+
+echo "Deploying commit: $commit_hash" >&2
+echo "  Tests: $test_result" >&2
+echo "  Lint: $lint_result" >&2
+echo "  Security: $scan_result" >&2
+
+# Verify all passed
+if echo "$test_result $lint_result $scan_result" | grep -q "failed"; then
+  cat <<EOF >&3
+{
+  "structural_type": "Failure",
+  "artefact_payload": "Prerequisites failed",
+  "summary": "Deployment aborted"
+}
+EOF
+  exit 0
+fi
+
+# Simulate deployment
+deployment_id="deploy-$(date +%s)"
+
+cat <<EOF >&3
+{
+  "artefact_type": "DeploymentComplete",
+  "artefact_payload": "$deployment_id",
+  "summary": "Deployed commit $commit_hash"
+}
+EOF
+```
+
+---
+
+### Example: Batch Aggregator (Producer-Declared Pattern)
+
+**Producer agent (creates multiple artefacts):**
+```bash
+#!/bin/sh
+# Process 100 records and output each to FD 3
+for i in $(seq 1 100); do
+  result="record-$i-processed"
+
+  cat <<EOF >&3
+{
+  "artefact_type": "ProcessedRecord",
+  "artefact_payload": "$result",
+  "summary": "Processed record $i"
+}
+EOF
+done
+
+# Pup automatically injects: {"batch_size": "100"}
+```
+
+**Synchronizer holt.yml:**
+```yaml
+agents:
+  aggregator:
+    role: "Aggregator"
+    image: "aggregator:latest"
+    command: ["/app/aggregate.sh"]
+
+    synchronize:
+      ancestor_type: "DataBatch"
+      wait_for:
+        - type: "ProcessedRecord"
+          count_from_metadata: "batch_size"
+```
+
+**aggregate.sh:**
+```bash
+#!/bin/sh
+set -e
+
+input=$(cat)
+
+# Extract all processed records
+records=$(echo "$input" | jq -r '.descendant_artefacts')
+
+# Count and aggregate
+record_count=$(echo "$records" | jq 'length')
+aggregated=$(echo "$records" | jq -r '.[].payload' | paste -sd,)
+
+echo "Aggregating $record_count records..." >&2
+
+cat <<EOF >&3
+{
+  "artefact_type": "AggregationReport",
+  "artefact_payload": "{\"total\": $record_count, \"data\": \"$aggregated\"}",
+  "summary": "Aggregated $record_count records"
+}
+EOF
+```
+
+---
+
+### Multi-Artefact Output (M5.1+)
+
+Agents can now output **multiple artefacts** in a single execution.
+
+**How it works:**
+1. Agent writes multiple JSON objects to FD 3
+2. Pup buffers all outputs until process exits
+3. Pup injects `{"batch_size": "N"}` into each artefact's metadata
+4. All artefacts created atomically
+
+**Example:**
+```bash
+#!/bin/sh
+# Generate 3 files, create 3 CodeCommit artefacts
+
+cd /workspace
+
+# File 1
+cat > file1.txt <<EOF
+Content 1
+EOF
+git add file1.txt
+git commit -m "Generated file1"
+commit1=$(git rev-parse HEAD)
+
+cat <<EOF >&3
+{
+  "artefact_type": "CodeCommit",
+  "artefact_payload": "$commit1",
+  "summary": "Generated file1.txt"
+}
+EOF
+
+# File 2
+cat > file2.txt <<EOF
+Content 2
+EOF
+git add file2.txt
+git commit -m "Generated file2"
+commit2=$(git rev-parse HEAD)
+
+cat <<EOF >&3
+{
+  "artefact_type": "CodeCommit",
+  "artefact_payload": "$commit2",
+  "summary": "Generated file2.txt"
+}
+EOF
+
+# File 3
+cat > file3.txt <<EOF
+Content 3
+EOF
+git add file3.txt
+git commit -m "Generated file3"
+commit3=$(git rev-parse HEAD)
+
+cat <<EOF >&3
+{
+  "artefact_type": "CodeCommit",
+  "artefact_payload": "$commit3",
+  "summary": "Generated file3.txt"
+}
+EOF
+
+# Pup creates 3 artefacts, each with metadata: {"batch_size": "3"}
+```
+
+**Result:** 3 artefacts created, all siblings (same `source_artefacts`), all with batch size metadata.
+
+**Use case:** Downstream synchronizer can wait for all 3 using Producer-Declared pattern.
+
+---
+
+### Synchronizer Troubleshooting
+
+**Synchronizer never bids:**
+```bash
+# Check logs for debugging info
+holt logs {synchronizer-agent}
+
+# Common issues:
+# - "No ancestor of type 'X' found" → Check provenance chain
+# - "Not all dependencies met" → Check descendants exist
+# - "Lock already held" → Race condition (expected for duplicate triggers)
+```
+
+**Synchronizer bids too early:**
+```bash
+# Verify wait_for configuration
+cat holt.yml | grep -A 5 wait_for
+
+# Check metadata (Producer-Declared pattern)
+docker exec holt-{inst}-redis redis-cli HGET "holt:{inst}:artefact:{id}" metadata
+```
+
+**For comprehensive troubleshooting, see:** [fan-in-synchronization.md](./fan-in-synchronization.md)
+
+---
+
+### Synchronizer vs Standard Agents
+
+| Aspect | Standard Agent | Synchronizer Agent |
+|--------|---------------|-------------------|
+| **Bidding** | Manual (strategy/script) | Automatic (declarative) |
+| **Configuration** | `bidding_strategy` or `bid_script` | `synchronize` block |
+| **Use Case** | Single-branch workflows | Multi-branch fan-in |
+| **Input** | `target_artefact`, `context_chain` | + `ancestor_artefact`, `descendant_artefacts` |
+| **Coordination** | Agent implements logic | Pup handles coordination |
+
+---
+
+### Learn More
+
+**Complete guide:** [fan-in-synchronization.md](./fan-in-synchronization.md)
+
+**Example agents:**
+- `agents/example-deployer-agent/` - Named pattern (CI/CD)
+- `agents/example-batch-aggregator-agent/` - Producer-Declared (data processing)
+
+**Design document:** `design/features/phase-5-complex-coordination/M5.1-fan-in.md`
+
+---
+
 ## Next Steps
 
 1. **Start simple:** Begin with an echo agent to understand the contract
 2. **Iterate:** Add complexity incrementally (Git, LLM calls, multi-step)
-3. **Test thoroughly:** Validate both success and failure paths
-4. **Document:** Add README to your agent directory
-5. **Share:** Contribute useful agents back to the Holt community
+3. **Try synchronizers:** Build a fan-in agent for multi-branch workflows
+4. **Test thoroughly:** Validate both success and failure paths
+5. **Document:** Add README to your agent directory
+6. **Share:** Contribute useful agents back to the Holt community
 
 For more examples, see:
 - `agents/example-agent/` - Minimal echo agent
 - `agents/example-git-agent/` - Git workflow agent
+- `agents/example-deployer-agent/` - Synchronizer (Named pattern)
+- `agents/example-batch-aggregator-agent/` - Synchronizer (Producer-Declared pattern)
 
-For troubleshooting, see: [docs/troubleshooting.md](./troubleshooting.md)
+For troubleshooting, see: [troubleshooting.md](./troubleshooting.md)
+
+For fan-in synchronization, see: [fan-in-synchronization.md](./fan-in-synchronization.md)
 
 For system architecture, see: [PROJECT_CONTEXT.md](./PROJECT_CONTEXT.md)

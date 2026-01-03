@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/hearth-insights/holt/internal/debug"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -60,43 +61,88 @@ func (c *Client) RedisClient() *redis.Client {
 }
 
 // CreateArtefact writes an artefact to Redis and publishes an event.
+// M5.1: Uses atomic Lua script to ensure reverse index consistency.
+//
 // Validates the artefact before writing. Returns error if validation fails or Redis operation fails.
 // Publishes full artefact JSON to holt:{instance}:artefact_events after successful write.
 //
 // The artefact is stored as a Redis hash at holt:{instance}:artefact:{id}.
 // This method is idempotent - writing the same artefact twice is safe.
+//
+// CRITICAL: Lua script failures are FATAL. If this method returns an error,
+// the caller MUST panic/exit immediately (partial artefact creation is unacceptable).
+// CreateArtefact writes an artefact to Redis and publishes an event.
+// M5.1: Uses atomic Lua script to ensure reverse index consistency.
+//
+// Validates the artefact before writing. Returns error if validation fails or Redis operation fails.
+// Publishes full artefact JSON to holt:{instance}:artefact_events after successful write.
+//
+// The artefact is stored as a Redis hash at holt:{instance}:artefact:{id}.
+// This method is idempotent - writing the same artefact twice is safe.
+//
+// CRITICAL: Lua script failures are FATAL. If this method returns an error,
+// the caller MUST panic/exit immediately (partial artefact creation is unacceptable).
 func (c *Client) CreateArtefact(ctx context.Context, a *Artefact) error {
 	// M3.9: Auto-populate CreatedAtMs if not set
-	if a.CreatedAtMs == 0 {
-		a.CreatedAtMs = time.Now().UnixMilli()
+	if a.Header.CreatedAtMs == 0 {
+		a.Header.CreatedAtMs = time.Now().UnixMilli()
 	}
+
+	// M5.1: Ensure metadata is valid JSON (default to empty object)
+	if a.Header.Metadata == "" {
+		a.Header.Metadata = "{}"
+	}
+	debug.Log("Client creating artefact %s with metadata: %s", a.ID, a.Header.Metadata)
 
 	// Validate artefact
 	if err := a.Validate(); err != nil {
 		return fmt.Errorf("invalid artefact: %w", err)
 	}
 
-	// Convert to Redis hash
-	hash, err := ArtefactToHash(a)
+	// Encode source artefacts as JSON (Header.ParentHashes)
+	sourceArtefactsJSON, err := json.Marshal(a.Header.ParentHashes)
 	if err != nil {
-		return fmt.Errorf("failed to serialize artefact: %w", err)
+		return fmt.Errorf("failed to marshal parent_hashes (source_artefacts): %w", err)
 	}
 
-	// Write to Redis
-	key := ArtefactKey(c.instanceName, a.ID)
-	if err := c.rdb.HSet(ctx, key, hash).Err(); err != nil {
-		return fmt.Errorf("failed to write artefact to Redis: %w", err)
+	// Encode context_for_roles as JSON
+	contextForRolesJSON, err := json.Marshal(a.Header.ContextForRoles)
+	if err != nil {
+		return fmt.Errorf("failed to marshal context_for_roles: %w", err)
 	}
 
-	// Publish event
+	// Encode full artefact for Pub/Sub event
 	artefactJSON, err := json.Marshal(a)
 	if err != nil {
 		return fmt.Errorf("failed to marshal artefact for event: %w", err)
 	}
 
-	channel := ArtefactEventsChannel(c.instanceName)
-	if err := c.rdb.Publish(ctx, channel, artefactJSON).Err(); err != nil {
-		return fmt.Errorf("failed to publish artefact event: %w", err)
+	// M5.1: Execute atomic Lua script
+	script := redis.NewScript(createArtefactScript)
+	_, err = script.Run(ctx, c.rdb,
+		[]string{
+			ArtefactKey(c.instanceName, a.ID),
+			ThreadKey(c.instanceName, a.Header.LogicalThreadID),
+			ArtefactEventsChannel(c.instanceName),
+		},
+		a.ID,
+		a.Header.LogicalThreadID,
+		a.Header.Version,
+		string(a.Header.StructuralType),
+		a.Header.Type,
+		a.Payload.Content,
+		string(sourceArtefactsJSON),
+		a.Header.ProducedByRole,
+		a.Header.CreatedAtMs,
+		string(contextForRolesJSON),
+		a.Header.ClaimID,
+		a.Header.Metadata,
+		string(artefactJSON),
+	).Result()
+
+	if err != nil {
+		// M5.1: Lua failure is FATAL - partial artefact creation is unacceptable
+		log.Fatalf("[Blackboard] FATAL: Lua script create_artefact failed for artefact %s: %v", a.ID, err)
 	}
 
 	return nil
@@ -191,6 +237,7 @@ func (c *Client) CreateClaim(ctx context.Context, claim *Claim) error {
 
 	// Write to Redis
 	key := ClaimKey(c.instanceName, claim.ID)
+	debug.Log("CreateClaim writing to key: %s", key)
 	if err := c.rdb.HSet(ctx, key, hash).Err(); err != nil {
 		return fmt.Errorf("failed to write claim to Redis: %w", err)
 	}
@@ -319,6 +366,7 @@ func (c *Client) SetBid(ctx context.Context, claimID string, agentName string, b
 
 	// Write bid to Redis
 	key := ClaimBidsKey(c.instanceName, claimID)
+	debug.Log("SetBid writing to key: '%s' agent: '%s'", key, agentName)
 	if err := c.rdb.HSet(ctx, key, agentName, string(bidJSON)).Err(); err != nil {
 		return fmt.Errorf("failed to write bid to Redis: %w", err)
 	}
@@ -337,11 +385,65 @@ func (c *Client) SetBid(ctx context.Context, claimID string, agentName string, b
 	return nil
 }
 
+// SubmitBid submits a complete Bid struct (including metadata) for a claim.
+// M5.1.1: Used for merge bids which include metadata (ancestor_id, batch_size, etc.)
+//
+// Parameters:
+//   - ctx: Context
+//   - claimID: Claim ID to bid on
+//   - bid: Complete Bid struct with AgentName, BidType, and optional Metadata
+//
+// Returns error if bid submission fails.
+func (c *Client) SubmitBid(ctx context.Context, claimID string, bid *Bid) error {
+	// Validate bid type
+	if err := bid.BidType.Validate(); err != nil {
+		return fmt.Errorf("invalid bid type: %w", err)
+	}
+
+	// Ensure timestamp is set
+	if bid.TimestampMs == 0 {
+		bid.TimestampMs = time.Now().UnixMilli()
+	}
+
+	// Marshal to JSON
+	bidJSON, err := json.Marshal(bid)
+	if err != nil {
+		return fmt.Errorf("failed to marshal bid: %w", err)
+	}
+
+	// Write bid to Redis
+	key := ClaimBidsKey(c.instanceName, claimID)
+	debug.Log("SubmitBid writing to key: '%s' agent: '%s' type: '%s'", key, bid.AgentName, bid.BidType)
+	if err := c.rdb.HSet(ctx, key, bid.AgentName, string(bidJSON)).Err(); err != nil {
+		return fmt.Errorf("failed to write bid to Redis: %w", err)
+	}
+
+	// Publish bid_submitted event
+	eventData := map[string]interface{}{
+		"claim_id":     claimID,
+		"agent_name":   bid.AgentName,
+		"bid_type":     string(bid.BidType),
+		"timestamp_ms": bid.TimestampMs,
+	}
+
+	// Include metadata in event if present (for merge bids)
+	if len(bid.Metadata) > 0 {
+		eventData["metadata"] = bid.Metadata
+	}
+
+	if err := c.publishWorkflowEvent(ctx, "bid_submitted", eventData); err != nil {
+		return fmt.Errorf("failed to publish bid_submitted event: %w", err)
+	}
+
+	return nil
+}
+
 // GetAllBids retrieves all bids for a claim as a map of agent name to Bid struct.
 // Returns empty map if no bids exist (not an error).
 // Expects JSON-encoded bids in Redis. Fails if data is not valid JSON.
 func (c *Client) GetAllBids(ctx context.Context, claimID string) (map[string]Bid, error) {
 	key := ClaimBidsKey(c.instanceName, claimID)
+	debug.Log("GetAllBids reading from key: '%s'", key)
 
 	// Read all bids from Redis
 	rawBids, err := c.rdb.HGetAll(ctx, key).Result()
@@ -532,8 +634,11 @@ func (c *Client) SubscribeArtefactEvents(ctx context.Context) (*Subscription, er
 	}
 
 	// Create buffered channels for events and errors
-	eventsChan := make(chan *Artefact, 10)
-	errorsChan := make(chan error, 10)
+	// TODO: WARNING - A buffer of 1000 is a temporary fix for bursty workloads (like decomposer fan-out).
+	// If the consumer is slower than the producer for sustained periods, events will still be dropped.
+	// A more robust solution using Redis Streams or a reliable queue pattern is needed for production resilience.
+	eventsChan := make(chan *Artefact, 1000)
+	errorsChan := make(chan error, 1000)
 
 	// Create cancellation context
 	subCtx, cancelFunc := context.WithCancel(ctx)
@@ -547,6 +652,8 @@ func (c *Client) SubscribeArtefactEvents(ctx context.Context) (*Subscription, er
 		defer close(errorsChan)
 		defer pubsub.Close()
 
+		debug.Log("Subscribing to channel: '%s'", channel)
+
 		// Receive channel from pubsub
 		ch := pubsub.Channel()
 
@@ -558,24 +665,22 @@ func (c *Client) SubscribeArtefactEvents(ctx context.Context) (*Subscription, er
 				if !ok {
 					return
 				}
-
-				// Unmarshal artefact from JSON
+				debug.Log("Raw message received on %s: %s", msg.Channel, msg.Payload)
 				var artefact Artefact
 				if err := json.Unmarshal([]byte(msg.Payload), &artefact); err != nil {
-					// Send error on error channel, skip message
+					log.Printf("[Blackboard] Failed to unmarshal artefact event: %v (payload: %s)", err, msg.Payload)
 					select {
-					case errorsChan <- fmt.Errorf("failed to unmarshal artefact event: %w", err):
-					case <-subCtx.Done():
-						return
+					case errorsChan <- fmt.Errorf("failed to unmarshal event: %w", err):
+					default:
+						// Drop error if channel full
 					}
 					continue
 				}
-
-				// Send artefact on events channel
+				debug.Log("Dispatching event for artefact %s", artefact.ID)
 				select {
 				case eventsChan <- &artefact:
-				case <-subCtx.Done():
-					return
+				default:
+					log.Printf("[Blackboard] Warning: Event channel full, dropping event for %s", artefact.ID)
 				}
 			}
 		}
@@ -601,8 +706,8 @@ func (c *Client) SubscribeClaimEvents(ctx context.Context) (*ClaimSubscription, 
 	}
 
 	// Create buffered channels for events and errors
-	eventsChan := make(chan *Claim, 10)
-	errorsChan := make(chan error, 10)
+	eventsChan := make(chan *Claim, 1000)
+	errorsChan := make(chan error, 1000)
 
 	// Create cancellation context
 	subCtx, cancelFunc := context.WithCancel(ctx)
@@ -670,8 +775,8 @@ func (c *Client) SubscribeWorkflowEvents(ctx context.Context) (*WorkflowSubscrip
 	}
 
 	// Create buffered channels for events and errors
-	eventsChan := make(chan *WorkflowEvent, 10)
-	errorsChan := make(chan error, 10)
+	eventsChan := make(chan *WorkflowEvent, 1000)
+	errorsChan := make(chan error, 1000)
 
 	// Create cancellation context
 	subCtx, cancelFunc := context.WithCancel(ctx)
@@ -1024,19 +1129,30 @@ func (c *Client) CreateOrVersionKnowledge(ctx context.Context, knowledgeName, kn
 	}
 
 	// Create the Knowledge artefact
-	artefactID := uuid.New().String()
+	// Use V2 structure with Header and Payload
 	knowledge := &Artefact{
-		ID:              artefactID,
-		LogicalID:       logicalID,
-		Version:         version,
-		StructuralType:  StructuralTypeKnowledge,
-		Type:            knowledgeName, // The knowledge_name becomes the Type field
-		Payload:         knowledgePayload,
-		SourceArtefacts: []string{}, // Knowledge artefacts have no sources
-		ProducedByRole:  producedByRole,
-		ContextForRoles: contextForRoles,
-		CreatedAtMs:     time.Now().UnixMilli(),
+		Header: ArtefactHeader{
+			LogicalThreadID: logicalID,
+			Version:         version,
+			StructuralType:  StructuralTypeKnowledge,
+			Type:            knowledgeName, // The knowledge_name becomes the Type field
+			ParentHashes:    []string{},    // Knowledge artefacts have no sources
+			ProducedByRole:  producedByRole,
+			ContextForRoles: contextForRoles,
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: ArtefactPayload{
+			Content: knowledgePayload,
+		},
 	}
+
+	// Compute content-based ID (V2)
+	hashID, err := ComputeArtefactHash(knowledge)
+	if err != nil {
+		return nil, fmt.Errorf("failed to compute knowledge artefact hash: %w", err)
+	}
+	knowledge.ID = hashID
+	artefactID := knowledge.ID // Fix: define artefactID for subsequent use
 
 	// Write the artefact to Redis (without publishing an event - Knowledge is passive)
 	if err := knowledge.Validate(); err != nil {
@@ -1081,6 +1197,89 @@ func (c *Client) CreateOrVersionKnowledge(ctx context.Context, knowledgeName, kn
 func IsNotFound(err error) bool {
 	return errors.Is(err, redis.Nil)
 }
+
+// GetDescendants retrieves all descendants of an artefact using recursive traversal.
+// M5.1: Used by Synchronizers to find all artefacts below an ancestor in the DAG.
+//
+// Parameters:
+//   - ancestorID: The ID of the ancestor artefact to start traversal from
+//   - maxDepth: Maximum depth to traverse (0 = unlimited)
+//
+// Returns:
+//   - Array of descendant artefacts (children, grandchildren, etc.)
+//   - Empty array if no descendants found
+//   - Error if traversal fails
+//
+// Implementation notes:
+//   - Uses BFS (breadth-first search) traversal via reverse index
+//   - Detects and handles cycles automatically via visited map
+//   - O(n) complexity where n = total descendants
+func (c *Client) GetDescendants(ctx context.Context, ancestorID string, maxDepth int) ([]*Artefact, error) {
+	visited := make(map[string]bool)
+	var descendants []*Artefact
+
+	var traverse func(string, int) error
+	traverse = func(nodeID string, depth int) error {
+		// Prevent revisiting (cycle detection)
+		if visited[nodeID] {
+			return nil
+		}
+		visited[nodeID] = true
+
+		// Check max depth limit - children of this node will be at depth+1
+		if maxDepth > 0 && depth >= maxDepth {
+			return nil // Don't get children beyond max depth
+		}
+
+		// Get children from reverse index
+		childrenKey := ChildrenIndexKey(c.instanceName, nodeID)
+		debug.Log("GetDescendants querying children key: '%s'", childrenKey)
+		childIDs, err := c.rdb.SMembers(ctx, childrenKey).Result()
+		if err != nil {
+			return fmt.Errorf("failed to get children of %s: %w", nodeID, err)
+		}
+		debug.Log("GetDescendants found %d children for %s", len(childIDs), nodeID)
+
+		for _, childID := range childIDs {
+			// Skip if already visited (cycle detection)
+			if visited[childID] {
+				continue
+			}
+
+			// Load child artefact
+			child, err := c.GetArtefact(ctx, childID)
+			if err != nil {
+				if IsNotFound(err) {
+					// Child exists in index but not in Redis (inconsistency, but skip gracefully)
+					log.Printf("[Blackboard] WARNING: Child %s in index but not found in Redis", childID)
+					continue
+				}
+				return fmt.Errorf("failed to load child artefact %s: %w", childID, err)
+			}
+
+			descendants = append(descendants, child)
+
+			// Recurse into grandchildren (child is at depth+1, its children will be at depth+2)
+			if err := traverse(childID, depth+1); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	}
+
+	// Start traversal from ancestor (depth 0, so direct children are at depth 1)
+	if err := traverse(ancestorID, 0); err != nil {
+		return nil, err
+	}
+
+	return descendants, nil
+}
+
+// REMOVED M5.1.1: Client-side locking methods (AcquireSyncLock, CheckSyncLock, ReleaseSyncLock)
+// have been deleted as part of the architectural transition to Orchestrator-driven accumulation.
+// The merge phase now uses kernel-managed coordination via the accumulator Lua script.
+// See: ExecuteAccumulatorScript(), GetAccumulatedClaims(), UpdateAccumulatorStatus()
 
 // IsHashMismatchError checks if an error is a HashMismatchError and optionally extracts it.
 // M4.6 Phase 4: Used by CLI verify command to distinguish hash mismatches from other errors.
@@ -1224,97 +1423,6 @@ func (c *Client) PublishSecurityAlert(ctx context.Context, alert *SecurityAlert)
 	return nil
 }
 
-// WriteVerifiableArtefact writes a VerifiableArtefact to Redis.
-// M4.6: This is used for V2 hash-based artefacts during testing and eventual migration.
-// Similar to CreateArtefact but for the VerifiableArtefact type.
-//
-// Stores the artefact as a Redis Hash (HSET) to be compatible with existing GetArtefact (HGETALL) calls.
-func (c *Client) WriteVerifiableArtefact(ctx context.Context, a *VerifiableArtefact) error {
-	// Validate artefact structure
-	if err := a.Validate(); err != nil {
-		return fmt.Errorf("invalid verifiable artefact: %w", err)
-	}
-
-	// Convert V2 VerifiableArtefact to V1 Artefact for backwards compatibility with HGETALL
-	// This ensures GetArtefact works for both V1 (UUID) and V2 (Hash) artefacts
-	v1Artefact := &Artefact{
-		ID:              a.ID,
-		LogicalID:       a.Header.LogicalThreadID,
-		Version:         a.Header.Version,
-		StructuralType:  a.Header.StructuralType,
-		Type:            a.Header.Type,
-		Payload:         a.Payload.Content,
-		SourceArtefacts: a.Header.ParentHashes,
-		ProducedByRole:  a.Header.ProducedByRole,
-		CreatedAtMs:     a.Header.CreatedAtMs,
-		ClaimID:         a.Header.ClaimID,
-		ContextForRoles: a.Header.ContextForRoles,
-	}
-
-	// Convert to Redis hash
-	hash, err := ArtefactToHash(v1Artefact)
-	if err != nil {
-		return fmt.Errorf("failed to serialize verifiable artefact to hash: %w", err)
-	}
-
-	// Write to Redis using hash ID as key (HSET)
-	key := ArtefactKey(c.instanceName, a.ID)
-	if err := c.rdb.HSet(ctx, key, hash).Err(); err != nil {
-		return fmt.Errorf("failed to write verifiable artefact to Redis: %w", err)
-	}
-
-	// Note: We don't publish to artefact_events channel here because this is test-only.
-	// When V2 is fully implemented, the pup will write and publish.
-
-	return nil
-}
-
-// GetVerifiableArtefact retrieves a V2 VerifiableArtefact by its hash ID.
-// Returns (nil, redis.Nil) if the artefact doesn't exist.
-// Use IsNotFound() to check for not-found errors.
-// M4.6 Phase 4: Used by CLI verify command for independent hash verification.
-func (c *Client) GetVerifiableArtefact(ctx context.Context, hashID string) (*VerifiableArtefact, error) {
-	key := ArtefactKey(c.instanceName, hashID)
-
-	// Read hash from Redis (HGETALL)
-	hashData, err := c.rdb.HGetAll(ctx, key).Result()
-	if err != nil {
-		return nil, fmt.Errorf("failed to read verifiable artefact from Redis: %w", err)
-	}
-
-	// Check if key exists
-	if len(hashData) == 0 {
-		return nil, redis.Nil
-	}
-
-	// Convert Hash to V1 Artefact first (reusing existing deserialization logic)
-	v1Artefact, err := HashToArtefact(hashData)
-	if err != nil {
-		return nil, fmt.Errorf("failed to deserialize verifiable artefact from hash: %w", err)
-	}
-
-	// Convert V1 Artefact to V2 VerifiableArtefact structure
-	v2Artefact := &VerifiableArtefact{
-		ID: v1Artefact.ID,
-		Header: ArtefactHeader{
-			ParentHashes:    v1Artefact.SourceArtefacts,
-			LogicalThreadID: v1Artefact.LogicalID,
-			Version:         v1Artefact.Version,
-			CreatedAtMs:     v1Artefact.CreatedAtMs,
-			ProducedByRole:  v1Artefact.ProducedByRole,
-			StructuralType:  v1Artefact.StructuralType,
-			Type:            v1Artefact.Type,
-			ContextForRoles: v1Artefact.ContextForRoles,
-			ClaimID:         v1Artefact.ClaimID,
-		},
-		Payload: ArtefactPayload{
-			Content: v1Artefact.Payload,
-		},
-	}
-
-	return v2Artefact, nil
-}
-
 // ScanKeys scans for Redis keys matching the given pattern.
 // Returns an array of matching key strings (sorted for consistency).
 // Uses Redis SCAN for efficient iteration without blocking.
@@ -1428,6 +1536,150 @@ func (c *Client) UnlockGlobalLockdown(ctx context.Context, overrideAlert Securit
 	return nil
 }
 
+// ExecuteAccumulatorScript atomically adds a claim to the merge accumulator and checks completion.
+// M5.1.1: Orchestrator-driven batch synchronization using deterministic Fan-In Claim IDs.
+//
+// REFACTORED: Supports BOTH COUNT mode (Producer-Declared) and TYPES mode (Named pattern).
+//
+// Returns:
+//   - (true, false, nil) if batch/set is complete (triggers Fan-In grant)
+//   - (false, false, nil) if still accumulating
+//   - (false, true, nil) if duplicate type detected in TYPES mode (ERROR)
+//   - (false, false, err) if script execution fails
+//
+// Parameters:
+//   - ancestorID: The common ancestor artefact ID
+//   - role: Agent role name (for accumulator key)
+//   - claimID: Claim ID being accumulated
+//   - mode: "count" or "types"
+//   - expectedCount: Expected count (e.g., "15")
+//   - currentArtefactType: Type of the claim being accumulated (e.g., "TestResult")
+//   - expectedTypesJSON: JSON array of expected types (only for TYPES mode, empty for COUNT)
+func (c *Client) ExecuteAccumulatorScript(ctx context.Context, ancestorID, role, claimID, mode, expectedCount, currentArtefactType, expectedTypesJSON string) (complete bool, duplicate bool, err error) {
+	script := redis.NewScript(accumulatorAddAndCheckScript)
+
+	key := ClaimAccumulatorKey(c.instanceName, ancestorID, role)
+
+	result, execErr := script.Run(ctx, c.rdb,
+		[]string{key},
+		claimID,
+		mode,
+		expectedCount,
+		ancestorID,          // merge_ancestor
+		currentArtefactType, // current_artefact_type
+		role,                // claimer
+		expectedTypesJSON,   // expected_types_json
+	).Result()
+
+	if execErr != nil {
+		return false, false, fmt.Errorf("accumulator script failed: %w", execErr)
+	}
+
+	// Parse return code
+	resultCode := result.(int64)
+	switch resultCode {
+	case 1:
+		return true, false, nil // Complete
+	case 0:
+		return false, false, nil // Accumulating
+	case -1:
+		return false, true, nil // Duplicate type error
+	default:
+		return false, false, fmt.Errorf("unexpected result code: %d", resultCode)
+	}
+}
+
+// GetAccumulatedClaims retrieves all claim IDs that have been accumulated for a batch.
+// M5.1.1: Used by Orchestrator to fetch accumulated claims when granting Fan-In Claim.
+//
+// REFACTORED: Supports both COUNT mode (:count SET) and TYPES mode (:types HASH).
+//
+// Returns empty slice if accumulator doesn't exist or has no claims yet.
+func (c *Client) GetAccumulatedClaims(ctx context.Context, ancestorID, role string) ([]string, error) {
+	key := ClaimAccumulatorKey(c.instanceName, ancestorID, role)
+
+	// First, determine the mode by reading from accumulator Hash
+	mode, err := c.rdb.HGet(ctx, key, "mode").Result()
+	if err == redis.Nil {
+		// Accumulator doesn't exist yet
+		return []string{}, nil
+	} else if err != nil {
+		return nil, fmt.Errorf("failed to get accumulator mode: %w", err)
+	}
+
+	// Fetch claims based on mode
+	if mode == "count" {
+		// COUNT mode: Read from :count SET
+		countKey := ClaimAccumulatorCountKey(c.instanceName, ancestorID, role)
+		members, err := c.rdb.SMembers(ctx, countKey).Result()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get accumulated claims (count mode): %w", err)
+		}
+		return members, nil
+
+	} else if mode == "types" {
+		// TYPES mode: Read from :types HASH (get all values, which are claim IDs)
+		typesKey := ClaimAccumulatorTypesKey(c.instanceName, ancestorID, role)
+		claimIDs, err := c.rdb.HVals(ctx, typesKey).Result()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get accumulated claims (types mode): %w", err)
+		}
+		return claimIDs, nil
+
+	} else {
+		return nil, fmt.Errorf("unknown accumulator mode: %s", mode)
+	}
+}
+
+// UpdateAccumulatorStatus updates the status field of an accumulator.
+// M5.1.1: Used by Orchestrator to mark accumulator as "granted" or "complete".
+//
+// Valid status values: "accumulating", "granted", "complete"
+func (c *Client) UpdateAccumulatorStatus(ctx context.Context, ancestorID, role, status string) error {
+	key := ClaimAccumulatorKey(c.instanceName, ancestorID, role)
+
+	// Set granted_at_ms timestamp if transitioning to granted
+	if status == "granted" {
+		nowMs := time.Now().UnixMilli()
+		if err := c.rdb.HSet(ctx, key, "granted_at_ms", nowMs).Err(); err != nil {
+			return fmt.Errorf("failed to set granted_at_ms: %w", err)
+		}
+	}
+
+	// Set completed_at_ms timestamp if transitioning to complete
+	if status == "complete" {
+		nowMs := time.Now().UnixMilli()
+		if err := c.rdb.HSet(ctx, key, "completed_at_ms", nowMs).Err(); err != nil {
+			return fmt.Errorf("failed to set completed_at_ms: %w", err)
+		}
+	}
+
+	// Update status field
+	if err := c.rdb.HSet(ctx, key, "status", status).Err(); err != nil {
+		return fmt.Errorf("failed to update accumulator status: %w", err)
+	}
+
+	return nil
+}
+
+// GetAccumulatorFanInClaimID retrieves the deterministic Fan-In Claim ID for an accumulator.
+// M5.1.1: The Fan-In Claim ID is generated by the Lua script and stored in the accumulator.
+//
+// Returns empty string if accumulator doesn't exist.
+func (c *Client) GetAccumulatorFanInClaimID(ctx context.Context, ancestorID, role string) (string, error) {
+	key := ClaimAccumulatorKey(c.instanceName, ancestorID, role)
+
+	fanInClaimID, err := c.rdb.HGet(ctx, key, "id").Result()
+	if err == redis.Nil {
+		return "", nil // Accumulator doesn't exist
+	}
+	if err != nil {
+		return "", fmt.Errorf("failed to get Fan-In Claim ID: %w", err)
+	}
+
+	return fanInClaimID, nil
+}
+
 // keepAliveInterval is the interval between PINGs to keep the connection alive.
 // It is a variable to allow overriding in tests.
 var keepAliveInterval = 5 * time.Second
@@ -1446,9 +1698,9 @@ func (c *Client) keepAlive(ctx context.Context, pubsub *redis.PubSub) {
 		case <-ticker.C:
 			// Send PING and log result for debugging
 			if err := pubsub.Ping(ctx); err != nil {
-				log.Printf("DEBUG: KeepAlive PING failed: %v", err)
+				debug.Log("KeepAlive PING failed: %v", err)
 			} else {
-				// log.Printf("DEBUG: KeepAlive PING success") // Uncomment for very verbose logging
+				debug.Log("KeepAlive PING success")
 			}
 		}
 	}

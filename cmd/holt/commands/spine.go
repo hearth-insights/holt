@@ -90,20 +90,20 @@ func runSpine(cmd *cobra.Command, args []string) error {
 	}
 
 	// Fetch active manifest artefact to start traversal
-	activeManifest, err := bbClient.GetVerifiableArtefact(ctx, activeManifestID)
+	activeManifest, err := bbClient.GetArtefact(ctx, activeManifestID)
 	if err != nil {
 		return fmt.Errorf("failed to fetch manifest artefact %s: %w", activeManifestID, err)
 	}
 
 	// Traverse spine backwards via ParentHashes
 	// Note: SystemManifests form a linear chain via ParentHashes
-	var manifests []*blackboard.VerifiableArtefact
+	var manifests []*blackboard.Artefact
 	manifests = append(manifests, activeManifest)
 	current := activeManifest
 
 	for len(current.Header.ParentHashes) > 0 {
 		parentID := current.Header.ParentHashes[0]
-		parent, err := bbClient.GetVerifiableArtefact(ctx, parentID)
+		parent, err := bbClient.GetArtefact(ctx, parentID)
 		if err != nil {
 			printer.Warning("Failed to fetch parent manifest %s: %v\n", parentID, err)
 			break

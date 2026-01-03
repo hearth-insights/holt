@@ -6,7 +6,6 @@ package commands
 import (
 	"context"
 	"encoding/json"
-	"os/exec"
 	"testing"
 	"time"
 
@@ -29,21 +28,8 @@ func TestE2E_M4_1_AgentToHumanQA(t *testing.T) {
 
 	t.Log("=== M4.1 E2E: Agent-to-Human Question/Answer ===")
 
-	// Step 0: Build question-agent Docker image
-	projectRoot := testutil.GetProjectRoot()
-
-	t.Log("Building question-agent Docker image...")
-	buildCmd := exec.Command("docker", "build",
-		"-t", "question-agent:latest",
-		"-f", "agents/question-agent/Dockerfile",
-		".")  // Build from project root (needs access to go.mod, cmd/pup, etc.)
-	buildCmd.Dir = projectRoot
-	output, err := buildCmd.CombinedOutput()
-	if err != nil {
-		t.Logf("Build output:\n%s", string(output))
-	}
-	require.NoError(t, err, "Failed to build question-agent image")
-	t.Log("✓ question-agent image built")
+	// Step 0: Ensure shared test agent image is built
+	testutil.EnsureTestAgentImage(t)
 
 	// Step 1: Setup environment with question agent
 	holtYML := `version: "1.0"
@@ -52,8 +38,9 @@ orchestrator:
   timestamp_drift_tolerance_ms: 600000 # 10 minutes for E2E tests
 agents:
   QuestionAgent:
-    image: "question-agent:latest"
-    command: ["/app/run.sh"]
+
+    image: "holt-test-agent:latest"
+    command: ["/app/run_question.sh"]
     bidding_strategy:
       type: "exclusive"
     workspace:
@@ -79,7 +66,7 @@ services:
 	upCmd := &cobra.Command{}
 	upInstanceName = env.InstanceName
 	upForce = false
-	err = runUp(upCmd, []string{})
+	err := runUp(upCmd, []string{})
 	require.NoError(t, err, "Failed to start instance")
 	t.Logf("✓ Instance started: %s", env.InstanceName)
 
@@ -104,6 +91,7 @@ services:
 		StructuralType:  blackboard.StructuralTypeStandard,
 		Type:            "GoalDefined",
 		ClaimID:         "",
+		Metadata:        "{}",
 	}, "Build a REST API")
 
 	t.Logf("✓ GoalDefined created: %s", goalArtefact.ID)
@@ -128,7 +116,7 @@ services:
 				continue
 			}
 
-			if art.StructuralType == blackboard.StructuralTypeQuestion {
+			if art.Header.StructuralType == blackboard.StructuralTypeQuestion {
 				questionArtefact = art
 				break
 			}
@@ -154,7 +142,7 @@ services:
 		QuestionText     string `json:"question_text"`
 		TargetArtefactID string `json:"target_artefact_id"`
 	}
-	err = json.Unmarshal([]byte(questionArtefact.Payload), &questionPayload)
+	err = json.Unmarshal([]byte(questionArtefact.Payload.Content), &questionPayload)
 	require.NoError(t, err)
 	require.Equal(t, goalArtefact.ID, questionPayload.TargetArtefactID)
 	t.Logf("✓ Question text: \"%s\"", questionPayload.QuestionText)
@@ -164,7 +152,7 @@ services:
 	originalClaim, err := bbClient.GetClaimByArtefactID(ctx, goalArtefact.ID)
 	require.NoError(t, err)
 	require.Equal(t, blackboard.ClaimStatusTerminated, originalClaim.Status)
-	require.Contains(t, originalClaim.TerminationReason, "Agent asked a clarifying question")
+	require.Contains(t, originalClaim.TerminationReason, "Question")
 	t.Logf("✓ Original claim terminated: %s", originalClaim.TerminationReason)
 
 	// Step 7: Run `holt questions` to list the question
@@ -186,16 +174,17 @@ services:
 
 	answerArtefact := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
 		ParentHashes:    []string{goalArtefact.ID, questionArtefact.ID},
-		LogicalThreadID: goalArtefact.LogicalID, // Same logical thread
-		Version:         goalArtefact.Version + 1, // Incremented version
+		LogicalThreadID: goalArtefact.Header.LogicalThreadID, // Same logical thread
+		Version:         goalArtefact.Header.Version + 1,     // Incremented version
 		CreatedAtMs:     time.Now().UnixMilli(),
 		ProducedByRole:  "user",
 		StructuralType:  blackboard.StructuralTypeStandard,
 		Type:            "GoalDefined",
 		ClaimID:         "",
+		Metadata:        "{}",
 	}, clarifiedGoal)
 
-	t.Logf("✓ Clarified goal created: %s v%d", answerArtefact.ID, answerArtefact.Version)
+	t.Logf("✓ Clarified goal created: %s v%d", answerArtefact.ID, answerArtefact.Header.Version)
 
 	// Step 9: Verify new claim is created for clarified goal
 	t.Log("Step 9: Waiting for new claim on clarified goal...")
@@ -244,8 +233,9 @@ orchestrator:
   timestamp_drift_tolerance_ms: 600000 # 10 minutes
 agents:
   QuestionAgent:
-    image: "question-agent:latest"
-    command: ["/app/run.sh"]
+
+    image: "holt-test-agent:latest"
+    command: ["/app/run_question.sh"]
     bidding_strategy:
       type: "exclusive"
     workspace:
@@ -288,6 +278,7 @@ services:
 		StructuralType:  blackboard.StructuralTypeStandard,
 		Type:            "GoalDefined",
 		ClaimID:         "",
+		Metadata:        "{}",
 	}, "Build API v2")
 
 	t.Logf("✓ Created artefact at version 2: %s", targetArtefact.ID)
@@ -310,11 +301,11 @@ services:
 			continue
 		}
 
-		if art.StructuralType == blackboard.StructuralTypeFailure &&
-			art.Type == "MaxIterationsExceeded" {
+		if art.Header.StructuralType == blackboard.StructuralTypeFailure &&
+			art.Header.Type == "MaxIterationsExceeded" {
 			failureFound = true
 			t.Logf("✓ Failure artefact created: %s", art.ID)
-			t.Logf("  Payload: %s", art.Payload)
+			t.Logf("  Payload: %s", art.Payload.Content)
 			break
 		}
 	}

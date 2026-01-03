@@ -44,6 +44,42 @@ func (e *Engine) GrantReviewPhase(ctx context.Context, claim *blackboard.Claim, 
 
 	// Publish grant notifications to all review agents
 	for _, agentName := range reviewBidders {
+		// Check if agent is a controller
+		agent, agentExists := e.config.Agents[agentName]
+		if agentExists && agent.Mode == "controller" {
+			// Controller-worker pattern
+			if e.workerManager != nil {
+				// Check worker limit
+				if e.workerManager.IsAtWorkerLimit(agentName, agent.Worker.MaxConcurrent) {
+					log.Printf("[Orchestrator] Role '%s' at max_concurrent worker limit (%d), pausing claim %s in grant queue",
+						agentName, agent.Worker.MaxConcurrent, claim.ID)
+					
+					// Add to persistent grant queue
+					if err := e.pauseGrantForQueue(ctx, claim, agentName, agentName); err != nil {
+						log.Printf("[Orchestrator] Failed to pause claim in grant queue: %v", err)
+					}
+					continue
+				}
+
+				// Launch worker
+				log.Printf("[Orchestrator] Launching worker for review controller %s (claim %s)", agentName, claim.ID)
+				if err := e.workerManager.LaunchWorker(ctx, claim, agentName, agent, e.client); err != nil {
+					log.Printf("[Orchestrator] Failed to launch worker for review controller %s: %v", agentName, err)
+					// We don't terminate the claim here because other reviewers might succeed.
+					// Ideally we'd mark this specific reviewer as failed, but for now we log error.
+				}
+				
+				// M3.9: Get worker image ID (resolved dynamically) - pass empty string for now
+				if err := e.publishClaimGrantedEvent(ctx, claim.ID, agentName, "review", ""); err != nil {
+					log.Printf("[Orchestrator] Failed to publish workflow event for review grant to %s: %v", agentName, err)
+				}
+			} else {
+				log.Printf("[Orchestrator] WARN: Controller %s granted review but workerManager is nil", agentName)
+			}
+			continue
+		}
+
+		// Standard agent logic
 		if err := e.publishGrantNotificationWithType(ctx, agentName, claim.ID, "review"); err != nil {
 			log.Printf("[Orchestrator] Failed to publish review grant notification to %s: %v", agentName, err)
 		}
@@ -53,6 +89,16 @@ func (e *Engine) GrantReviewPhase(ctx context.Context, claim *blackboard.Claim, 
 		if err := e.publishClaimGrantedEvent(ctx, claim.ID, agentName, "review", agentImageID); err != nil {
 			log.Printf("[Orchestrator] Failed to publish workflow event for review grant to %s: %v", agentName, err)
 		}
+	}
+
+	// M3.5: Create new phase state for review phase and persist
+	newPhaseState := NewPhaseState(claim.ID, "review", reviewBidders, bids)
+	e.phaseStates[claim.ID] = newPhaseState
+
+	// M3.5: Persist phase state to claim for restart resilience
+	if err := e.persistPhaseState(ctx, claim, newPhaseState); err != nil {
+		log.Printf("[Orchestrator] Warning: Failed to persist phase state for claim %s: %v", claim.ID, err)
+		// Non-fatal - continue execution
 	}
 
 	return nil
@@ -83,7 +129,7 @@ func (e *Engine) CheckReviewPhaseCompletion(ctx context.Context, claim *blackboa
 		}
 
 		// Parse review payload
-		if !isApproval(artefact.Payload) {
+		if !isApproval(artefact.Payload.Content) {
 			feedbackArtefacts = append(feedbackArtefacts, artefact)
 
 			e.logEvent("review_rejection", map[string]interface{}{
@@ -93,7 +139,7 @@ func (e *Engine) CheckReviewPhaseCompletion(ctx context.Context, claim *blackboa
 			})
 
 			// Publish review_rejected workflow event
-			if err := e.publishReviewRejectedEvent(ctx, claim.ArtefactID, artefact.ID, agentRole, artefact.Payload); err != nil {
+			if err := e.publishReviewRejectedEvent(ctx, claim.ArtefactID, artefact.ID, agentRole, artefact.Payload.Content); err != nil {
 				log.Printf("[Orchestrator] Failed to publish review_rejected event: %v", err)
 			}
 		} else {

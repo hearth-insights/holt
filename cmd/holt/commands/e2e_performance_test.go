@@ -6,14 +6,13 @@ package commands
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/hearth-insights/holt/internal/instance"
 	"github.com/hearth-insights/holt/internal/testutil"
 	"github.com/hearth-insights/holt/pkg/blackboard"
-	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )
@@ -35,12 +34,8 @@ func TestPerformance_Startup(t *testing.T) {
 	}()
 
 	// Build echo agent image for config validation
-	buildCmd := exec.Command("docker", "build",
-		"-t", "example-agent:latest",
-		"-f", "agents/example-agent/Dockerfile",
-		".")
-	buildCmd.Dir = testutil.GetProjectRoot()
-	buildCmd.Run() // Ignore errors if already built
+	// Build consolidated test agent image (once per suite)
+	testutil.EnsureTestAgentImage(t)
 
 	// Measure holt up duration
 	t.Log("Measuring holt up duration...")
@@ -80,21 +75,17 @@ func TestPerformance_ClaimToExecution(t *testing.T) {
 	t.Log("=== Performance Test: Claim-to-Execution Latency ===")
 
 	// Build example-agent
-	buildCmd := exec.Command("docker", "build",
-		"-t", "example-agent:latest",
-		"-f", "agents/example-agent/Dockerfile",
-		".")
-	buildCmd.Dir = testutil.GetProjectRoot()
-	buildCmd.Run()
+	// Build consolidated test agent image (once per suite)
+	testutil.EnsureTestAgentImage(t)
 
-	// Setup environment with echo agent and drift tolerance
+	// Setup environment with echo agent (using consolidated image)
 	echoAgentYML := `version: "1.0"
 orchestrator:
   timestamp_drift_tolerance_ms: 600000 # 10 minutes
 agents:
   EchoAgent:
-    image: "example-agent:latest"
-    command: ["/app/run.sh"]
+    image: "holt-test-agent:latest"
+    command: ["/app/run_echo.sh"]
     bidding_strategy:
       type: "exclusive"
     workspace:
@@ -173,12 +164,8 @@ func TestPerformance_ContextAssembly(t *testing.T) {
 	}()
 
 	// Build echo agent image for config validation
-	buildCmd := exec.Command("docker", "build",
-		"-t", "example-agent:latest",
-		"-f", "agents/example-agent/Dockerfile",
-		".")
-	buildCmd.Dir = testutil.GetProjectRoot()
-	buildCmd.Run() // Ignore errors if already built
+	// Build consolidated test agent image (once per suite)
+	testutil.EnsureTestAgentImage(t)
 
 	// Start instance
 	upCmd := &cobra.Command{}
@@ -197,23 +184,33 @@ func TestPerformance_ContextAssembly(t *testing.T) {
 	artefactIDs := make([]string, 10)
 
 	for i := 0; i < 10; i++ {
+
 		artefact := &blackboard.Artefact{
-			ID:              uuid.NewString(),
-			LogicalID:       uuid.NewString(),
-			Version:         1,
-			StructuralType:  blackboard.StructuralTypeStandard,
-			Type:            fmt.Sprintf("Level%d", i),
-			Payload:         fmt.Sprintf("content-level-%d", i),
-			SourceArtefacts: []string{},
-			ProducedByRole:  "test-agent", // M3.7: Required field
+			Header: blackboard.ArtefactHeader{
+				LogicalThreadID: uuid.NewString(),
+				Version:         1,
+				StructuralType:  blackboard.StructuralTypeStandard,
+				Type:            fmt.Sprintf("Level%d", i),
+				ParentHashes:    []string{},
+				ProducedByRole:  "test-agent", // M3.7: Required field
+				CreatedAtMs:     time.Now().UnixMilli(),
+				Metadata:        "{}",
+			},
+			Payload: blackboard.ArtefactPayload{
+				Content: fmt.Sprintf("content-level-%d", i),
+			},
 		}
 
 		if i > 0 {
-			artefact.SourceArtefacts = []string{previousArtefactID}
+			artefact.Header.ParentHashes = []string{previousArtefactID}
 		}
 
+		hash, err := blackboard.ComputeArtefactHash(artefact)
+		require.NoError(t, err)
+		artefact.ID = hash
+
 		// Store artefact on blackboard
-		err := env.BBClient.CreateArtefact(ctx, artefact)
+		err = env.BBClient.CreateArtefact(ctx, artefact)
 		require.NoError(t, err)
 
 		artefactIDs[i] = artefact.ID
@@ -246,7 +243,7 @@ func TestPerformance_ContextAssembly(t *testing.T) {
 		require.NoError(t, err)
 
 		// Add source artefacts to queue
-		for _, sourceID := range artefact.SourceArtefacts {
+		for _, sourceID := range artefact.Header.ParentHashes {
 			if !visited[sourceID] {
 				queue = append(queue, sourceID)
 			}
@@ -277,16 +274,8 @@ func TestPerformance_GitCommit(t *testing.T) {
 	t.Log("=== Performance Test: Git Commit ===")
 
 	// Build git agent
-	buildCmd := exec.Command("docker", "build",
-		"-t", "example-git-agent:latest",
-		"-f", "agents/example-git-agent/Dockerfile",
-		".")
-	buildCmd.Dir = testutil.GetProjectRoot()
-	output, err := buildCmd.CombinedOutput()
-	if err != nil {
-		t.Logf("Build output:\n%s", string(output))
-	}
-	require.NoError(t, err)
+	// Build consolidated test agent image (once per suite)
+	testutil.EnsureTestAgentImage(t)
 
 	// Setup environment with increased drift tolerance
 	gitAgentYML := `version: "1.0"
@@ -294,8 +283,9 @@ orchestrator:
   timestamp_drift_tolerance_ms: 600000 # 10 minutes
 agents:
   GitAgent:
-    image: "example-git-agent:latest"
-    command: ["/app/run.sh"]
+    image: "holt-test-agent:latest"
+    command: ["/app/run_git.sh"]
+    bid_script: ["/app/bid_git.sh"]
     bidding_strategy:
       type: "exclusive"
     workspace:
@@ -315,7 +305,7 @@ services:
 	upCmd := &cobra.Command{}
 	upInstanceName = env.InstanceName
 	upForce = false
-	err = runUp(upCmd, []string{})
+	err := runUp(upCmd, []string{})
 	require.NoError(t, err)
 
 	env.WaitForContainer("orchestrator")
@@ -344,7 +334,7 @@ services:
 	t.Logf("✓ Git commit operation completed in: %v", duration)
 
 	// Verify commit exists
-	env.VerifyGitCommitExists(codeCommitArtefact.Payload)
+	env.VerifyGitCommitExists(codeCommitArtefact.Payload.Content)
 	env.VerifyFileExists("perf-test.txt")
 
 	// Assert threshold (includes agent execution + file creation + git add + git commit)
@@ -368,13 +358,8 @@ func TestPerformance_FullWorkflowE2E(t *testing.T) {
 
 	t.Log("=== Performance Test: Full Workflow E2E ===")
 
-	// Build git agent
-	buildCmd := exec.Command("docker", "build",
-		"-t", "example-git-agent:latest",
-		"-f", "agents/example-git-agent/Dockerfile",
-		".")
-	buildCmd.Dir = testutil.GetProjectRoot()
-	buildCmd.Run()
+	// Build consolidated test agent image (once per suite)
+	testutil.EnsureTestAgentImage(t)
 
 	// Setup environment with increased drift tolerance
 	gitAgentYML := `version: "1.0"
@@ -382,8 +367,9 @@ orchestrator:
   timestamp_drift_tolerance_ms: 600000 # 10 minutes
 agents:
   GitAgent:
-    image: "example-git-agent:latest"
-    command: ["/app/run.sh"]
+    image: "holt-test-agent:latest"
+    command: ["/app/run_git.sh"]
+    bid_script: ["/app/bid_git.sh"]
     bidding_strategy:
       type: "exclusive"
     workspace:
@@ -441,7 +427,7 @@ services:
 	t.Logf("✓ Full workflow completed in: %v", totalDuration)
 
 	// Verify result
-	env.VerifyGitCommitExists(codeCommitArtefact.Payload)
+	env.VerifyGitCommitExists(codeCommitArtefact.Payload.Content)
 	env.VerifyFileExists("e2e-perf.txt")
 
 	// Log performance breakdown

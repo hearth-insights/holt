@@ -68,7 +68,7 @@ services:
 		assert.Len(t, manifestID, 64, "Manifest ID should be 64-char SHA-256 hash")
 
 		// Fetch the manifest artefact
-		manifest, err := bbClient.GetVerifiableArtefact(ctx, manifestID)
+		manifest, err := bbClient.GetArtefact(ctx, manifestID)
 		require.NoError(t, err, "Should be able to fetch SystemManifest")
 		assert.Equal(t, blackboard.StructuralTypeSystemManifest, manifest.Header.StructuralType)
 		assert.Equal(t, "orchestrator", manifest.Header.ProducedByRole)
@@ -99,12 +99,12 @@ services:
 		keys, err := bbClient.ScanKeys(ctx, "holt:"+env.InstanceName+":artefact:*")
 		require.NoError(t, err)
 
-		var goalArtefact *blackboard.VerifiableArtefact
+		var goalArtefact *blackboard.Artefact
 		for _, key := range keys {
 			// Extract hash from key (last part after final :)
 			hashID := key[len("holt:"+env.InstanceName+":artefact:"):]
 
-			artefact, err := bbClient.GetVerifiableArtefact(ctx, hashID)
+			artefact, err := bbClient.GetArtefact(ctx, hashID)
 			if err != nil {
 				continue // Skip if can't fetch
 			}
@@ -122,7 +122,7 @@ services:
 		assert.Equal(t, expectedManifestID, goalArtefact.Header.ParentHashes[0], "Parent should be the active SystemManifest")
 
 		// Verify the parent is actually a SystemManifest
-		parentManifest, err := bbClient.GetVerifiableArtefact(ctx, goalArtefact.Header.ParentHashes[0])
+		parentManifest, err := bbClient.GetArtefact(ctx, goalArtefact.Header.ParentHashes[0])
 		require.NoError(t, err, "Should be able to fetch parent manifest")
 		assert.Equal(t, blackboard.StructuralTypeSystemManifest, parentManifest.Header.StructuralType)
 	})
@@ -139,7 +139,7 @@ services:
 		var goalArtefactID string
 		for _, key := range keys {
 			hashID := key[len("holt:"+env.InstanceName+":artefact:"):]
-			artefact, err := bbClient.GetVerifiableArtefact(ctx, hashID)
+			artefact, err := bbClient.GetArtefact(ctx, hashID)
 			if err != nil {
 				continue
 			}

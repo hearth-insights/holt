@@ -58,4 +58,3 @@ func SelectFields(artefact *blackboard.Artefact, spineInfo *spine.SpineInfo, fie
 
 	return result, nil
 }
-

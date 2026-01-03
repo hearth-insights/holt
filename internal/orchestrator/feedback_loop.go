@@ -4,9 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"time"
 
-	"github.com/hearth-insights/holt/pkg/blackboard"
 	"github.com/google/uuid"
+	"github.com/hearth-insights/holt/pkg/blackboard"
 )
 
 // CreateFeedbackClaim creates a new claim assigned to the original producer of the rejected artefact.
@@ -23,7 +24,7 @@ func (e *Engine) CreateFeedbackClaim(ctx context.Context, originalClaim *blackbo
 	}
 
 	// Check iteration limit using version number
-	iterationCount := targetArtefact.Version - 1
+	iterationCount := targetArtefact.Header.Version - 1
 	maxIterations := *e.config.Orchestrator.MaxReviewIterations
 
 	if maxIterations > 0 && iterationCount >= maxIterations {
@@ -32,7 +33,7 @@ func (e *Engine) CreateFeedbackClaim(ctx context.Context, originalClaim *blackbo
 	}
 
 	// Find the agent that produced the original artefact (reverse-lookup by role)
-	producerAgent, err := e.findAgentByRole(targetArtefact.ProducedByRole)
+	producerAgent, err := e.findAgentByRole(targetArtefact.Header.ProducedByRole)
 	if err != nil {
 		// Agent no longer exists in config
 		return e.terminateMissingAgent(ctx, originalClaim, targetArtefact)
@@ -81,6 +82,36 @@ func (e *Engine) CreateFeedbackClaim(ctx context.Context, originalClaim *blackbo
 
 	// Note: CreateClaim already published to claim_events channel
 
+	// M3.4: If the assigned agent is a controller, we must launch a worker explicitly
+	// because PendingAssignment claims bypass the bidding/granting phase where workers are usually launched.
+	if agent, exists := e.config.Agents[producerAgent]; exists && agent.Mode == "controller" {
+		if e.workerManager != nil {
+			// Check worker limit (though for rework we might want to prioritize it?)
+			// For now, respect the limit to avoid DOS.
+			if e.workerManager.IsAtWorkerLimit(producerAgent, agent.Worker.MaxConcurrent) {
+				log.Printf("[Orchestrator] Role '%s' at max_concurrent worker limit (%d), pausing feedback claim %s in grant queue",
+					producerAgent, agent.Worker.MaxConcurrent, feedbackClaim.ID)
+				
+				// Add to persistent grant queue
+				if err := e.pauseGrantForQueue(ctx, feedbackClaim, producerAgent, producerAgent); err != nil {
+					log.Printf("[Orchestrator] Failed to pause feedback claim in grant queue: %v", err)
+				}
+			} else {
+				log.Printf("[Orchestrator] Launching worker for feedback controller %s (claim %s)", producerAgent, feedbackClaim.ID)
+				if err := e.workerManager.LaunchWorker(ctx, feedbackClaim, producerAgent, agent, e.client); err != nil {
+					log.Printf("[Orchestrator] Failed to launch worker for feedback controller %s: %v", producerAgent, err)
+				}
+				// M3.9: Resolve worker image ID dynamically (pass empty string for now)
+				// Publish event for watching
+				if err := e.publishClaimGrantedEvent(ctx, feedbackClaim.ID, producerAgent, "exclusive", ""); err != nil {
+					log.Printf("[Orchestrator] Failed to publish workflow event for feedback grant to %s: %v", producerAgent, err)
+				}
+			}
+		} else {
+			log.Printf("[Orchestrator] WARN: Feedback assigned to controller %s but workerManager is nil", producerAgent)
+		}
+	}
+
 	return nil
 }
 
@@ -99,18 +130,28 @@ func (e *Engine) findAgentByRole(role string) (string, error) {
 func (e *Engine) terminateMaxIterations(ctx context.Context, claim *blackboard.Claim, artefact *blackboard.Artefact, iterations int) error {
 	maxIterations := *e.config.Orchestrator.MaxReviewIterations
 	failurePayload := fmt.Sprintf("Max review iterations (%d) reached for artefact %s (version %d). Review feedback loop terminated.",
-		maxIterations, artefact.ID, artefact.Version)
+		maxIterations, artefact.ID, artefact.Header.Version)
 
 	failure := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeFailure,
-		Type:            "MaxIterationsExceeded",
-		Payload:         failurePayload,
-		SourceArtefacts: []string{artefact.ID},
-		ProducedByRole:  "orchestrator",
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeFailure,
+			Type:            "MaxIterationsExceeded",
+			ProducedByRole:  "orchestrator",
+			ParentHashes:    []string{artefact.ID},
+			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: failurePayload,
+		},
 	}
+	failureHash, err := blackboard.ComputeArtefactHash(failure)
+	if err != nil {
+		return fmt.Errorf("failed to compute hash for Failure artefact: %w", err)
+	}
+	failure.ID = failureHash
 
 	if err := e.client.CreateArtefact(ctx, failure); err != nil {
 		return fmt.Errorf("failed to create Failure artefact: %w", err)
@@ -136,34 +177,44 @@ func (e *Engine) terminateMaxIterations(ctx context.Context, claim *blackboard.C
 // M3.3: Called when findAgentByRole fails during feedback claim creation.
 func (e *Engine) terminateMissingAgent(ctx context.Context, claim *blackboard.Claim, artefact *blackboard.Artefact) error {
 	failurePayload := fmt.Sprintf("Cannot create feedback claim: agent with role '%s' no longer exists in configuration.",
-		artefact.ProducedByRole)
+		artefact.Header.ProducedByRole)
 
 	failure := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeFailure,
-		Type:            "MissingAgentConfiguration",
-		Payload:         failurePayload,
-		SourceArtefacts: []string{artefact.ID},
-		ProducedByRole:  "orchestrator",
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeFailure,
+			Type:            "MissingAgentConfiguration",
+			ProducedByRole:  "orchestrator",
+			ParentHashes:    []string{artefact.ID},
+			CreatedAtMs:     time.Now().UnixMilli(),
+			Metadata:        "{}",
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: failurePayload,
+		},
 	}
+	failureHash, err := blackboard.ComputeArtefactHash(failure)
+	if err != nil {
+		return fmt.Errorf("failed to compute hash for Failure artefact: %w", err)
+	}
+	failure.ID = failureHash
 
 	if err := e.client.CreateArtefact(ctx, failure); err != nil {
 		return fmt.Errorf("failed to create Failure artefact: %w", err)
 	}
 
 	claim.Status = blackboard.ClaimStatusTerminated
-	claim.TerminationReason = fmt.Sprintf("Terminated due to missing agent configuration (role: %s).", artefact.ProducedByRole)
+	claim.TerminationReason = fmt.Sprintf("Terminated due to missing agent configuration (role: %s).", artefact.Header.ProducedByRole)
 
 	e.logEvent("claim_terminated_missing_agent", map[string]interface{}{
 		"claim_id":     claim.ID,
-		"missing_role": artefact.ProducedByRole,
+		"missing_role": artefact.Header.ProducedByRole,
 		"failure_id":   failure.ID,
 	})
 
 	log.Printf("[Orchestrator] Claim %s terminated: agent with role '%s' not found",
-		claim.ID, artefact.ProducedByRole)
+		claim.ID, artefact.Header.ProducedByRole)
 
 	return e.client.UpdateClaim(ctx, claim)
 }

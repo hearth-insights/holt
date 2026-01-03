@@ -39,10 +39,10 @@ func TestCreateVerifiableResultArtefact_Success(t *testing.T) {
 	}
 
 	// Create a V2 target artefact with hash ID (full V2 flow)
-	targetArtefact := &blackboard.VerifiableArtefact{
+	targetArtefact := &blackboard.Artefact{
 		Header: blackboard.ArtefactHeader{
 			ParentHashes:    []string{}, // Root artefact
-			LogicalThreadID: uuid.New().String(),
+			LogicalThreadID: blackboard.NewID(),
 			Version:         1,
 			CreatedAtMs:     time.Now().UnixMilli(),
 			ProducedByRole:  "user",
@@ -60,7 +60,7 @@ func TestCreateVerifiableResultArtefact_Success(t *testing.T) {
 	targetArtefact.ID = targetHash
 
 	// Write to blackboard
-	err = bbClient.WriteVerifiableArtefact(ctx, targetArtefact)
+	err = bbClient.CreateArtefact(ctx, targetArtefact)
 	require.NoError(t, err)
 
 	// Create claim
@@ -78,21 +78,8 @@ func TestCreateVerifiableResultArtefact_Success(t *testing.T) {
 		Summary:         "Test completed",
 	}
 
-	// Convert V2 artefact to V1 for function call (transitional compatibility)
-	targetArtefactV1 := &blackboard.Artefact{
-		ID:              targetArtefact.ID,
-		LogicalID:       targetArtefact.Header.LogicalThreadID,
-		Version:         targetArtefact.Header.Version,
-		StructuralType:  targetArtefact.Header.StructuralType,
-		Type:            targetArtefact.Header.Type,
-		Payload:         targetArtefact.Payload.Content,
-		SourceArtefacts: targetArtefact.Header.ParentHashes,
-		ProducedByRole:  targetArtefact.Header.ProducedByRole,
-		CreatedAtMs:     targetArtefact.Header.CreatedAtMs,
-	}
-
-	// Call createVerifiableResultArtefact
-	result, err := engine.createVerifiableResultArtefact(ctx, claim, output, targetArtefactV1)
+	// Call createResultArtefact (was createVerifiableResultArtefact)
+	result, err := engine.createResultArtefact(ctx, claim, output, targetArtefact, "{}") // Use "{}" for consistent hashing
 	require.NoError(t, err, "Should successfully create verifiable artefact")
 
 	// Verify artefact structure
@@ -100,14 +87,15 @@ func TestCreateVerifiableResultArtefact_Success(t *testing.T) {
 	assert.Len(t, result.ID, 64, "ID should be 64-char SHA-256 hash")
 	assert.Equal(t, "TestResult", result.Header.Type)
 	assert.Equal(t, "test payload content", result.Payload.Content)
-	assert.Equal(t, []string{targetArtefactV1.ID}, result.Header.ParentHashes)
+	assert.Equal(t, []string{targetArtefact.ID}, result.Header.ParentHashes)
 	assert.Equal(t, "test-agent", result.Header.ProducedByRole)
 	assert.Equal(t, blackboard.StructuralTypeStandard, result.Header.StructuralType)
 
 	// Verify hash can be recomputed
 	recomputedHash, err := blackboard.ComputeArtefactHash(result)
 	require.NoError(t, err)
-	assert.Equal(t, result.ID, recomputedHash, "Hash should be deterministic")
+	// Hash will vary due to timestamp, so we only verify it's a valid hash and recomputable
+	assert.Equal(t, result.ID, recomputedHash, "Hash should be deterministic for the same content")
 
 	// Verify artefact was written to Redis
 	exists, err := bbClient.ArtefactExists(ctx, result.ID)
@@ -140,18 +128,23 @@ func TestCreateVerifiableResultArtefact_PayloadSizeValidation(t *testing.T) {
 		bbClient: bbClient,
 	}
 
-	// Create target artefact
+	// Create target artefact (valid hash)
 	targetArtefact := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "GoalDefined",
-		Payload:         "Generate large file",
-		SourceArtefacts: []string{},
-		ProducedByRole:  "user",
-		CreatedAtMs:     time.Now().UnixMilli(),
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "GoalDefined",
+			ProducedByRole:  "user",
+			CreatedAtMs:     time.Now().UnixMilli(),
+			ParentHashes:    []string{},
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "Generate large file",
+		},
 	}
+	targetHash, _ := blackboard.ComputeArtefactHash(targetArtefact)
+	targetArtefact.ID = targetHash
 
 	err = bbClient.CreateArtefact(ctx, targetArtefact)
 	require.NoError(t, err)
@@ -176,8 +169,8 @@ func TestCreateVerifiableResultArtefact_PayloadSizeValidation(t *testing.T) {
 		Summary:         "Created large file",
 	}
 
-	// Call createVerifiableResultArtefact (should fail)
-	result, err := engine.createVerifiableResultArtefact(ctx, claim, output, targetArtefact)
+	// Call createResultArtefact (should fail)
+	result, err := engine.createResultArtefact(ctx, claim, output, targetArtefact, "")
 	assert.Error(t, err, "Should reject oversized payload")
 	assert.Nil(t, result)
 	assert.Contains(t, err.Error(), "payload validation failed", "Error should mention payload validation")

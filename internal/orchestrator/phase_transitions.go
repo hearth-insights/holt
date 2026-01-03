@@ -2,8 +2,10 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/hearth-insights/holt/internal/orchestrator/debug"
 	"github.com/hearth-insights/holt/pkg/blackboard"
@@ -35,6 +37,7 @@ func (e *Engine) TransitionToNextPhase(ctx context.Context, claim *blackboard.Cl
 	// Determine next phase
 	var nextStatus blackboard.ClaimStatus
 	var nextPhase string
+	var skipGranting bool // True when transitioning to final state with no bids
 
 	switch currentClaim.Status {
 	case blackboard.ClaimStatusPendingReview:
@@ -46,21 +49,14 @@ func (e *Engine) TransitionToNextPhase(ctx context.Context, claim *blackboard.Cl
 			nextStatus = blackboard.ClaimStatusPendingExclusive
 			nextPhase = "exclusive"
 		} else {
-			// No more work - claim is complete
-			e.logEvent("claim_complete", map[string]interface{}{
-				"claim_id": claim.ID,
-				"reason":   "no_grants_remaining_after_review",
-			})
-			log.Printf("[Orchestrator] Claim %s has no remaining grants after review phase, marking as complete", claim.ID)
-			
-			currentClaim.Status = blackboard.ClaimStatusComplete
-			if err := e.client.UpdateClaim(ctx, currentClaim); err != nil {
-				e.logError("failed to update claim status to complete", err)
-				return fmt.Errorf("failed to update claim status: %w", err)
-			}
-			
-			delete(e.phaseStates, claim.ID)
-			return nil
+			// No more phases - transition to pending_exclusive so agents will create Terminal
+			// This handles review-only workflows (no parallel/exclusive work)
+			log.Printf("[Orchestrator] Review phase complete for claim %s, no further phases, transitioning to pending_exclusive for Terminal creation", claim.ID)
+			nextStatus = blackboard.ClaimStatusPendingExclusive
+			nextPhase = "none" // Sentinel value to skip granting
+			skipGranting = true
+			// Note: No agents will be granted. The agent that completed review
+			// will see the status is now pending_exclusive and create Terminal
 		}
 
 	case blackboard.ClaimStatusPendingParallel:
@@ -69,37 +65,38 @@ func (e *Engine) TransitionToNextPhase(ctx context.Context, claim *blackboard.Cl
 			nextStatus = blackboard.ClaimStatusPendingExclusive
 			nextPhase = "exclusive"
 		} else {
-			// No exclusive work - claim is complete
-			e.logEvent("claim_complete", map[string]interface{}{
-				"claim_id": claim.ID,
-				"reason":   "no_grants_remaining_after_parallel",
-			})
-			log.Printf("[Orchestrator] Claim %s has no remaining grants after parallel phase, marking as complete", claim.ID)
-			
-			currentClaim.Status = blackboard.ClaimStatusComplete
-			if err := e.client.UpdateClaim(ctx, currentClaim); err != nil {
-				e.logError("failed to update claim status to complete", err)
-				return fmt.Errorf("failed to update claim status: %w", err)
-			}
-			
-			delete(e.phaseStates, claim.ID)
-			return nil
+			// No exclusive work - transition to pending_exclusive so agents will create Terminal
+			// This handles review+parallel workflows (no exclusive work)
+			log.Printf("[Orchestrator] Parallel phase complete for claim %s, no further phases, transitioning to pending_exclusive for Terminal creation", claim.ID)
+			nextStatus = blackboard.ClaimStatusPendingExclusive
+			nextPhase = "none" // Sentinel value to skip granting
+			skipGranting = true
+			// Note: No agents will be granted. The agents that completed parallel
+			// will see the status is now pending_exclusive and create Terminal
 		}
 
 	case blackboard.ClaimStatusPendingExclusive:
-		// Exclusive completes → claim complete
-		nextStatus = blackboard.ClaimStatusComplete
-		currentClaim.Status = nextStatus
-		if err := e.client.UpdateClaim(ctx, currentClaim); err != nil {
-			e.logError("failed to update claim status to complete", err)
-			return fmt.Errorf("failed to update claim status: %w", err)
-		}
-		delete(e.phaseStates, claim.ID)
+		// M5.1.1: Check if merge phase has bids (4th phase - Fan-In Accumulator)
+		if HasBidsForPhase(phaseState.AllBids, "merge") {
+			nextStatus = blackboard.ClaimStatusPendingMerge
+			nextPhase = "merge"
+			log.Printf("[Orchestrator] Exclusive phase complete for claim %s, transitioning to merge phase", claim.ID)
+		} else {
+			// Exclusive phase complete - do NOT mark claim as complete yet
+			// Claim will complete when agent sends Terminal artefact
+			log.Printf("[Orchestrator] Exclusive phase complete for claim %s, waiting for Terminal artefact", claim.ID)
 
-		e.logEvent("claim_complete", map[string]interface{}{
-			"claim_id": claim.ID,
-		})
-		log.Printf("[Orchestrator] Claim %s marked as complete", claim.ID)
+			// Keep the claim in granted_exclusive status and phaseStates
+			// The Terminal artefact handler will mark it complete
+			// Don't delete from phaseStates - needed for Terminal artefact lookup
+			return nil
+		}
+
+	case blackboard.ClaimStatusPendingMerge:
+		// M5.1.1: Merge phase complete
+		// Claim completes after merge phase (no Terminal artefact needed for merge-only claims)
+		log.Printf("[Orchestrator] Merge phase complete for claim %s", claim.ID)
+		// Claim was already marked complete by GrantMergePhase
 		return nil
 
 	default:
@@ -125,9 +122,9 @@ func (e *Engine) TransitionToNextPhase(ctx context.Context, claim *blackboard.Cl
 
 	// M4.2: Emit phase_completed event after successful phase completion
 	e.logEvent("phase_completed", map[string]interface{}{
-		"claim_id":       claim.ID,
+		"claim_id":        claim.ID,
 		"completed_phase": claim.Status,
-		"next_phase":     nextPhase,
+		"next_phase":      nextPhase,
 	})
 
 	// M4.2: Check breakpoints after phase completion
@@ -145,7 +142,38 @@ func (e *Engine) TransitionToNextPhase(ctx context.Context, claim *blackboard.Cl
 	}
 	currentClaim = freshClaim // Use fresh claim for subsequent operations
 
-	// Grant next phase
+	// Grant next phase (unless this is a synthetic transition to trigger Terminal creation)
+	if skipGranting {
+		// M5.2: When no further phases exist, the Orchestrator takes responsibility
+		// for creating the Terminal artefact and marking the claim complete.
+		log.Printf("[Orchestrator] No further phases for claim %s, creating Terminal artefact and completing claim", currentClaim.ID)
+
+		// Create Terminal artefact produced by orchestrator
+		if err := e.createOrchestratorTerminal(ctx, currentClaim); err != nil {
+			log.Printf("[Orchestrator] Failed to create Terminal artefact for claim %s: %v", currentClaim.ID, err)
+			return fmt.Errorf("failed to create Terminal artefact: %w", err)
+		}
+
+		// Mark claim complete
+		currentClaim.Status = blackboard.ClaimStatusComplete
+		if err := e.client.UpdateClaim(ctx, currentClaim); err != nil {
+			log.Printf("[Orchestrator] Failed to mark claim %s complete: %v", currentClaim.ID, err)
+			return fmt.Errorf("failed to mark claim complete: %w", err)
+		}
+
+		e.logEvent("claim_completed", map[string]interface{}{
+			"claim_id":     currentClaim.ID,
+			"artefact_id":  currentClaim.ArtefactID,
+			"reason":       "No further phases, orchestrator created Terminal",
+		})
+
+		log.Printf("[Orchestrator] Claim %s marked complete (no further phases)", currentClaim.ID)
+
+		// Clean up phase state
+		delete(e.phaseStates, currentClaim.ID)
+
+		return nil
+	}
 	return e.GrantNextPhase(ctx, currentClaim, phaseState, nextPhase)
 }
 
@@ -183,6 +211,22 @@ func (e *Engine) GrantNextPhase(ctx context.Context, claim *blackboard.Claim, ph
 			}
 		}
 		return e.GrantExclusivePhase(ctx, claim, bids)
+
+	case "merge":
+		// M5.1.1: Reconstruct map[string]Bid from PhaseState data for merge phase
+		bids := make(map[string]blackboard.Bid)
+		for agent, bidType := range phaseState.AllBids {
+			timestamp := int64(0)
+			if ts, ok := phaseState.BidTimestamps[agent]; ok {
+				timestamp = ts
+			}
+			bids[agent] = blackboard.Bid{
+				AgentName:   agent,
+				BidType:     bidType,
+				TimestampMs: timestamp,
+			}
+		}
+		return e.GrantMergePhase(ctx, claim, bids)
 
 	default:
 		return fmt.Errorf("unknown next phase: %s", nextPhase)
@@ -323,5 +367,62 @@ func (e *Engine) GrantExclusivePhase(ctx context.Context, claim *blackboard.Clai
 		// Non-fatal - continue execution
 	}
 
+	return nil
+}
+
+// createOrchestratorTerminal creates a Terminal artefact produced by the orchestrator.
+// M5.2: Called when no further phases exist and the Orchestrator takes responsibility
+// for completing the claim instead of waiting for agents to create Terminal.
+//
+// This prevents claims from getting stuck when:
+// - Review phase completes but no parallel/exclusive phases exist
+// - Parallel phase completes but no exclusive phase exists
+func (e *Engine) createOrchestratorTerminal(ctx context.Context, claim *blackboard.Claim) error {
+	log.Printf("[Orchestrator] Creating Terminal artefact for claim %s (produced by orchestrator)", claim.ID)
+
+	// Create Terminal artefact payload
+	terminalData := map[string]interface{}{
+		"reason":       "No further phases - orchestrator completing claim",
+		"claim_id":     claim.ID,
+		"completed_by": "orchestrator",
+	}
+
+	payloadJSON, err := json.Marshal(terminalData)
+	if err != nil {
+		return fmt.Errorf("failed to marshal Terminal payload: %w", err)
+	}
+
+	// Create unique logical thread for Terminal artefact
+	logicalThreadID := blackboard.NewID()
+
+	artefact := &blackboard.Artefact{
+		Header: blackboard.ArtefactHeader{
+			ParentHashes:    []string{claim.ArtefactID},
+			LogicalThreadID: logicalThreadID,
+			Version:         1,
+			CreatedAtMs:     time.Now().UnixMilli(),
+			ProducedByRole:  "orchestrator", // M5.2: Orchestrator is the producer
+			StructuralType:  blackboard.StructuralTypeTerminal,
+			Type:            "WorkflowComplete",
+			ClaimID:         claim.ID,
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: string(payloadJSON),
+		},
+	}
+
+	// Compute hash
+	hash, err := blackboard.ComputeArtefactHash(artefact)
+	if err != nil {
+		return fmt.Errorf("failed to compute hash for Terminal artefact: %w", err)
+	}
+	artefact.ID = hash
+
+	// Write to blackboard using atomic CreateArtefact
+	if err := e.client.CreateArtefact(ctx, artefact); err != nil {
+		return fmt.Errorf("failed to create Terminal artefact: %w", err)
+	}
+
+	log.Printf("[Orchestrator] Created Terminal artefact: id=%s type=%s", artefact.ID, artefact.Header.Type)
 	return nil
 }

@@ -672,6 +672,333 @@ holt down && holt up
 
 ---
 
+## Fan-In Synchronization Issues (M5.1+)
+
+### Synchronizer Never Bids
+
+**Symptoms:**
+- Prerequisites complete successfully
+- Synchronizer agent running
+- No bid submitted, workflow stalls
+
+**Causes:**
+1. Ancestor not found in provenance chain
+2. Not all dependencies met
+3. Lock already held (race condition)
+4. Configuration error
+
+**Solution:**
+```bash
+# Check synchronizer logs
+holt logs {synchronizer-agent}
+
+# Look for diagnostic messages:
+# - "Artefact X is not a potential trigger" → Check wait_for types
+# - "No ancestor of type 'Y' found" → Check ancestor_type config
+# - "Not all dependencies met" → Verify all prerequisites exist
+# - "Lock already held" → Expected (deduplication working)
+
+# Verify ancestor exists in graph
+holt hoard | grep -A 5 "{ancestor_type}"
+
+# Verify all descendants exist
+holt hoard | grep -c "{descendant_type}"
+# Should match expected count
+
+# Check reverse index (shows parent-child relationships)
+docker exec holt-{inst}-redis redis-cli SMEMBERS "holt:{inst}:index:children:{ancestor_id}"
+```
+
+**Debug Commands:**
+```bash
+# Trace synchronizer evaluation
+holt logs {synchronizer} | grep "Evaluating claim"
+
+# Expected output:
+# [Synchronizer] Evaluating claim abc-123 for synchronization
+# [Synchronizer] Found ancestor def-456 (type=CodeCommit)
+# [Synchronizer] Found 3 descendants of ancestor def-456
+# [Synchronizer] Type 'TestResult': present
+# [Synchronizer] Type 'LintResult': present
+# [Synchronizer] Type 'SecurityScan': present
+# [Synchronizer] All dependencies met for ancestor def-456
+# [Synchronizer] Lock acquired for ancestor def-456, ready to bid
+```
+
+---
+
+### Synchronizer Bids Too Early
+
+**Symptoms:**
+Synchronizer executes before all prerequisites complete.
+
+**Causes:**
+1. Wrong `wait_for` configuration (missing types)
+2. Metadata count incorrect (Producer-Declared pattern)
+3. Duplicate artefacts (same type created multiple times)
+
+**Solution:**
+```bash
+# Verify configuration
+cat holt.yml | grep -A 10 synchronize
+
+# For Named pattern: Check all types listed
+# For Producer-Declared: Check count_from_metadata key
+
+# Verify actual dependency count
+holt hoard | jq '.artefacts[] | select(.type=="{descendant_type}") | .id' | wc -l
+
+# For Producer-Declared: Check metadata
+docker exec holt-{inst}-redis redis-cli HGET "holt:{inst}:artefact:{id}" metadata
+# Should return: {"batch_size": "N"}
+```
+
+**Debug Commands:**
+```bash
+# View synchronizer decision logs
+holt logs {synchronizer} | grep "dependencies met"
+
+# If bids too early:
+# - Missing type in wait_for → Add to configuration
+# - Metadata wrong → Check producer agent output count
+# - Duplicates → Check why same type created twice
+```
+
+---
+
+### Metadata Not Found Error
+
+**Symptoms:**
+```
+[Synchronizer] Failed to read metadata 'batch_size': key not found
+```
+
+**Causes:**
+1. Producer agent didn't output multiple artefacts (no metadata injection)
+2. Metadata key mismatch in configuration
+3. Producer using pre-M5.1 Pup (no multi-artefact support)
+
+**Solution:**
+```bash
+# Check artefact metadata in Redis
+docker exec holt-{inst}-redis redis-cli HGET "holt:{inst}:artefact:{id}" metadata
+
+# Expected: {"batch_size": "N"}
+# If returns {}: Producer only output 1 artefact (metadata not injected)
+
+# Verify configuration key matches
+cat holt.yml | grep count_from_metadata
+# Key must match metadata field exactly
+
+# Rebuild producer agent with M5.1 Pup
+docker build -t producer:latest -f agents/producer/Dockerfile .
+holt down && holt up
+```
+
+**Debug Producer Agent:**
+```bash
+# Check how many artefacts producer created
+holt logs {producer-agent} | grep "Created artefact"
+# If only 1 line: Not using multi-artefact output
+
+# Producer script should output MULTIPLE JSON objects to FD 3
+# Example:
+# echo '{"artefact_type": "Record", "artefact_payload": "1"}' >&3
+# echo '{"artefact_type": "Record", "artefact_payload": "2"}' >&3
+# echo '{"artefact_type": "Record", "artefact_payload": "3"}' >&3
+```
+
+---
+
+### Deadlock After Lock Acquisition (10-Minute TTL)
+
+**Symptoms:**
+- Synchronizer log shows "Lock acquired"
+- No bid submitted
+- Workflow stalls for ~10 minutes
+- Eventually resumes
+
+**Cause:** Pup crashed after acquiring deduplication lock but before submitting bid.
+
+**Solution:**
+```bash
+# Identify orphaned locks
+docker exec holt-{inst}-redis redis-cli KEYS "holt:{inst}:sync_dedup:*"
+
+# Check lock TTL (time until auto-cleanup)
+docker exec holt-{inst}-redis redis-cli TTL "holt:{inst}:sync_dedup:{ancestor_id}:{role_hash}"
+# Returns seconds remaining (max 600)
+
+# Option 1: Wait for TTL expiry (automatic recovery)
+# Lock will expire after 10 minutes, next claim event will succeed
+
+# Option 2: Manual lock deletion (if you're certain it's orphaned)
+docker exec holt-{inst}-redis redis-cli DEL "holt:{inst}:sync_dedup:{ancestor_id}:{role_hash}"
+# WARNING: Only delete if you're sure the Pup crashed!
+```
+
+**Prevention:**
+- Monitor container health: `docker ps --filter "status=running"`
+- Check for OOM kills: `docker logs {agent} | grep "Killed"`
+- Increase container memory if needed
+
+---
+
+### Partial Fan-In Hang (Missing Prerequisite)
+
+**Symptoms:**
+- Most prerequisites complete (e.g., 4 of 5 shards)
+- One prerequisite fails or never arrives
+- Synchronizer never bids
+- Workflow stalls indefinitely
+
+**Cause:** M5.1 V1 has no timeout mechanism. Synchronizers wait forever for missing artefacts.
+
+**Solution:**
+```bash
+# Identify which prerequisite is missing
+holt hoard | grep -c "{descendant_type}"
+# Compare to expected count (from metadata or configuration)
+
+# Option 1: Fix upstream producer
+# If prerequisite failed, check its logs
+holt logs {upstream-agent}
+# Look for Failure artefact or error
+
+# Option 2: Manual workflow termination
+# Create Terminal artefact to end workflow
+cat > terminal.json <<EOF
+{
+  "artefact_type": "WorkflowTerminated",
+  "artefact_payload": "Manual termination due to partial failure",
+  "structural_type": "Terminal",
+  "summary": "Workflow terminated"
+}
+EOF
+
+# (Note: No built-in command for this in V1, would need custom script)
+
+# Option 3: Restart instance (clears all state)
+holt down && holt up
+```
+
+**Prevention:**
+- Design upstream agents to handle failures gracefully
+- Monitor workflows: `holt watch`
+- Future: Use M5.2 timeout-based synchronization (not in V1)
+
+---
+
+### Descendant Not Found (max_depth Limit)
+
+**Symptoms:**
+- Descendant exists in artefact graph
+- Synchronizer never finds it
+- Log shows "Not all dependencies met"
+
+**Cause:** Descendant is deeper in graph than `max_depth` allows.
+
+**Solution:**
+```bash
+# Check synchronizer configuration
+cat holt.yml | grep max_depth
+
+# If set to small value (e.g., 1), increase or remove
+# holt.yml:
+synchronize:
+  max_depth: 0  # Unlimited depth
+
+# Or increase to expected depth:
+synchronize:
+  max_depth: 10  # Search up to 10 levels
+
+# Verify descendant depth
+holt hoard | jq '.artefacts[] | select(.type=="{descendant_type}") | .source_artefacts'
+# Count hops from ancestor to descendant
+
+# Restart instance with updated config
+holt down && holt up
+```
+
+**Example:**
+```
+Ancestor (depth 0)
+  └── Child (depth 1)
+        └── Grandchild (depth 2)  ← If max_depth=1, this won't be found
+```
+
+---
+
+### Duplicate Bids (Deduplication Failure)
+
+**Symptoms:**
+- Multiple synchronizers bid on same ancestor
+- Orchestrator grants multiple claims
+- Expected only one to execute
+
+**Cause:** Deduplication lock mechanism failure (rare, indicates bug).
+
+**Solution:**
+```bash
+# Check orchestrator logs for duplicate grants
+holt logs orchestrator | grep "Granting claim"
+
+# Verify lock acquisition in agent logs
+holt logs {synchronizer-1} | grep "Lock acquired"
+holt logs {synchronizer-2} | grep "Lock acquired"
+# Only ONE should show "Lock acquired"
+# Other should show "Lock already held"
+
+# If BOTH show "Lock acquired": BUG
+# Report issue with:
+# - Redis version: docker exec holt-{inst}-redis redis-cli INFO server
+# - Holt version: git log --oneline | head -1
+# - Reproduction steps
+```
+
+**Expected behavior:**
+```
+Worker A: [Synchronizer] Lock acquired for ancestor abc-123, ready to bid
+Worker B: [Synchronizer] Lock already held for ancestor abc-123, skipping bid (deduplication)
+```
+
+---
+
+### Reverse Index Inconsistency
+
+**Symptoms:**
+- Artefact exists but not in reverse index
+- Synchronizer can't find descendants
+- Graph traversal incomplete
+
+**Cause:** Artefact created before M5.1 (no Lua script), or Lua script failure.
+
+**Solution:**
+```bash
+# Check if artefact has reverse index entry
+PARENT_ID="abc-123"
+docker exec holt-{inst}-redis redis-cli SMEMBERS "holt:{inst}:index:children:$PARENT_ID"
+
+# If empty but children exist:
+# Query all artefacts with this parent
+docker exec holt-{inst}-redis redis-cli KEYS "holt:{inst}:artefact:*" | while read key; do
+  sources=$(docker exec holt-{inst}-redis redis-cli HGET "$key" source_artefacts)
+  if echo "$sources" | grep -q "$PARENT_ID"; then
+    echo "$key has parent $PARENT_ID but not in reverse index"
+  fi
+done
+
+# Resolution: Restart instance (creates new artefacts with proper indexing)
+holt down && holt up
+```
+
+**Prevention:**
+- Ensure all components use M5.1 Lua script
+- Never manually create artefacts via Redis CLI
+- Rebuild all agents with M5.1 Pup
+
+---
+
 ## Docker & Container Problems
 
 ### Docker Daemon Not Running
@@ -972,6 +1299,9 @@ If you've tried the solutions above and still have issues:
 | Max iterations (M3.3) | `holt hoard \| grep Failure` |
 | Feedback loop (M3.3) | `holt logs orchestrator \| grep feedback` |
 | Version not incrementing (M3.3) | `holt logs <agent> \| grep "rework artefact"` |
+| Synchronizer not bidding (M5.1) | `holt logs <synchronizer> \| grep "dependencies met"` |
+| Metadata missing (M5.1) | `docker exec holt-{inst}-redis redis-cli HGET holt:{inst}:artefact:{id} metadata` |
+| Deadlock (M5.1) | `docker exec holt-{inst}-redis redis-cli KEYS "holt:*:sync_dedup:*"` |
 
 ---
 

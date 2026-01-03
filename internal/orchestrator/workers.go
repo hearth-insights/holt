@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -156,28 +157,25 @@ func (wm *WorkerManager) LaunchWorker(ctx context.Context, claim *blackboard.Cla
 	// Build Docker container config
 	redisURL := fmt.Sprintf("redis://%s:6379", wm.redisContainerName)
 
-	// Serialize BiddingStrategyConfig to JSON (M4.8)
-	biddingStrategyJSON, err := json.Marshal(agent.BiddingStrategy)
-	if err != nil {
-		return fmt.Errorf("failed to marshal bidding strategy: %w", err)
+	// Build base environment variables
+	// M3.7: ONLY HOLT_AGENT_NAME is set (to the role), HOLT_AGENT_ROLE removed
+	// M4.6 Security Addendum: HOLT_CLAIM_ID binds the worker to the authorization
+	env := []string{
+		fmt.Sprintf("HOLT_INSTANCE_NAME=%s", wm.instanceName),
+		fmt.Sprintf("HOLT_AGENT_NAME=%s", agentRole),
+		fmt.Sprintf("HOLT_CLAIM_ID=%s", claim.ID), // M4.6: Grant Linkage for topology validation
+		fmt.Sprintf("REDIS_URL=%s", redisURL),
+		// NOTE: No HOLT_MODE for workers - the --execute-claim flag is sufficient
 	}
 
-	containerConfig := &container.Config{
-		Image: agent.Worker.Image,
-		// M3.4: Worker is launched with --execute-claim flag
-		// Note: Image has ENTRYPOINT ["/app/pup"], so Cmd only contains arguments
-		Cmd: []string{"--execute-claim", claim.ID},
-		// M3.7: ONLY HOLT_AGENT_NAME is set (to the role), HOLT_AGENT_ROLE removed
-		// M4.6 Security Addendum: HOLT_CLAIM_ID binds the worker to the authorization
-		Env: []string{
-			fmt.Sprintf("HOLT_INSTANCE_NAME=%s", wm.instanceName),
-			fmt.Sprintf("HOLT_AGENT_NAME=%s", agentRole),
-			fmt.Sprintf("HOLT_CLAIM_ID=%s", claim.ID), // M4.6: Grant Linkage for topology validation
-			fmt.Sprintf("REDIS_URL=%s", redisURL),
-			fmt.Sprintf("HOLT_BIDDING_STRATEGY=%s", string(biddingStrategyJSON)),
-			// NOTE: No HOLT_MODE for workers - the --execute-claim flag is sufficient
-		},
-		Labels: dockerpkg.BuildLabels(wm.instanceName, uuid.New().String(), wm.workspacePath, "worker"),
+	// M4.8/M5.1: Add HOLT_BIDDING_STRATEGY only if configured
+	// Don't set empty bidding strategy when only synchronize is configured
+	if agent.BiddingStrategy.Type != "" {
+		biddingStrategyJSON, err := json.Marshal(agent.BiddingStrategy)
+		if err != nil {
+			return fmt.Errorf("failed to marshal bidding strategy: %w", err)
+		}
+		env = append(env, fmt.Sprintf("HOLT_BIDDING_STRATEGY=%s", string(biddingStrategyJSON)))
 	}
 
 	// Add HOLT_AGENT_COMMAND environment variable if configured
@@ -186,8 +184,13 @@ func (wm *WorkerManager) LaunchWorker(ctx context.Context, claim *blackboard.Cla
 		if err != nil {
 			return fmt.Errorf("failed to marshal worker command to JSON: %w", err)
 		}
-		containerConfig.Env = append(containerConfig.Env, fmt.Sprintf("HOLT_AGENT_COMMAND=%s", commandJSON))
+		env = append(env, fmt.Sprintf("HOLT_AGENT_COMMAND=%s", commandJSON))
 	}
+
+	// M4.10: Add user-defined worker environment variables
+	// Workers inherit agent-level environment by default
+	env = append(env, agent.Environment...)
+	env = append(env, agent.Worker.Environment...)
 
 	// Add HOLT_AGENT_BID_SCRIPT as JSON array
 	if len(agent.BidScript) > 0 {
@@ -195,7 +198,25 @@ func (wm *WorkerManager) LaunchWorker(ctx context.Context, claim *blackboard.Cla
 		if err != nil {
 			return fmt.Errorf("failed to marshal agent bid script to JSON: %w", err)
 		}
-		containerConfig.Env = append(containerConfig.Env, fmt.Sprintf("HOLT_AGENT_BID_SCRIPT=%s", bidScriptJSON))
+		env = append(env, fmt.Sprintf("HOLT_AGENT_BID_SCRIPT=%s", bidScriptJSON))
+	}
+
+	// M5.1: Add HOLT_SYNCHRONIZE_CONFIG if synchronization is configured
+	if agent.Synchronize != nil {
+		synchronizeJSON, err := json.Marshal(agent.Synchronize)
+		if err != nil {
+			return fmt.Errorf("failed to marshal synchronize config to JSON: %w", err)
+		}
+		env = append(env, fmt.Sprintf("HOLT_SYNCHRONIZE_CONFIG=%s", synchronizeJSON))
+	}
+
+	containerConfig := &container.Config{
+		Image: agent.Worker.Image,
+		// M3.4: Worker is launched with --execute-claim flag
+		// Note: Image has ENTRYPOINT ["/app/pup"], so Cmd only contains arguments
+		Cmd:    []string{"--execute-claim", claim.ID},
+		Env:    env,
+		Labels: dockerpkg.BuildLabels(wm.instanceName, uuid.New().String(), wm.workspacePath, "worker"),
 	}
 
 	// Build host config
@@ -305,22 +326,35 @@ func (wm *WorkerManager) handleWorkerExit(ctx context.Context, worker *WorkerSta
 
 		// Get container logs for failure details
 		logs := wm.getWorkerLogs(ctx, worker.ContainerID)
+		sanitizedLogs := sanitizeLogs(logs)
 
 		// Create Failure artefact
-		failurePayload := fmt.Sprintf("Worker container exited with code %d\n\nLogs:\n%s", exitCode, logs)
+		failurePayload := fmt.Sprintf("Worker container exited with code %d\n\nLogs:\n%s", exitCode, sanitizedLogs)
 		failure := &blackboard.Artefact{
-			ID:              uuid.New().String(),
-			LogicalID:       uuid.New().String(),
-			Version:         1,
-			StructuralType:  blackboard.StructuralTypeFailure,
-			Type:            "WorkerFailure",
-			Payload:         failurePayload,
-			SourceArtefacts: []string{},
-			ProducedByRole:  worker.Role,
+			Header: blackboard.ArtefactHeader{
+				LogicalThreadID: uuid.New().String(),
+				Version:         1,
+				StructuralType:  blackboard.StructuralTypeFailure,
+				Type:            "WorkerFailure",
+				ProducedByRole:  worker.Role,
+				ParentHashes:    []string{},
+				Metadata:        "{}",
+				CreatedAtMs:     time.Now().UnixMilli(),
+			},
+			Payload: blackboard.ArtefactPayload{
+				Content: failurePayload,
+			},
 		}
 
-		if err := bbClient.CreateArtefact(ctx, failure); err != nil {
-			log.Printf("[Orchestrator] Failed to create Failure artefact: %v", err)
+		// Compute hash for V2 ID
+		hash, err := blackboard.ComputeArtefactHash(failure)
+		if err != nil {
+			log.Printf("[Orchestrator] Failed to compute hash for Failure artefact: %v", err)
+		} else {
+			failure.ID = hash
+			if err := bbClient.CreateArtefact(ctx, failure); err != nil {
+				log.Printf("[Orchestrator] Failed to create Failure artefact: %v", err)
+			}
 		}
 
 		// Terminate claim
@@ -350,18 +384,30 @@ func (wm *WorkerManager) handleWorkerError(ctx context.Context, worker *WorkerSt
 	// Create Failure artefact
 	failurePayload := fmt.Sprintf("Worker container monitoring error: %v", err)
 	failure := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeFailure,
-		Type:            "WorkerError",
-		Payload:         failurePayload,
-		SourceArtefacts: []string{},
-		ProducedByRole:  worker.Role,
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: uuid.New().String(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeFailure,
+			Type:            "WorkerError",
+			ProducedByRole:  worker.Role,
+			ParentHashes:    []string{},
+			Metadata:        "{}",
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: failurePayload,
+		},
 	}
 
-	if createErr := bbClient.CreateArtefact(ctx, failure); createErr != nil {
-		log.Printf("[Orchestrator] Failed to create Failure artefact: %v", createErr)
+	// Compute hash for V2 ID
+	hash, createErr := blackboard.ComputeArtefactHash(failure)
+	if createErr != nil {
+		log.Printf("[Orchestrator] Failed to compute hash for Failure artefact: %v", createErr)
+	} else {
+		failure.ID = hash
+		if createErr := bbClient.CreateArtefact(ctx, failure); createErr != nil {
+			log.Printf("[Orchestrator] Failed to create Failure artefact: %v", createErr)
+		}
 	}
 
 	// Terminate claim
@@ -490,4 +536,14 @@ func (wm *WorkerManager) truncateImageID(imageID string) string {
 		return imageID[:12]
 	}
 	return imageID
+}
+
+// sanitizeLogs removes non-printable control characters from strings to ensure JSON safety
+func sanitizeLogs(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 32 && r != '\n' && r != '\r' && r != '\t' {
+			return -1 // drop control characters
+		}
+		return r
+	}, s)
 }

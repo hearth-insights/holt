@@ -78,7 +78,7 @@ func TestAgent_Validate_BiddingStrategy(t *testing.T) {
 				// BiddingStrategy omitted, no BidScript
 			},
 			expectError:   true,
-			errorContains: "either bidding_strategy or bid_script must be provided",
+			errorContains: "either bidding_strategy, bid_script, or synchronize must be provided",
 		},
 		{
 			name: "invalid bidding_strategy with bid_script",

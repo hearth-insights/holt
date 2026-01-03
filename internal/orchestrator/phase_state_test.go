@@ -146,3 +146,26 @@ func TestDetermineInitialPhase_EmptyBids(t *testing.T) {
 	assert.Equal(t, blackboard.ClaimStatusPendingReview, status)
 	assert.Equal(t, "", phase) // Empty phase indicates dormant
 }
+
+// M5.1.1: Test merge phase detection
+func TestHasBidsForPhase_Merge(t *testing.T) {
+	bids := map[string]blackboard.BidType{
+		"aggregator": blackboard.BidTypeMerge,
+	}
+
+	assert.False(t, HasBidsForPhase(bids, "review"))
+	assert.False(t, HasBidsForPhase(bids, "parallel"))
+	assert.False(t, HasBidsForPhase(bids, "exclusive"))
+	assert.True(t, HasBidsForPhase(bids, "merge"))
+}
+
+// M5.1.1: Test merge-only workflows (skip directly to merge phase)
+func TestDetermineInitialPhase_SkipToMerge(t *testing.T) {
+	bids := map[string]blackboard.Bid{
+		"aggregator": {AgentName: "aggregator", BidType: blackboard.BidTypeMerge},
+	}
+
+	status, phase := DetermineInitialPhase(bids)
+	assert.Equal(t, blackboard.ClaimStatusPendingMerge, status)
+	assert.Equal(t, "merge", phase)
+}

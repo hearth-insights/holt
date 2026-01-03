@@ -63,7 +63,7 @@ func TestGlobalLockdown(t *testing.T) {
 	// 8. Verify override was logged
 	alerts, err = client.GetSecurityAlerts(ctx, 0)
 	require.NoError(t, err)
-	require.Len(t, alerts, 2) // Original alert + override alert
+	require.Len(t, alerts, 2)                                  // Original alert + override alert
 	assert.Equal(t, AlertTypeSecurityOverride, alerts[0].Type) // Newest first
 }
 
@@ -94,7 +94,7 @@ func TestSecurityAlerts(t *testing.T) {
 	// Verify alert received
 	msg, err := pubsub.ReceiveMessage(ctx)
 	require.NoError(t, err)
-	
+
 	var receivedAlert SecurityAlert
 	err = json.Unmarshal([]byte(msg.Payload), &receivedAlert)
 	require.NoError(t, err)
@@ -123,7 +123,7 @@ func TestVerifiableArtefacts(t *testing.T) {
 	ctx := context.Background()
 
 	// Create V2 artefact
-	v2Artefact := &VerifiableArtefact{
+	v2Artefact := &Artefact{
 		ID: "a3f5b8c91d2e4f7a9b1c3d5e6f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a", // Valid 64-char hex
 		Header: ArtefactHeader{
 			Type:            "GoalDefined",
@@ -140,22 +140,16 @@ func TestVerifiableArtefacts(t *testing.T) {
 	}
 
 	// Write V2 artefact
-	err = client.WriteVerifiableArtefact(ctx, v2Artefact)
+	err = client.CreateArtefact(ctx, v2Artefact)
 	require.NoError(t, err)
 
 	// Read back as V2
-	readV2, err := client.GetVerifiableArtefact(ctx, v2Artefact.ID)
+	readV2, err := client.GetArtefact(ctx, v2Artefact.ID)
 	require.NoError(t, err)
 	assert.Equal(t, v2Artefact.ID, readV2.ID)
 	assert.Equal(t, v2Artefact.Payload.Content, readV2.Payload.Content)
 	assert.Equal(t, v2Artefact.Header.ParentHashes, readV2.Header.ParentHashes)
 
-	// Read back as V1 (compatibility check)
-	readV1, err := client.GetArtefact(ctx, v2Artefact.ID)
-	require.NoError(t, err)
-	assert.Equal(t, v2Artefact.ID, readV1.ID)
-	assert.Equal(t, v2Artefact.Payload.Content, readV1.Payload)
-	assert.Equal(t, v2Artefact.Header.ParentHashes, readV1.SourceArtefacts)
 }
 
 func TestSecurityAlertTypes(t *testing.T) {

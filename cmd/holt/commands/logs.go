@@ -120,9 +120,10 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	}
 	defer reader.Close()
 
-	// Copy logs to stdout/stderr
-	// Docker logs use a multiplexed stream format that needs demultiplexing
-	_, err = stdcopy.StdCopy(cmd.OutOrStdout(), cmd.ErrOrStderr(), reader)
+	// Copy logs to command output (demultiplex Docker's stream format)
+	// Send both container's stdout and stderr to command output for easier piping
+	out := cmd.OutOrStdout()
+	_, err = stdcopy.StdCopy(out, out, reader)
 	if err != nil {
 		return fmt.Errorf("error streaming logs: %w", err)
 	}

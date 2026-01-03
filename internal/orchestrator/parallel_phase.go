@@ -43,6 +43,40 @@ func (e *Engine) GrantParallelPhase(ctx context.Context, claim *blackboard.Claim
 
 	// Publish grant notifications to all parallel agents
 	for _, agentName := range parallelBidders {
+		// Check if agent is a controller
+		agent, agentExists := e.config.Agents[agentName]
+		if agentExists && agent.Mode == "controller" {
+			// Controller-worker pattern
+			if e.workerManager != nil {
+				// Check worker limit
+				if e.workerManager.IsAtWorkerLimit(agentName, agent.Worker.MaxConcurrent) {
+					log.Printf("[Orchestrator] Role '%s' at max_concurrent worker limit (%d), pausing claim %s in grant queue",
+						agentName, agent.Worker.MaxConcurrent, claim.ID)
+					
+					// Add to persistent grant queue
+					if err := e.pauseGrantForQueue(ctx, claim, agentName, agentName); err != nil {
+						log.Printf("[Orchestrator] Failed to pause claim in grant queue: %v", err)
+					}
+					continue
+				}
+
+				// Launch worker
+				log.Printf("[Orchestrator] Launching worker for parallel controller %s (claim %s)", agentName, claim.ID)
+				if err := e.workerManager.LaunchWorker(ctx, claim, agentName, agent, e.client); err != nil {
+					log.Printf("[Orchestrator] Failed to launch worker for parallel controller %s: %v", agentName, err)
+				}
+				
+				// M3.9: Get worker image ID (resolved dynamically) - pass empty string for now
+				if err := e.publishClaimGrantedEvent(ctx, claim.ID, agentName, "claim", ""); err != nil {
+					log.Printf("[Orchestrator] Failed to publish workflow event for parallel grant to %s: %v", agentName, err)
+				}
+			} else {
+				log.Printf("[Orchestrator] WARN: Controller %s granted parallel claim but workerManager is nil", agentName)
+			}
+			continue
+		}
+
+		// Standard agent logic
 		if err := e.publishGrantNotificationWithType(ctx, agentName, claim.ID, "claim"); err != nil {
 			log.Printf("[Orchestrator] Failed to publish parallel grant notification to %s: %v", agentName, err)
 		}

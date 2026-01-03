@@ -8,9 +8,8 @@ set -e  # Exit on any error
 # Read JSON input from stdin (required by pup contract)
 input=$(cat)
 
-# Extract the target artefact version from input JSON
-# Input structure: {"claim_type": "...", "target_artefact": {...}, "context_chain": [...]}
-version=$(echo "$input" | grep -o '"version":[[:space:]]*[0-9]*' | head -1 | sed 's/[^0-9]//g')
+# Extract the target artefact version from input JSON (handle V1 and V2)
+version=$(echo "$input" | jq -r '.target_artefact.header.version // .target_artefact.version // 1')
 
 # Default to 1 if version not found (defensive)
 if [ -z "$version" ]; then

@@ -20,8 +20,13 @@ func RunWorkerMode(ctx context.Context, config *Config, bbClient *blackboard.Cli
 		return fmt.Errorf("failed to fetch claim: %w", err)
 	}
 
-	// Verify claim is granted (can be pending_exclusive or pending_assignment)
-	if claim.Status != blackboard.ClaimStatusPendingExclusive && claim.Status != blackboard.ClaimStatusPendingAssignment {
+	// Verify claim is granted (can be pending_exclusive, pending_assignment, pending_review, pending_parallel, or pending_merge)
+	// M5.1.1: Added pending_merge for Fan-In Accumulator pattern
+	if claim.Status != blackboard.ClaimStatusPendingExclusive &&
+		claim.Status != blackboard.ClaimStatusPendingAssignment &&
+		claim.Status != blackboard.ClaimStatusPendingReview &&
+		claim.Status != blackboard.ClaimStatusPendingParallel &&
+		claim.Status != blackboard.ClaimStatusPendingMerge {
 		return fmt.Errorf("claim %s is not in valid status for worker execution (status: %s)", claimID, claim.Status)
 	}
 

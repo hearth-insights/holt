@@ -1,4 +1,3 @@
-// go:build integration
 //go:build integration
 
 package main
@@ -63,7 +62,7 @@ func setupRedis(t *testing.T) (string, func()) {
 // helper to create a valid hashed artefact for V1 client
 func createValidArtefact(t *testing.T, logicalID string, version int, structuralType blackboard.StructuralType, typ, payload string, sourceArtefacts []string, role string) *blackboard.Artefact {
 	// Create V2 representation to compute hash
-	v2 := &blackboard.VerifiableArtefact{
+	v2 := &blackboard.Artefact{
 		Header: blackboard.ArtefactHeader{
 			ParentHashes:    sourceArtefacts,
 			LogicalThreadID: logicalID,
@@ -72,7 +71,8 @@ func createValidArtefact(t *testing.T, logicalID string, version int, structural
 			ProducedByRole:  role,
 			StructuralType:  structuralType,
 			Type:            typ,
-			ClaimID:         "", // Root/User artefact
+			ClaimID:         "",   // Root/User artefact
+			Metadata:        "{}", // M5.1: Default to empty JSON object
 		},
 		Payload: blackboard.ArtefactPayload{
 			Content: payload,
@@ -82,18 +82,9 @@ func createValidArtefact(t *testing.T, logicalID string, version int, structural
 	hash, err := blackboard.ComputeArtefactHash(v2)
 	require.NoError(t, err)
 
-	// Return V1 representation with computed hash
-	return &blackboard.Artefact{
-		ID:              hash,
-		LogicalID:       logicalID,
-		Version:         version,
-		StructuralType:  structuralType,
-		Type:            typ,
-		Payload:         payload,
-		SourceArtefacts: sourceArtefacts,
-		ProducedByRole:  role,
-		CreatedAtMs:     v2.Header.CreatedAtMs,
-	}
+	// Return V2 representation
+	v2.ID = hash
+	return v2
 }
 
 // TestOrchestrator_CreatesClaimForGoalDefined tests the happy path.

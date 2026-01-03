@@ -23,17 +23,25 @@ func TestResolveArtefactID(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Create test artefact with SHA-256 hash ID
-	hashID := "a3f2b9c4e8d6f1a7b5c3e9d2f4a8b6c1e7d3f9a2b8c4e6d1f7a3b9c5e2d8f4a1"
+	// Create test artefact with proper SHA-256 hash ID
 	artefact := &blackboard.Artefact{
-		ID:              hashID,
-		LogicalID:       "550e8400-e29b-41d4-a716-446655440000",
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "GoalDefined",
-		ProducedByRole:  "test-agent",
-		SourceArtefacts: []string{},
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "GoalDefined",
+			ProducedByRole:  "test-agent",
+			ParentHashes:    []string{},
+			CreatedAtMs:     1234567890,
+			Metadata:        "{}",
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "test-content",
+		},
 	}
+	hashID, err := blackboard.ComputeArtefactHash(artefact)
+	require.NoError(t, err)
+	artefact.ID = hashID
 
 	err = bbClient.CreateArtefact(ctx, artefact)
 	require.NoError(t, err)
@@ -51,25 +59,33 @@ func TestResolveArtefactID(t *testing.T) {
 		assert.Equal(t, hashID, resolved)
 	})
 
-    t.Run("resolve full UUID", func(t *testing.T) {
-        uuidID := "550e8400-e29b-41d4-a716-446655440000"
-        // Create artefact with UUID
-        uuidArtefact := &blackboard.Artefact{
-            ID:              uuidID,
-            LogicalID:       "650e8400-e29b-41d4-a716-446655440000",
-            Version:         1,
-            StructuralType:  blackboard.StructuralTypeStandard,
-            Type:            "GoalDefined",
-            ProducedByRole:  "test-agent",
-            SourceArtefacts: []string{},
-        }
-        err = bbClient.CreateArtefact(ctx, uuidArtefact)
-        require.NoError(t, err)
+	t.Run("resolve full hash ID for second artefact", func(t *testing.T) {
+		// Create another artefact with proper hash ID
+		artefact2 := &blackboard.Artefact{
+			Header: blackboard.ArtefactHeader{
+				LogicalThreadID: blackboard.NewID(),
+				Version:         1,
+				StructuralType:  blackboard.StructuralTypeStandard,
+				Type:            "GoalDefined",
+				ProducedByRole:  "test-agent",
+				ParentHashes:    []string{},
+				CreatedAtMs:     1234567891,
+				Metadata:        "{}",
+			},
+			Payload: blackboard.ArtefactPayload{
+				Content: "second-content",
+			},
+		}
+		hashID2, err := blackboard.ComputeArtefactHash(artefact2)
+		require.NoError(t, err)
+		artefact2.ID = hashID2
+		err = bbClient.CreateArtefact(ctx, artefact2)
+		require.NoError(t, err)
 
-        resolved, err := ResolveArtefactID(ctx, bbClient, uuidID)
-        require.NoError(t, err)
-        assert.Equal(t, uuidID, resolved)
-    })
+		resolved, err := ResolveArtefactID(ctx, bbClient, hashID2)
+		require.NoError(t, err)
+		assert.Equal(t, hashID2, resolved)
+	})
 }
 
 func TestErrorHelpers(t *testing.T) {

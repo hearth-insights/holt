@@ -15,7 +15,7 @@ import (
 func TestWaitForConsensus(t *testing.T) {
 	// Setup miniredis
 	s := miniredis.RunT(t)
-	
+
 	// Setup blackboard client
 	client, err := blackboard.NewClient(&redis.Options{Addr: s.Addr()}, "test-instance")
 	require.NoError(t, err)
@@ -26,7 +26,7 @@ func TestWaitForConsensus(t *testing.T) {
 		"agent-a": "role-a",
 		"agent-b": "role-b",
 	}
-	
+
 	engine := &Engine{
 		client:        client,
 		instanceName:  "test-instance",
@@ -55,11 +55,11 @@ func TestWaitForConsensus(t *testing.T) {
 	// Scenario 2: Consensus achieved after delay
 	t.Run("ConsensusDelayed", func(t *testing.T) {
 		claimIDDelayed := "claim-delayed"
-		
+
 		// Start waiting in a goroutine
 		resultChan := make(chan map[string]blackboard.Bid)
 		errChan := make(chan error)
-		
+
 		go func() {
 			bids, err := engine.WaitForConsensus(ctx, claimIDDelayed)
 			if err != nil {
@@ -84,14 +84,14 @@ func TestWaitForConsensus(t *testing.T) {
 			t.Fatal("WaitForConsensus timed out")
 		}
 	})
-	
+
 	// Scenario 3: Context cancellation (timeout)
 	t.Run("ContextCancelled", func(t *testing.T) {
 		claimIDTimeout := "claim-timeout"
-		
+
 		// Only one bid submitted
 		client.SetBid(ctx, claimIDTimeout, "agent-a", blackboard.BidTypeExclusive)
-		
+
 		// Create a short context
 		shortCtx, shortCancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 		defer shortCancel()

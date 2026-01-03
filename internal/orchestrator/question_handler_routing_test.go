@@ -5,9 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
 
-	"github.com/hearth-insights/holt/pkg/blackboard"
 	"github.com/google/uuid"
+	"github.com/hearth-insights/holt/pkg/blackboard"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -20,18 +21,23 @@ func TestHandleQuestionArtefact_RoutingHuman(t *testing.T) {
 
 	// Create target artefact produced by "Coder" (an agent)
 	targetArtefact := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeStandard,
-		Type:            "CodeArtefact",
-		Payload:         "Some code",
-		ProducedByRole:  "Coder",
-		SourceArtefacts: []string{},
-		CreatedAtMs:     1000,
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeStandard,
+			Type:            "CodeArtefact",
+			ProducedByRole:  "Coder",
+			ParentHashes:    []string{},
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: "Some code",
+		},
 	}
-	err := client.CreateArtefact(ctx, targetArtefact)
+	targetHash, err := blackboard.ComputeArtefactHash(targetArtefact)
 	require.NoError(t, err)
+	targetArtefact.ID = targetHash
+	require.NoError(t, client.CreateArtefact(ctx, targetArtefact))
 
 	// Create claim for target artefact
 	targetClaim := &blackboard.Claim{
@@ -52,18 +58,23 @@ func TestHandleQuestionArtefact_RoutingHuman(t *testing.T) {
 	payloadJSON, _ := json.Marshal(questionPayload)
 
 	questionArtefact := &blackboard.Artefact{
-		ID:              uuid.New().String(),
-		LogicalID:       uuid.New().String(),
-		Version:         1,
-		StructuralType:  blackboard.StructuralTypeQuestion,
-		Type:            "GatekeeperQuestion",
-		Payload:         string(payloadJSON),
-		ProducedByRole:  "Gatekeeper",
-		SourceArtefacts: []string{targetArtefact.ID},
-		CreatedAtMs:     2000,
+		Header: blackboard.ArtefactHeader{
+			LogicalThreadID: blackboard.NewID(),
+			Version:         1,
+			StructuralType:  blackboard.StructuralTypeQuestion,
+			Type:            "GatekeeperQuestion",
+			ProducedByRole:  "Gatekeeper",
+			ParentHashes:    []string{targetArtefact.ID},
+			CreatedAtMs:     time.Now().UnixMilli(),
+		},
+		Payload: blackboard.ArtefactPayload{
+			Content: string(payloadJSON),
+		},
 	}
-	err = client.CreateArtefact(ctx, questionArtefact)
+	hash, err := blackboard.ComputeArtefactHash(questionArtefact)
 	require.NoError(t, err)
+	questionArtefact.ID = hash
+	require.NoError(t, client.CreateArtefact(ctx, questionArtefact))
 
 	// Subscribe to workflow events to verify human_input_required is emitted
 	streamKey := fmt.Sprintf("holt:%s:workflow_events", engine.instanceName)
@@ -80,6 +91,7 @@ func TestHandleQuestionArtefact_RoutingHuman(t *testing.T) {
 	// Verify: Target claim is terminated
 	claim, err := client.GetClaim(ctx, targetClaim.ID)
 	require.NoError(t, err)
+	t.Logf("Debug: Claim %s status is %s (expected terminated)", claim.ID, claim.Status)
 	assert.Equal(t, blackboard.ClaimStatusTerminated, claim.Status)
 
 	// Verify: NO feedback claim created (because we routed to human)

@@ -106,6 +106,11 @@ func (e *Engine) GrantClaim(ctx context.Context, claim *blackboard.Claim, bids m
 		err = e.GrantExclusivePhase(ctx, claim, bids)
 		grantedAgents = []string{claim.GrantedExclusiveAgent}
 
+	case "merge":
+		// M5.1.1: Handle merge-only workflows
+		err = e.GrantMergePhase(ctx, claim, bids)
+		grantedAgents = []string{} // Merge phase doesn't grant to agents immediately
+
 	default:
 		return fmt.Errorf("unknown initial phase: %s", initialPhase)
 	}

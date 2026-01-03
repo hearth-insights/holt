@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/hearth-insights/holt/pkg/blackboard"
 	canonicaljson "github.com/gibson042/canonicaljson-go"
+	"github.com/hearth-insights/holt/pkg/blackboard"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -72,10 +72,10 @@ func TestInitializeSpine(t *testing.T) {
 		// And it expects extractIdentityHash(manifest) to return X.
 		// extractIdentityHash computes it from payload.
 		// So we must ensure our mock IdentityHash() returns what extractIdentityHash computes.
-		
+
 		// Let's use a real LocalIdentityProvider to compute the hash for our test data?
 		// No, LocalIdentityProvider requires files.
-		
+
 		// We'll implement the hashing logic here.
 		bytes, _ := canonicaljson.Marshal(stable)
 		hash := sha256.Sum256(bytes)
@@ -90,7 +90,7 @@ func TestInitializeSpine(t *testing.T) {
 			GitCommit:  "commit-v1",
 		}
 		hash := computeHash(identity)
-		
+
 		mockProvider := &MockIdentityProvider{
 			Identity: identity,
 			Hash:     hash,
@@ -103,7 +103,7 @@ func TestInitializeSpine(t *testing.T) {
 		assert.NotEmpty(t, manifestID)
 
 		// Verify manifest created
-		manifest, err := bbClient.GetVerifiableArtefact(ctx, manifestID)
+		manifest, err := bbClient.GetArtefact(ctx, manifestID)
 		require.NoError(t, err)
 		assert.Equal(t, 1, manifest.Header.Version)
 		assert.Equal(t, spineThreadID, manifest.Header.LogicalThreadID)
@@ -130,14 +130,14 @@ func TestInitializeSpine(t *testing.T) {
 			Hash:     hash,
 		}
 		manager := NewSpineManager(bbClient, mockProvider, "test-instance", spineThreadID)
-		
+
 		// Run init again
 		manifestID, err := manager.InitializeSpine(ctx)
 		require.NoError(t, err)
 
-		// Should be same ID as before (we can't easily check exact ID without storing it, 
+		// Should be same ID as before (we can't easily check exact ID without storing it,
 		// but we can check version is still 1)
-		manifest, err := bbClient.GetVerifiableArtefact(ctx, manifestID)
+		manifest, err := bbClient.GetArtefact(ctx, manifestID)
 		require.NoError(t, err)
 		assert.Equal(t, 1, manifest.Header.Version)
 	})
@@ -163,11 +163,11 @@ func TestInitializeSpine(t *testing.T) {
 		require.NoError(t, err)
 
 		// Verify new manifest created
-		manifest, err := bbClient.GetVerifiableArtefact(ctx, manifestID)
+		manifest, err := bbClient.GetArtefact(ctx, manifestID)
 		require.NoError(t, err)
 		assert.Equal(t, 2, manifest.Header.Version)
 		assert.NotEmpty(t, manifest.Header.ParentHashes)
-		
+
 		// Verify active manifest updated
 		activeID, err := manager.GetActiveManifest(ctx)
 		require.NoError(t, err)
@@ -187,7 +187,7 @@ func TestFetchSpineHistory(t *testing.T) {
 
 	ctx := context.Background()
 	spineThreadID := "spine-thread-history"
-	
+
 	mockProvider := &MockIdentityProvider{
 		Identity: &blackboard.SystemIdentity{Strategy: "local"},
 		Hash:     "hash",
@@ -196,7 +196,7 @@ func TestFetchSpineHistory(t *testing.T) {
 
 	// Create a few manifests manually via internal helper or public API
 	// Since createManifest is private, we use InitializeSpine with changing hashes
-	
+
 	// V1
 	mockProvider.Hash = "hash-1-long-enough-for-logging-0000000000000000"
 	_, err = manager.InitializeSpine(ctx)
@@ -215,7 +215,7 @@ func TestFetchSpineHistory(t *testing.T) {
 	// Fetch history
 	history, err := manager.FetchSpineHistory(ctx)
 	require.NoError(t, err)
-	
+
 	assert.Len(t, history, 3)
 	assert.Equal(t, 1, history[0].Header.Version)
 	assert.Equal(t, 2, history[1].Header.Version)

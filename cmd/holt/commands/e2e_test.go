@@ -26,12 +26,15 @@ func TestE2E_Phase1_Heartbeat(t *testing.T) {
 
 	ctx := context.Background()
 
+	// Step 0: Ensure consolidated test agent image is built
+	testutil.EnsureTestAgentImage(t)
+
 	// Setup environment with minimal config (echo agent for Phase 1)
 	holtYML := `version: "1.0"
 agents:
   echo-agent:
     role: "Echo Agent"
-    image: "example-agent:latest"
+    image: "holt-test-agent:latest"
     command: ["/bin/sh", "-c", "cat && echo '{\"artefact_type\": \"EchoSuccess\", \"artefact_payload\": \"echo-test\"}'"]
     bidding_strategy:
       type: "exclusive"
@@ -140,12 +143,15 @@ func TestE2E_Forage_GitValidation(t *testing.T) {
 		t.Skip("Skipping E2E test in short mode")
 	}
 
+	// Step 0: Ensure consolidated test agent image is built
+	testutil.EnsureTestAgentImage(t)
+
 	// Setup environment with minimal config (echo agent for Phase 1)
 	holtYML := `version: "1.0"
 agents:
   echo-agent:
     role: "Echo Agent"
-    image: "example-agent:latest"
+    image: "holt-test-agent:latest"
     command: ["/bin/sh", "-c", "cat && echo '{\"artefact_type\": \"EchoSuccess\", \"artefact_payload\": \"echo-test\"}'"]
     bidding_strategy:
       type: "exclusive"
