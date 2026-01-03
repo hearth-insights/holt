@@ -5,7 +5,8 @@
 set -e
 INPUT=$(cat)
 
-SUBGOAL=$(echo "$INPUT" | jq -r '.target_artefact.payload')
+# Extract payload - handle both string and JSON object formats
+SUBGOAL=$(echo "$INPUT" | jq -r '.target_artefact.payload.content // .target_artefact.payload')
 METADATA=$(echo "$INPUT" | jq -r '.target_artefact.header.metadata // "{}"')
 
 cat <<RESULT >&3

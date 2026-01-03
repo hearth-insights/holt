@@ -269,7 +269,7 @@ services:
 	mapping1v1 := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
 		ParentHashes:    []string{subGoal.ID},
 		LogicalThreadID: thread1,
-		Version:         1,
+		Version:         2, // Version 2: continuation from SubGoal
 		Type:            "HPOMappingResult",
 		CreatedAtMs:     time.Now().UnixMilli(),
 		Metadata:        `{"batch_size": "2"}`,
@@ -280,7 +280,7 @@ services:
 	_ = env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
 		ParentHashes:    []string{mapping1v1.ID},
 		LogicalThreadID: blackboard.NewID(),
-		Version:         1,
+		Version:         3, // Version 3: continuation from HPOMappingResult
 		Type:            "ReviewResult",
 		CreatedAtMs:     time.Now().UnixMilli(),
 		Metadata:        `{"batch_size": "2"}`,
@@ -291,7 +291,7 @@ services:
 	mapping1v2 := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
 		ParentHashes:    []string{subGoal.ID},
 		LogicalThreadID: thread1, // Same thread!
-		Version:         2,       // New version
+		Version:         2,       // Version 2 of this thread
 		Type:            "HPOMappingResult",
 		CreatedAtMs:     time.Now().UnixMilli(),
 		Metadata:        `{"batch_size": "2"}`,
@@ -302,7 +302,7 @@ services:
 	_ = env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
 		ParentHashes:    []string{mapping1v2.ID},
 		LogicalThreadID: blackboard.NewID(),
-		Version:         1,
+		Version:         3, // Version 3: continuation from HPOMappingResult v2
 		Type:            "ReviewResult",
 		CreatedAtMs:     time.Now().UnixMilli(),
 		Metadata:        `{"batch_size": "2"}`,
@@ -313,7 +313,7 @@ services:
 	mapping2 := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
 		ParentHashes:    []string{subGoal.ID},
 		LogicalThreadID: thread2,
-		Version:         1,
+		Version:         2, // Version 2: continuation from SubGoal
 		Type:            "HPOMappingResult",
 		CreatedAtMs:     time.Now().UnixMilli(),
 		Metadata:        `{"batch_size": "2"}`,
@@ -324,7 +324,7 @@ services:
 	_ = env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
 		ParentHashes:    []string{mapping2.ID},
 		LogicalThreadID: blackboard.NewID(),
-		Version:         1,
+		Version:         3, // Version 3: continuation from HPOMappingResult
 		Type:            "ReviewResult",
 		CreatedAtMs:     time.Now().UnixMilli(),
 		Metadata:        `{"batch_size": "2"}`,
