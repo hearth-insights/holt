@@ -75,6 +75,13 @@ func shouldBidMerge(ctx context.Context, bbClient *blackboard.Client, agentRole 
 		return nil, fmt.Errorf("invalid synchronize config: cannot determine mode")
 	}
 
+	// Skip merge bidding if current artefact IS the ancestor
+	// We only want to bid merge for DESCENDANTS of the ancestor
+	if artefact.Header.Type == syncConfig.AncestorType {
+		log.Printf("[Pup/Merge] Current artefact is the ancestor type %s - skipping merge bid", syncConfig.AncestorType)
+		return nil, nil
+	}
+
 	// Find ancestor
 	ancestor, err := findAncestor(ctx, bbClient, artefact, syncConfig.AncestorType, syncConfig.MaxDepth)
 	if err != nil {

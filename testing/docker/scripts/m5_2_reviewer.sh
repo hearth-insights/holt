@@ -5,8 +5,13 @@
 set -e
 INPUT=$(cat)
 
-MAPPING=$(echo "$INPUT" | jq -r '.target_artefact.payload')
+# Extract the payload content (not the entire payload object)
+MAPPING=$(echo "$INPUT" | jq -r '.target_artefact.payload.content')
 
-cat <<RESULT >&3
-{"artefact_type":"ReviewResult","artefact_payload":"Reviewed: $MAPPING - APPROVED","summary":"Review completed"}
-RESULT
+# Use jq to construct JSON safely (handles escaping)
+jq -n --arg mapping "$MAPPING" \
+  '{
+    artefact_type: "ReviewResult",
+    artefact_payload: ("Reviewed: " + $mapping + " - APPROVED"),
+    summary: "Review completed"
+  }' >&3

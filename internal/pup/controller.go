@@ -175,7 +175,11 @@ func processClaim(ctx context.Context, config *Config, bbClient *blackboard.Clie
 			// Submit merge bid using the new Bid type with metadata
 			if err := bbClient.SubmitBid(ctx, claim.ID, mergeBid); err != nil {
 				log.Printf("[Controller] Failed to submit merge bid for claim %s: %v", claim.ID, err)
+			} else {
+				log.Printf("[Controller] ✓ Submitted MERGE bid for claim %s (mode=%s)", claim.ID, mergeBid.Metadata["mode"])
 			}
+		} else {
+			log.Printf("[Controller] No merge bid returned (pattern check returned nil)")
 		}
 	}
 }

@@ -151,10 +151,46 @@ func (e *Engine) GrantMergePhase(ctx context.Context, claim *blackboard.Claim, b
 				continue
 			}
 
-			// Publish grant notification (agent receives Fan-In Claim)
-			// The grant type is "merge" to distinguish from regular grants
-			if err := e.publishGrantNotificationWithType(ctx, role, fanInClaimID, "merge"); err != nil {
-				log.Printf("[Orchestrator/Merge] Failed to publish grant notification: %v", err)
+			// Create a pseudo-claim for the Fan-In work
+			// The Fan-In claim ID is deterministic, but we need a Claim object for worker launch
+			fanInClaim := &blackboard.Claim{
+				ID:         fanInClaimID,
+				ArtefactID: ancestorID, // Fan-In claim targets the ancestor artefact
+				Status:     blackboard.ClaimStatusPendingMerge,
+			}
+
+			// M3.4: Check if agent is a controller and launch worker if needed
+			agent, agentExists := e.config.Agents[role]
+			if agentExists && agent.Mode == "controller" {
+				// Controller-worker pattern - launch worker instead of publishing notification
+				if e.workerManager != nil {
+					// Check worker limit
+					if e.workerManager.IsAtWorkerLimit(role, agent.Worker.MaxConcurrent) {
+						log.Printf("[Orchestrator/Merge] Role '%s' at max_concurrent worker limit (%d), pausing merge grant",
+							role, agent.Worker.MaxConcurrent)
+						// TODO: Add to grant queue for merge claims (future enhancement)
+						// For now, log warning and skip
+						continue
+					}
+
+					// Launch worker for Fan-In execution
+					log.Printf("[Orchestrator/Merge] Launching worker for merge controller %s (Fan-In claim %s)", role, fanInClaimID)
+					if err := e.workerManager.LaunchWorker(ctx, fanInClaim, role, agent, e.client); err != nil {
+						log.Printf("[Orchestrator/Merge] Failed to launch worker for merge controller %s: %v", role, err)
+					} else {
+						// Publish workflow event for audit trail
+						if err := e.publishClaimGrantedEvent(ctx, fanInClaimID, role, "merge", ""); err != nil {
+							log.Printf("[Orchestrator/Merge] Failed to publish workflow event for merge grant to %s: %v", role, err)
+						}
+					}
+				} else {
+					log.Printf("[Orchestrator/Merge] WARN: Controller %s granted merge but workerManager is nil", role)
+				}
+			} else {
+				// Traditional agent - publish grant notification
+				if err := e.publishGrantNotificationWithType(ctx, role, fanInClaimID, "merge"); err != nil {
+					log.Printf("[Orchestrator/Merge] Failed to publish grant notification: %v", err)
+				}
 			}
 
 			// Log event for audit trail

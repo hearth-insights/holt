@@ -16,7 +16,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
 	"github.com/hearth-insights/holt/internal/instance"
 	"github.com/hearth-insights/holt/pkg/blackboard"
@@ -966,14 +968,26 @@ func (env *E2EEnvironment) WaitForArtefactCount(artefactType string, count int, 
 	return nil, fmt.Errorf("found only %d artefacts of type '%s' within %v (required: %d)", lastCount, artefactType, timeout, count)
 }
 
-// DumpInstanceLogs retrieves and logs all container logs for an instance.
+// DumpInstanceLogs retrieves and logs container logs for an instance.
 // This is useful for debugging test failures - call it before cleanup.
+//
+// Behavior:
+//   - By default: Shows last 15 lines of each container log
+//   - If DEBUG env var is set: Shows last 200 lines and full Redis state
 func (env *E2EEnvironment) DumpInstanceLogs() {
 	if env.DockerClient == nil {
 		return
 	}
 
-	env.T.Log("=== Dumping container logs for debugging ===")
+	// Check if DEBUG mode is enabled
+	debugMode := os.Getenv("DEBUG") != ""
+
+	if debugMode {
+		env.T.Log("=== Dumping container logs (DEBUG mode - verbose) ===")
+	} else {
+		env.T.Log("=== Dumping container logs (last 15 lines per container) ===")
+		env.T.Log("(Set DEBUG=1 environment variable for full logs)")
+	}
 
 	// List all containers for this instance
 	containers, err := env.DockerClient.ContainerList(env.Ctx, container.ListOptions{All: true})
@@ -982,8 +996,8 @@ func (env *E2EEnvironment) DumpInstanceLogs() {
 		return
 	}
 
-	// Dump Redis State (Claims and Artefacts)
-	if env.BBClient != nil {
+	// Dump Redis State (Claims and Artefacts) - only in DEBUG mode
+	if debugMode && env.BBClient != nil {
 		env.T.Log("--- Redis State Dump ---")
 
 		// Dump Claims
@@ -1022,6 +1036,12 @@ func (env *E2EEnvironment) DumpInstanceLogs() {
 		env.T.Log("--- End Redis State Dump ---")
 	}
 
+	// Determine log tail size based on DEBUG mode
+	tailLines := "15"  // Default: last 15 lines
+	if debugMode {
+		tailLines = "200" // DEBUG mode: last 200 lines
+	}
+
 	for _, c := range containers {
 		// Check if container belongs to this instance
 		for _, name := range c.Names {
@@ -1034,7 +1054,7 @@ func (env *E2EEnvironment) DumpInstanceLogs() {
 				logs, logErr := env.DockerClient.ContainerLogs(env.Ctx, containerName, container.LogsOptions{
 					ShowStdout: true,
 					ShowStderr: true,
-					Tail:       "100", // Last 100 lines
+					Tail:       tailLines,
 				})
 				if logErr != nil {
 					env.T.Logf("Failed to get logs for %s: %v", containerName, logErr)
@@ -1055,6 +1075,97 @@ func (env *E2EEnvironment) DumpInstanceLogs() {
 	}
 
 	env.T.Log("=== End container logs ===")
+}
+
+// CleanupOrphanedTestNetworks removes all orphaned test networks that may have been
+// left behind by previous test runs. Call this at the start of test suites to prevent
+// "address pool exhausted" errors.
+func CleanupOrphanedTestNetworks(t *testing.T) {
+	ctx := context.Background()
+	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err != nil {
+		t.Logf("Warning: Failed to create Docker client for cleanup: %v", err)
+		return
+	}
+	defer cli.Close()
+
+	// Find all networks matching test patterns
+	allNetworks, err := cli.NetworkList(ctx, types.NetworkListOptions{})
+	if err != nil {
+		t.Logf("Warning: Failed to list networks: %v", err)
+		return
+	}
+
+	cleaned := 0
+	for _, net := range allNetworks {
+		// Clean up networks with test-related names
+		if strings.HasPrefix(net.Name, "holt-network-test-") {
+			if err := cli.NetworkRemove(ctx, net.ID); err != nil {
+				t.Logf("Warning: Failed to remove network %s: %v", net.Name, err)
+			} else {
+				cleaned++
+			}
+		}
+	}
+
+	if cleaned > 0 {
+		t.Logf("✓ Cleaned up %d orphaned test network(s)", cleaned)
+	}
+}
+
+// ForceCleanup forcefully removes all Docker resources for this instance.
+// Unlike holt down, this works even for partial/failed instance creation.
+// Use this in test cleanup defers to prevent resource leaks.
+func (env *E2EEnvironment) ForceCleanup() {
+	if env.DockerClient == nil {
+		return
+	}
+
+	ctx := context.Background()
+	instanceName := env.InstanceName
+
+	// Remove all containers (even if stopped/failed)
+	containerFilters := filters.NewArgs()
+	containerFilters.Add("label", fmt.Sprintf("holt.instance=%s", instanceName))
+
+	containers, err := env.DockerClient.ContainerList(ctx, container.ListOptions{
+		All:     true,
+		Filters: containerFilters,
+	})
+	if err == nil {
+		for _, c := range containers {
+			env.DockerClient.ContainerRemove(ctx, c.ID, container.RemoveOptions{
+				Force:         true,
+				RemoveVolumes: true,
+			})
+		}
+	}
+
+	// Remove networks (even if no containers exist)
+	// Try label-based cleanup first
+	networkFilters := filters.NewArgs()
+	networkFilters.Add("label", fmt.Sprintf("holt.instance=%s", instanceName))
+
+	networks, err := env.DockerClient.NetworkList(ctx, types.NetworkListOptions{
+		Filters: networkFilters,
+	})
+	if err == nil {
+		for _, net := range networks {
+			env.DockerClient.NetworkRemove(ctx, net.ID)
+		}
+	}
+
+	// Also try to remove by name pattern (catches partially-created networks without labels)
+	networkName := fmt.Sprintf("holt-network-%s", instanceName)
+	env.DockerClient.NetworkRemove(ctx, networkName)
+
+	// Additional fallback: If this is a test instance, try common test network patterns
+	// This handles cases where network was created but labeling failed
+	if len(instanceName) > 8 && instanceName[:8] == "test-e2e" {
+		// Try alternate network naming patterns that might exist
+		env.DockerClient.NetworkRemove(ctx, fmt.Sprintf("holt_%s", instanceName))
+		env.DockerClient.NetworkRemove(ctx, fmt.Sprintf("%s_holt-network", instanceName))
+	}
 }
 
 // StringReader wraps a string to implement io.Reader for Docker build contexts

@@ -5,10 +5,14 @@
 set -e
 INPUT=$(cat)
 
-# Extract payload - handle both string and JSON object formats
-SUBGOAL=$(echo "$INPUT" | jq -r '.target_artefact.payload.content // .target_artefact.payload')
+# Extract payload content
+SUBGOAL=$(echo "$INPUT" | jq -r '.target_artefact.payload.content')
 METADATA=$(echo "$INPUT" | jq -r '.target_artefact.header.metadata // "{}"')
 
-cat <<RESULT >&3
-{"artefact_type":"HPOMappingResult","artefact_payload":"Mapped: $SUBGOAL","summary":"Mapping created"}
-RESULT
+# Use jq to construct JSON safely (handles escaping)
+jq -n --arg subgoal "$SUBGOAL" \
+  '{
+    artefact_type: "HPOMappingResult",
+    artefact_payload: ("Mapped: " + $subgoal),
+    summary: "Mapping created"
+  }' >&3
