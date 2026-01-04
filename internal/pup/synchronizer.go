@@ -60,13 +60,20 @@ func (s *Synchronizer) shouldBidOnClaim(ctx context.Context, claim *blackboard.C
 	}
 	log.Printf("[Synchronizer] Loaded target artefact %s (Type: %s)", claim.ArtefactID, targetArtefact.Header.Type)
 
-	// M5.2: Evaluate ALL descendant claims (not just wait_for types)
-	// Claims arrive for work artefacts (e.g., HPOMappingResult)
-	// But we wait for review artefacts (e.g., ReviewResult) to exist
-	// Ignore only ancestor claims (those are for other agents)
+	// Filter 1: Ignore ancestor claims (those are for other agents)
 	if targetArtefact.Header.Type == s.config.AncestorType {
 		log.Printf("[Synchronizer] Ignoring ancestor claim for %s (synchronizers only process descendants)",
 			targetArtefact.ID)
+		return DecisionIgnore, nil
+	}
+
+	// Filter 2: Only evaluate claims for wait_for types
+	// M5.2: We evaluate work artefact claims (e.g., HPOMappingResult)
+	// and wait for their review artefacts (e.g., ReviewResult) to exist.
+	// We should NOT evaluate claims for other artefact types (e.g., FinalPatientProfile output).
+	if !s.isPotentialTrigger(targetArtefact) {
+		log.Printf("[Synchronizer] Ignoring claim for non-trigger type %s (not in wait_for list)",
+			targetArtefact.Header.Type)
 		return DecisionIgnore, nil
 	}
 
