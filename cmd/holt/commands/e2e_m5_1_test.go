@@ -713,6 +713,151 @@ services:
 	t.Log("=== Max Depth Limiting E2E Test PASSED ===")
 }
 
+// TestE2E_M5_1_NoOutputLooping validates that synchronizers don't bid on their own output:
+// 1. Synchronizer configured with wait_for: HPOMappingResult
+// 2. Create N HPOMappingResults (with batch_size metadata)
+// 3. Synchronizer executes and creates FinalReport
+// 4. Synchronizer should IGNORE FinalReport claim (not bid on its own output)
+// 5. Only ONE FinalReport should exist (no infinite loop)
+func TestE2E_M5_1_NoOutputLooping(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping E2E test in short mode")
+	}
+
+	t.Log("=== M5.1 E2E: No Output Looping (Output Artefact Filtering) ===")
+
+	// Step 0: Ensure shared test agent image is built
+	testutil.EnsureTestAgentImage(t)
+
+	holtYML := `version: "1.0"
+orchestrator:
+  max_review_iterations: 3
+  timestamp_drift_tolerance_ms: 600000
+agents:
+  Producer:
+    image: "holt-test-agent:latest"
+    command: ["/app/m5_1_multi_producer.sh"]
+    bidding_strategy:
+      type: "exclusive"
+      target_types: ["DataBatch"]
+  Aggregator:
+    image: "holt-test-agent:latest"
+    command: ["/app/m5_1_aggregator.sh"]
+    synchronize:
+      ancestor_type: "GoalDefined"
+      wait_for:
+        - type: "ProcessedRecord"
+          count_from_metadata: "batch_size"
+services:
+  redis:
+    image: redis:7-alpine
+`
+
+	env := testutil.SetupE2EEnvironment(t, holtYML)
+	defer func() {
+		if t.Failed() {
+			env.DumpInstanceLogs()
+		}
+		downCmd := &cobra.Command{}
+		downInstanceName = env.InstanceName
+		_ = runDown(downCmd, []string{})
+		t.Log("✓ Cleanup complete")
+	}()
+
+	upCmd := &cobra.Command{}
+	upInstanceName = env.InstanceName
+	upForce = false
+	err := runUp(upCmd, []string{})
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	env.InitializeBlackboardClient()
+	bbClient := env.BBClient
+
+	// Create workflow spine
+	_, goalID := env.CreateWorkflowSpine(ctx, "Process batch without looping")
+
+	// Wait for orchestrator to be ready
+	require.True(t, waitForClaimCreated(ctx, bbClient, goalID, 10*time.Second),
+		"Orchestrator should create claim for GoalDefined")
+	t.Log("✓ Orchestrator ready")
+
+	// Create DataBatch (trigger for Producer to create ProcessedRecords)
+	t.Log("Creating DataBatch...")
+	dataBatch := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
+		ParentHashes:    []string{goalID},
+		LogicalThreadID: blackboard.NewID(),
+		Version:         2,
+		Type:            "DataBatch",
+		CreatedAtMs:     time.Now().UnixMilli(),
+		Metadata:        "{}",
+	}, "batch-123")
+	t.Logf("✓ DataBatch created: %s", dataBatch.ID)
+
+	// Wait for Producer to execute and create ProcessedRecords
+	require.True(t, waitForClaimStatus(ctx, bbClient, dataBatch.ID, blackboard.ClaimStatusComplete, 15*time.Second),
+		"DataBatch claim should be completed by Producer")
+	t.Log("✓ Producer executed")
+
+	// Wait for 5 ProcessedRecords
+	t.Log("Waiting for 5 ProcessedRecords...")
+	require.True(t, waitForArtefactCount(ctx, bbClient, "ProcessedRecord", 5, 10*time.Second),
+		"Should have 5 ProcessedRecords")
+	t.Log("✓ All 5 ProcessedRecords created")
+
+	// Wait for all ProcessedRecord claims to be created
+	records := getArtefactsByType(ctx, bbClient, "ProcessedRecord")
+	for i, record := range records {
+		require.True(t, waitForClaimCreated(ctx, bbClient, record.ID, 5*time.Second),
+			"ProcessedRecord %d claim should be created", i+1)
+	}
+	t.Log("✓ All ProcessedRecord claims created")
+
+	// Wait for Aggregator to synchronize and create AggregatedReport
+	t.Log("Waiting for Aggregator to execute...")
+	report := waitForArtefactType(ctx, t, bbClient, "AggregatedReport", 30*time.Second)
+	if report == nil {
+		env.DumpInstanceLogs()
+	}
+	require.NotNil(t, report, "AggregatedReport should be created")
+	t.Logf("✓ Aggregator executed: AggregatedReport %s", report.ID)
+
+	// CRITICAL: Wait a bit to ensure Aggregator doesn't bid on its own output
+	// If there's a bug, we'll see a second AggregatedReport created
+	t.Log("Waiting to verify no output looping...")
+	time.Sleep(3 * time.Second)
+
+	// Verify ONLY ONE AggregatedReport exists (no infinite loop)
+	reports := getArtefactsByType(ctx, bbClient, "AggregatedReport")
+	if len(reports) != 1 {
+		t.Logf("ERROR: Found %d AggregatedReports (expected 1)", len(reports))
+		env.DumpInstanceLogs()
+	}
+	require.Len(t, reports, 1, "Should have exactly 1 AggregatedReport (no output looping)")
+	t.Log("✓ No output looping detected (only 1 AggregatedReport)")
+
+	// Verify the synchronizer ignored its own output claim
+	reportClaim, err := bbClient.GetClaimByArtefactID(ctx, report.ID)
+	require.NoError(t, err, "Should be able to fetch AggregatedReport claim")
+	require.NotNil(t, reportClaim, "AggregatedReport claim should exist")
+
+	// Get all bids on the output claim
+	bids, err := bbClient.GetAllBids(ctx, reportClaim.ID)
+	require.NoError(t, err, "Should be able to fetch bids")
+
+	// Verify Aggregator did NOT bid on its own output
+	aggregatorBid, exists := bids["Aggregator"]
+	if exists && aggregatorBid.BidType != blackboard.BidTypeIgnore {
+		t.Logf("ERROR: Aggregator bid %s on its own output (should be ignore)", aggregatorBid.BidType)
+		env.DumpInstanceLogs()
+	}
+	require.True(t, !exists || aggregatorBid.BidType == blackboard.BidTypeIgnore,
+		"Aggregator should ignore its own output (AggregatedReport)")
+	t.Log("✓ Aggregator correctly ignored its own output artefact")
+
+	t.Log("=== No Output Looping E2E Test PASSED ===")
+}
+
 // Helper functions for deterministic test conditions
 
 // waitForClaimCreated waits for the orchestrator to create a claim for an artefact.
