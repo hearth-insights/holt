@@ -847,6 +847,119 @@ services:
 	t.Log("=== No Output Looping E2E Test PASSED ===")
 }
 
+// TestE2E_M5_1_ControllerCountMode validates controller mode with COUNT synchronization:
+// 1. Controller mode agent with COUNT pattern (count_from_metadata)
+// 2. Controller bids on each prerequisite (merge bids)
+// 3. Orchestrator accumulates merge bids
+// 4. When accumulation completes, orchestrator launches worker
+// 5. Worker executes ONCE and creates output
+// 6. Validates controller-worker pattern works with COUNT mode
+func TestE2E_M5_1_ControllerCountMode(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping E2E test in short mode")
+	}
+
+	t.Log("=== M5.1 E2E: Controller Mode + COUNT Pattern ===")
+
+	testutil.EnsureTestAgentImage(t)
+
+	holtYML := `version: "1.0"
+orchestrator:
+  max_review_iterations: 3
+  timestamp_drift_tolerance_ms: 600000
+agents:
+  Producer:
+    image: "holt-test-agent:latest"
+    command: ["/app/m5_1_multi_producer.sh"]
+    bidding_strategy:
+      type: "exclusive"
+      target_types: ["DataBatch"]
+  ControllerAggregator:
+    mode: controller
+    image: "holt-test-agent:latest"
+    command: ["/app/pup", "controller"]
+    worker:
+      image: "holt-test-agent:latest"
+      command: ["/app/m5_1_aggregator.sh"]
+    synchronize:
+      ancestor_type: "GoalDefined"
+      wait_for:
+        - type: "ProcessedRecord"
+          count_from_metadata: "batch_size"
+services:
+  redis:
+    image: redis:7-alpine
+`
+
+	env := testutil.SetupE2EEnvironment(t, holtYML)
+	defer func() {
+		if t.Failed() {
+			env.DumpInstanceLogs()
+		}
+		env.ForceCleanup()
+		t.Log("✓ Cleanup complete")
+	}()
+
+	upCmd := &cobra.Command{}
+	upInstanceName = env.InstanceName
+	upForce = false
+	err := runUp(upCmd, []string{})
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	env.InitializeBlackboardClient()
+	bbClient := env.BBClient
+
+	_, goalID := env.CreateWorkflowSpine(ctx, "Controller COUNT mode test")
+
+	require.True(t, waitForClaimCreated(ctx, bbClient, goalID, 10*time.Second),
+		"Orchestrator should create claim for GoalDefined")
+	t.Log("✓ Orchestrator ready")
+
+	t.Log("Creating DataBatch...")
+	dataBatch := env.CreateVerifiableArtefact(ctx, blackboard.ArtefactHeader{
+		ParentHashes:    []string{goalID},
+		LogicalThreadID: blackboard.NewID(),
+		Version:         2,
+		Type:            "DataBatch",
+		CreatedAtMs:     time.Now().UnixMilli(),
+		Metadata:        "{}",
+	}, "batch-456")
+	t.Logf("✓ DataBatch created: %s", dataBatch.ID)
+
+	require.True(t, waitForClaimStatus(ctx, bbClient, dataBatch.ID, blackboard.ClaimStatusComplete, 15*time.Second),
+		"DataBatch claim should be completed by Producer")
+	t.Log("✓ Producer executed")
+
+	t.Log("Waiting for 5 ProcessedRecords...")
+	require.True(t, waitForArtefactCount(ctx, bbClient, "ProcessedRecord", 5, 10*time.Second),
+		"Should have 5 ProcessedRecords")
+	t.Log("✓ All 5 ProcessedRecords created")
+
+	records := getArtefactsByType(ctx, bbClient, "ProcessedRecord")
+	for i, record := range records {
+		require.True(t, waitForClaimCreated(ctx, bbClient, record.ID, 5*time.Second),
+			"ProcessedRecord %d claim should be created", i+1)
+	}
+	t.Log("✓ All ProcessedRecord claims created")
+
+	// Wait for Controller to accumulate and Orchestrator to launch worker
+	t.Log("Waiting for worker to execute via controller-worker pattern...")
+	report := waitForArtefactType(ctx, t, bbClient, "AggregatedReport", 30*time.Second)
+	require.NotNil(t, report, "AggregatedReport should be created")
+	t.Logf("✓ Worker executed via controller-worker pattern: AggregatedReport %s", report.ID)
+
+	// Verify only ONE output (controller-worker pattern executed once)
+	t.Log("Verifying single execution...")
+	time.Sleep(2 * time.Second)
+
+	reports := getArtefactsByType(ctx, bbClient, "AggregatedReport")
+	require.Len(t, reports, 1, "Should have exactly 1 AggregatedReport (controller launched worker once)")
+	t.Log("✓ Controller-worker pattern executed once (1 AggregatedReport)")
+
+	t.Log("=== Controller Mode + COUNT Pattern E2E Test PASSED ===")
+}
+
 // Helper functions for deterministic test conditions
 
 // waitForClaimCreated waits for the orchestrator to create a claim for an artefact.
