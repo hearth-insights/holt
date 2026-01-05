@@ -254,14 +254,37 @@ func (e *Engine) handleClaimEvent(ctx context.Context, claim *blackboard.Claim, 
 // 2. M3.6: If bid_script is configured, execute it with target artefact as JSON on stdin
 // 3. M2.2: Fall back to static bidding_strategy from config
 func (e *Engine) determineBidType(ctx context.Context, claim *blackboard.Claim, targetArtefact *blackboard.Artefact) (blackboard.BidType, error) {
-	// M5.1: Check synchronizer first (highest priority)
-	// M5.2: Synchronizer checks dependencies and lock status, but doesn't acquire lock during bidding
+	// M5.1.1: Check synchronizer first (highest priority)
+	// Traditional mode and controller mode use IDENTICAL bidding logic
 	if e.synchronizer != nil {
-		// M5.1: Synchronizers evaluate claims for trigger types (wait_for), not ancestor type
+		// Check if this is a merge pattern (COUNT/TYPES mode)
+		mergeBid, err := shouldBidMerge(ctx, e.bbClient, e.config.AgentName, claim, e.config.SynchronizeConfig)
+		if err != nil {
+			log.Printf("[ERROR] Merge bid evaluation failed for claim %s: %v", claim.ID, err)
+			return blackboard.BidTypeIgnore, nil
+		}
+
+		if mergeBid != nil {
+			// Merge pattern detected (COUNT/TYPES)
+			// Bid IGNORE on regular bid phase, submit separate merge bid
+			log.Printf("[Synchronizer] Merge pattern detected, will bid IGNORE (merge bids handled separately)")
+
+			// Submit merge bid asynchronously (don't block regular bidding)
+			go func() {
+				if err := e.bbClient.SubmitBid(ctx, claim.ID, mergeBid); err != nil {
+					log.Printf("[ERROR] Failed to submit merge bid for claim %s: %v", claim.ID, err)
+				} else {
+					log.Printf("[Synchronizer] ✓ Submitted MERGE bid for claim %s (mode=%s)", claim.ID, mergeBid.Metadata["mode"])
+				}
+			}()
+
+			return blackboard.BidTypeIgnore, nil
+		}
+
+		// Not a merge pattern - use old synchronizer logic (dependency wait pattern)
 		decision, err := e.synchronizer.shouldBidOnClaim(ctx, claim)
 		if err != nil {
 			log.Printf("[ERROR] Synchronizer evaluation failed for claim %s: %v", claim.ID, err)
-			// Don't fall through - synchronizer errors should not silently ignore
 			return "", fmt.Errorf("synchronizer evaluation failed: %w", err)
 		}
 		switch decision {
@@ -269,10 +292,8 @@ func (e *Engine) determineBidType(ctx context.Context, claim *blackboard.Claim, 
 			log.Printf("[Synchronizer] Conditions met, bidding 'exclusive' on claim %s", claim.ID)
 			return blackboard.BidTypeExclusive, nil
 		case DecisionIgnore:
-			// Ignore this claim (not a trigger, conditions not met, or error occurred)
 			return blackboard.BidTypeIgnore, nil
 		default:
-			// Should never happen - all Decision values handled above
 			log.Printf("[ERROR] Unexpected synchronizer decision: %v", decision)
 			return blackboard.BidTypeIgnore, nil
 		}

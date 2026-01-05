@@ -739,12 +739,8 @@ agents:
       type: "exclusive"
       target_types: ["DataBatch"]
   Aggregator:
-    mode: controller
     image: "holt-test-agent:latest"
-    command: ["/app/pup", "controller"]
-    worker:
-      image: "holt-test-agent:latest"
-      command: ["/app/m5_1_aggregator.sh"]
+    command: ["/app/m5_1_aggregator.sh"]
     synchronize:
       ancestor_type: "GoalDefined"
       wait_for:
