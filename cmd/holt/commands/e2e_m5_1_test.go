@@ -376,9 +376,7 @@ services:
 		if t.Failed() {
 			env.DumpInstanceLogs()
 		}
-		downCmd := &cobra.Command{}
-		downInstanceName = env.InstanceName
-		_ = runDown(downCmd, []string{})
+		env.ForceCleanup()
 		t.Log("✓ Cleanup complete")
 	}()
 
@@ -741,8 +739,12 @@ agents:
       type: "exclusive"
       target_types: ["DataBatch"]
   Aggregator:
+    mode: controller
     image: "holt-test-agent:latest"
-    command: ["/app/m5_1_aggregator.sh"]
+    command: ["/app/pup", "controller"]
+    worker:
+      image: "holt-test-agent:latest"
+      command: ["/app/m5_1_aggregator.sh"]
     synchronize:
       ancestor_type: "GoalDefined"
       wait_for:
@@ -758,9 +760,7 @@ services:
 		if t.Failed() {
 			env.DumpInstanceLogs()
 		}
-		downCmd := &cobra.Command{}
-		downInstanceName = env.InstanceName
-		_ = runDown(downCmd, []string{})
+		env.ForceCleanup()
 		t.Log("✓ Cleanup complete")
 	}()
 
@@ -816,9 +816,6 @@ services:
 	// Wait for Aggregator to synchronize and create AggregatedReport
 	t.Log("Waiting for Aggregator to execute...")
 	report := waitForArtefactType(ctx, t, bbClient, "AggregatedReport", 30*time.Second)
-	if report == nil {
-		env.DumpInstanceLogs()
-	}
 	require.NotNil(t, report, "AggregatedReport should be created")
 	t.Logf("✓ Aggregator executed: AggregatedReport %s", report.ID)
 
@@ -829,10 +826,6 @@ services:
 
 	// Verify ONLY ONE AggregatedReport exists (no infinite loop)
 	reports := getArtefactsByType(ctx, bbClient, "AggregatedReport")
-	if len(reports) != 1 {
-		t.Logf("ERROR: Found %d AggregatedReports (expected 1)", len(reports))
-		env.DumpInstanceLogs()
-	}
 	require.Len(t, reports, 1, "Should have exactly 1 AggregatedReport (no output looping)")
 	t.Log("✓ No output looping detected (only 1 AggregatedReport)")
 
