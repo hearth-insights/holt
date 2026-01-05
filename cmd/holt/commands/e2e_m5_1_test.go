@@ -167,9 +167,6 @@ services:
 	t.Log("Step 4: Waiting for Synchronizer to bid and execute...")
 	// Synchronizer should now detect all conditions met and bid
 	deployResult := waitForArtefactType(ctx, t, bbClient, "DeployResult", 30*time.Second)
-	if deployResult == nil {
-		env.DumpInstanceLogs()
-	}
 	require.NotNil(t, deployResult, "DeployResult should exist (Synchronizer succeeded)")
 	t.Logf("✓ Synchronizer executed successfully: DeployResult %s", deployResult.ID)
 
@@ -273,13 +270,6 @@ services:
 
 	// Get the records
 	records, _ := testutil.FindAllArtefactsOfType(ctx, bbClient, "ProcessedRecord")
-	if len(records) != 5 {
-		env.DumpInstanceLogs()
-		failures, _ := testutil.FindAllArtefactsOfType(ctx, bbClient, "Failure")
-		for _, f := range failures {
-			t.Logf("FAILURE DETECTED: %s", f.Payload.Content)
-		}
-	}
 	require.Equal(t, 5, len(records), "Should have exactly 5 ProcessedRecords")
 
 	// Verify metadata injection
@@ -293,9 +283,6 @@ services:
 			metadata = make(map[string]string)
 		}
 
-		if metadata["batch_size"] != "5" {
-			env.DumpInstanceLogs()
-		}
 		assert.Equal(t, "5", metadata["batch_size"], "Record %d should have batch_size=5", i)
 	}
 	t.Log("✓ All 5 ProcessedRecords created with correct metadata")
@@ -311,10 +298,6 @@ services:
 	// Wait for Aggregator to synchronize and create report
 	t.Log("Waiting for Aggregator to synchronize...")
 	report := waitForArtefactType(ctx, t, bbClient, "AggregatedReport", 30*time.Second)
-	if report == nil {
-		t.Log("AggregatedReport not found - dumping logs...")
-		env.DumpInstanceLogs()
-	}
 	require.NotNil(t, report, "AggregatedReport should exist")
 	t.Logf("✓ Aggregator synchronized: %s", report.ID)
 
@@ -836,10 +819,6 @@ services:
 
 	// Verify Aggregator did NOT bid on its own output
 	aggregatorBid, exists := bids["Aggregator"]
-	if exists && aggregatorBid.BidType != blackboard.BidTypeIgnore {
-		t.Logf("ERROR: Aggregator bid %s on its own output (should be ignore)", aggregatorBid.BidType)
-		env.DumpInstanceLogs()
-	}
 	require.True(t, !exists || aggregatorBid.BidType == blackboard.BidTypeIgnore,
 		"Aggregator should ignore its own output (AggregatedReport)")
 	t.Log("✓ Aggregator correctly ignored its own output artefact")
