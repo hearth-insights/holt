@@ -51,9 +51,12 @@ func run() int {
 	}
 
 	// M3.4: Mode decision tree
-	// 1. If HOLT_MODE=controller → controller mode (bidder-only)
-	// 2. Else if --execute-claim <id> → worker mode (execute-only)
-	// 3. Else → traditional mode (standard agent)
+	// 1. If HOLT_MODE=controller → controller mode (bidding + worker launch)
+	// 2. Else if --execute-claim <id> → worker mode (execute-only, NO bidding)
+	// 3. Else → traditional mode (bidding + direct execution)
+	//
+	// Note: Bidding logic (including synchronize configs) is IDENTICAL for modes 1 & 3.
+	// Only difference: how grants are handled (notification vs worker launch).
 	holtMode := os.Getenv("HOLT_MODE")
 
 	if holtMode == "controller" {

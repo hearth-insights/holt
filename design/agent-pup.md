@@ -50,6 +50,35 @@ However, to support different scaling models, the `pup` can activate these gorou
 *   **Behavior**: The `pup` is single-purpose. It immediately executes the specific claim it was assigned, publishes the resulting artefact, and then exits. It does not watch for other claims or perform any bidding.
 *   **Use Case**: The ephemeral, scalable execution units for a controller-based agent.
 
+### **3.4. Synchronizer Bidding (M5.1.1)**
+
+Agents configured with `synchronize` in `holt.yml` use specialized fan-in coordination bidding logic that works **identically** in both Standard and Controller modes.
+
+**Key Principle**: The `synchronize` configuration is completely independent of the operational mode. The bidding logic is identical; only the execution method differs.
+
+**Bidding Behavior**:
+
+1.  **wait_for Type Filtering**: The pup only evaluates claims for artefact types listed in the `wait_for` configuration. Claims for other types (including the agent's own outputs) are ignored with bid type `ignore`.
+2.  **Merge Patterns**: For COUNT or TYPES synchronization modes, the pup submits both:
+    *   A regular `ignore` bid (to skip normal grant phases)
+    *   A separate `merge` bid (processed by the Orchestrator's merge phase accumulator)
+3.  **Execution After Grant**: When the Orchestrator completes merge accumulation and grants the Fan-In claim:
+    *   **Standard Mode**: The pup receives a grant notification via its subscribed channel and executes directly.
+    *   **Controller Mode**: The Orchestrator launches an ephemeral worker pup with `--execute-claim <fan_in_claim_id>`.
+
+**Example Configuration**:
+
+```yaml
+my_aggregator:
+  synchronize:
+    ancestor_type: "Goal"
+    wait_for:
+      - type: "DataRecord"
+        count_from_metadata: "batch_size"
+```
+
+This agent will only bid on `DataRecord` claims. When N records accumulate (where N = batch_size metadata), the Orchestrator grants a single Fan-In claim for execution.
+
 ## **4. The Context Assembly Algorithm**
 
 This is the core of the `pup`'s intelligence layer. It makes the agent appear stateful by providing it with a deep historical context for any given task.

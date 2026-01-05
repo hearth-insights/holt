@@ -84,6 +84,15 @@ Once consensus is reached, the orchestrator transitions the claim through a stri
     *   **Execution**: The orchestrator waits for the agent to produce its output artefact.
     *   **Completion**: When the artefact is received, the claim is marked as `complete`.
 
+5.  **Merge Phase (`pending_merge`) - M5.1.1**:
+    *   **Purpose**: Coordinates fan-in patterns where agents wait for multiple prerequisite artefacts before executing.
+    *   **Activation**: Claims with only `merge` bids (from synchronizer agents) skip directly to this phase.
+    *   **Accumulation**: The orchestrator maintains per-ancestor accumulators in Redis. Each merge bid atomically adds the claim to the accumulator and checks if all expected items have arrived (COUNT or TYPES mode).
+    *   **Grant**: When an accumulator completes, the orchestrator creates a deterministic Fan-In claim ID and grants it:
+        *   **Standard Mode Agents**: Publishes grant notification to agent's event channel.
+        *   **Controller Mode Agents**: Launches ephemeral worker with Fan-In claim ID.
+    *   **Completion**: The granted agent executes once with all accumulated artefacts as input, then the claim is marked complete.
+
 ### **3.4. Automated Feedback Loop (M3.3)**
 
 Instead of simply terminating a claim upon review rejection, the orchestrator initiates an automated rework cycle.
