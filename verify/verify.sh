@@ -20,8 +20,15 @@ USER_PWD=$(pwd)
 
 # Determine if we have local access to the transparency log
 # Use absolute path for safety
-SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+SCRIPT_PATH="${BASH_SOURCE[0]:-}"
+if [ -n "$SCRIPT_PATH" ]; then
+    SCRIPT_DIR=$(cd "$(dirname "$SCRIPT_PATH")" && pwd)
+    REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+else
+    # Fallback if piped (e.g. curl | bash)
+    SCRIPT_DIR=$(pwd)
+    REPO_ROOT=$(pwd)
+fi
 
 # Check for key in root or verify dir
 if [ -f "${REPO_ROOT}/cosign.pub" ]; then
@@ -163,14 +170,19 @@ done < checksums.txt
 echo "[5/5] Verifying Container Image..."
 IMAGE="ghcr.io/hearth-insights/holt/holt-orchestrator:${VERSION}"
 
+# Check if we already verified a local docker tarball
+LOCAL_DOCKER_VERIFIED=$(echo -e "$SUMMARY_REPORT" | grep -c "holt-orchestrator-docker.*tar.gz|.*Verified" || true)
+
 echo "Verifying: ${IMAGE}"
 if cosign verify --key cosign.pub "${IMAGE}" > /dev/null 2>&1; then
     echo "✓ Container Image Signature VERIFIED"
     append_summary "✓" "Container Image" "Signature Verified"
+elif [ "$LOCAL_DOCKER_VERIFIED" -gt 0 ]; then
+    echo "- Container Image (Registry): Skipped/Not found (Local tarball already verified)"
+    append_summary "-" "Container Image" "Skipped (Local tarball verified)"
 else
     echo "✗ Container Image Signature Verification FAILED"
     echo "  (Ensure you have network access and the image exists)"
-    # We mark this as a failure in summary
     HAS_FAILURE=1
     append_summary "✗" "Container Image" "Verification Failed (Network/Image missing)"
 fi
