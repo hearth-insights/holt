@@ -1,9 +1,9 @@
 {
   "version": "latest",
-  "commit": "749a3d0fad7753a8e2d5ed160643c6c141812774",
-  "build_date": "2026-04-29 13:18:31 UTC",
+  "commit": "70d652b46587c872f20b197615a1c98a2b089c59",
+  "build_date": "2026-06-01 14:05:14 UTC",
   "docker_image": "ghcr.io/hearth-insights/holt-engine/holt-orchestrator:latest",
-  "docker_digest": "sha256:4fa858d4b17ea8445bb502bdb7f08155ffe90c14bf25c7d1d5b05b22a9af2fb6",
+  "docker_digest": "sha256:3eef0ee99942ffe01147319908393cd3fc60f9f202062dcb070db622f6e7c19f",
   "ref": "refs/heads/main",
-  "workflow_run": "https://github.com/hearth-insights/holt-engine/actions/runs/25110671623"
+  "workflow_run": "https://github.com/hearth-insights/holt-engine/actions/runs/26759304925"
 }
