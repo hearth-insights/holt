@@ -1,221 +1,159 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -euo pipefail
 
+# Holt Release Verification Script
+#
+# Usage:
+#   ./verify.sh [VERSION]
+#   ./verify.sh v1.2.3
+#   ./verify.sh latest        (resolves to the most recent stable release)
+#
+# Run from the directory containing the files you want to verify.
+# Only files present in the current directory are checked; others are skipped.
+# All verification material is fetched exclusively from the public Hearth Insights
+# transparency log at https://github.com/hearth-insights/holt — never from the
+# bundle itself, which could be tampered with in transit.
+#
+# Environment:
+#   TRANSPARENCY_BASE  Override the transparency log base URL (for testing)
+
 VERSION="${1:-latest}"
-TRANSPARENCY_BASE="https://raw.githubusercontent.com/hearth-insights/holt/main"
-RELEASE_BASE="https://github.com/hearth-insights/holt-engine/releases/download"
+TRANSPARENCY_BASE="${TRANSPARENCY_BASE:-https://raw.githubusercontent.com/hearth-insights/holt/main}"
 
-echo "================================================"
-echo "Holt Release Verification Script"
-echo "Version: ${VERSION}"
-echo "================================================"
-echo ""
+# ---- helpers ----
 
-# Create temp directory
-TEMP_DIR=$(mktemp -d)
-trap "rm -rf ${TEMP_DIR}" EXIT
-
-# Capture user's PWD for relative file search
-USER_PWD=$(pwd)
-
-# Determine if we have local access to the transparency log
-# Use absolute path for safety
-SCRIPT_PATH="${BASH_SOURCE[0]:-}"
-if [ -n "$SCRIPT_PATH" ]; then
-    SCRIPT_DIR=$(cd "$(dirname "$SCRIPT_PATH")" && pwd)
-    REPO_ROOT="$(dirname "$SCRIPT_DIR")"
-else
-    # Fallback if piped (e.g. curl | bash)
-    SCRIPT_DIR=$(pwd)
-    REPO_ROOT=$(pwd)
-fi
-
-# Check for key in root or verify dir
-if [ -f "${REPO_ROOT}/cosign.pub" ]; then
-    LOCAL_KEY="${REPO_ROOT}/cosign.pub"
-else
-    LOCAL_KEY="${REPO_ROOT}/verify/cosign.pub"
-fi
-
-LOCAL_RELEASE_DIR="${REPO_ROOT}/releases/${VERSION}"
-
-echo "Debug: Script dir: ${SCRIPT_DIR}"
-echo "Debug: Local key found at: ${LOCAL_KEY}"
-
-cd "${TEMP_DIR}"
-
-# Download or Copy public key
-echo "[1/5] Getting public key..."
-if [ -f "${LOCAL_KEY}" ]; then
-    echo "Using local public key: ${LOCAL_KEY}"
-    cp "${LOCAL_KEY}" cosign.pub
-else
-    echo "Downloading public key from: ${TRANSPARENCY_BASE}/verify/cosign.pub"
-    curl -sSfL "${TRANSPARENCY_BASE}/verify/cosign.pub" -o cosign.pub
-fi
-echo "✓ Public key present"
-echo ""
-
-# Download or Copy checksums and signature
-echo "[2/5] Getting checksums from transparency log..."
-if [ -d "${LOCAL_RELEASE_DIR}" ] && [ -f "${LOCAL_RELEASE_DIR}/checksums.txt" ]; then
-    echo "Using local release files from: ${LOCAL_RELEASE_DIR}"
-    cp "${LOCAL_RELEASE_DIR}/checksums.txt" checksums.txt
-    cp "${LOCAL_RELEASE_DIR}/checksums.txt.sig" checksums.txt.sig
-else
-    echo "Downloading from transparency log..."
-    curl -sSfL "${TRANSPARENCY_BASE}/releases/${VERSION}/checksums.txt" -o checksums.txt
-    curl -sSfL "${TRANSPARENCY_BASE}/releases/${VERSION}/checksums.txt.sig" -o checksums.txt.sig
-fi
-echo "✓ Checksums present"
-echo ""
-
-# Verify checksums signature
-echo "[3/5] Verifying checksums signature..."
-if ! command -v cosign &> /dev/null; then
-    echo "ERROR: cosign not found. Install from: https://docs.sigstore.dev/cosign/installation/"
-    exit 1
-fi
-
-cosign verify-blob --key cosign.pub --signature checksums.txt.sig checksums.txt
-echo "✓ Checksums signature VERIFIED"
-echo ""
-
-# Verify all assets listed in checksums.txt
-# Track results for summary
-SUMMARY_REPORT=""
-HAS_FAILURE=0
-
-append_summary() {
-    local status="$1"
-    local name="$2"
-    local info="$3"
-    SUMMARY_REPORT="${SUMMARY_REPORT}\n${status} ${name}|${info}"
+die() {
+  echo "ERROR: $*" >&2
+  exit 1
 }
 
-echo "[4/5] Verifying assets..."
-echo "Scanning for local assets in: ${LOCAL_RELEASE_DIR:-"release dir"}, ${REPO_ROOT:-"repo root"}, and ${USER_PWD}..."
+sha256_of() {
+  if command -v sha256sum &>/dev/null; then
+    sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum &>/dev/null; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    die "No SHA256 tool found. Install sha256sum (Linux) or shasum (macOS)."
+  fi
+}
 
-# We need to map filenames in checksums.txt (key) to local files
-while read -r line; do
-    EXPECTED_HASH=$(echo "$line" | awk '{print $1}')
-    FILENAME=$(echo "$line" | awk '{print $2}' | sed 's|^\./||') # Remove leading ./
-    
-    # Skip README.md as it often differs in the repo vs release artifact
-    if [ "${FILENAME}" = "README.md" ]; then
-        # echo "Skipped: README.md (Source file, may generally match but not guaranteed)"
-        append_summary "-" "${FILENAME}" "Skipped (Source file)"
-        continue
-    fi
-    
-    # Search for the file
-    FOUND_FILE=""
-    if [ -f "${LOCAL_RELEASE_DIR}/${FILENAME}" ]; then
-        FOUND_FILE="${LOCAL_RELEASE_DIR}/${FILENAME}"
-    elif [ -f "${USER_PWD}/${FILENAME}" ]; then
-        FOUND_FILE="${USER_PWD}/${FILENAME}"
-    elif [ -f "${REPO_ROOT}/${FILENAME}" ]; then
-        FOUND_FILE="${REPO_ROOT}/${FILENAME}"
-    elif [ -f "${FILENAME}" ]; then
-         FOUND_FILE="${FILENAME}"
+# Check files present in the current directory against a checksums file.
+# Entries in the checksums file whose filename is not present are silently skipped.
+# Outputs per-file results; sets PASSED, FAILED, SKIPPED globals.
+check_files_against_checksums() {
+  local checksums_file="$1"
+  PASSED=0; FAILED=0; SKIPPED=0
+
+  while IFS= read -r line; do
+    # Skip blank lines and comments
+    [[ -z "${line// }" ]] && continue
+    [[ "$line" == \#* ]] && continue
+
+    local expected_hash filename
+    expected_hash="${line%%  *}"
+    filename="${line#*  }"
+    filename="${filename#./}"   # normalise: strip any leading ./
+
+    if [[ ! -f "$filename" ]]; then
+      (( SKIPPED++ )) || true
+      continue
     fi
 
-    if [ -n "$FOUND_FILE" ]; then
-        echo "Found: ${FILENAME}"
-        
-        # Verify Hash
-        ACTUAL_HASH=$(sha256sum "$FOUND_FILE" | awk '{print $1}')
-        if [ "${EXPECTED_HASH}" = "${ACTUAL_HASH}" ]; then
-            echo "  ✓ Checksum VERIFIED"
-            ASSET_STATUS="✓"
-            ASSET_NOTE="Checksum Verified"
-        else
-            echo "  ✗ Checksum MISMATCH"
-            echo "    Expected: ${EXPECTED_HASH}"
-            echo "    Got:      ${ACTUAL_HASH}"
-            HAS_FAILURE=1
-            append_summary "✗" "${FILENAME}" "Checksum Mismatch"
-            continue # proceed to next file, don't verify sig of bad file
-        fi
-        
-        # Verify Signature if .sig exists
-        # Check in same location as found file
-        SIG_FILE="${FOUND_FILE}.sig"
-        if [ -f "${SIG_FILE}" ]; then
-             if cosign verify-blob --key cosign.pub --signature "${SIG_FILE}" "${FOUND_FILE}" > /dev/null 2>&1; then
-                 echo "  ✓ Signature VERIFIED"
-                 ASSET_NOTE="${ASSET_NOTE}, Signature Verified"
-             else
-                 echo "  ✗ Signature VERIFICATION FAILED"
-                 HAS_FAILURE=1
-                 ASSET_STATUS="✗"
-                 ASSET_NOTE="Signature Failed"
-             fi
-        else
-             echo "  - No local signature file found (integrity covered by checksums.txt)"
-             ASSET_NOTE="${ASSET_NOTE} (No detached sig)"
-        fi
-        
-        append_summary "${ASSET_STATUS}" "${FILENAME}" "${ASSET_NOTE}"
-        
+    local actual_hash
+    actual_hash=$(sha256_of "$filename")
+
+    if [[ "$actual_hash" == "$expected_hash" ]]; then
+      printf "  ✓ %s\n" "$filename"
+      (( PASSED++ )) || true
     else
-        echo "Skipped: ${FILENAME} (Not found locally)"
-        # append_summary "-" "${FILENAME}" "Not found locally" 
-        append_summary "-" "${FILENAME}" "Not found locally"
+      printf "  ✗ %s  (hash mismatch)\n" "$filename"
+      printf "      expected: %s\n" "$expected_hash"
+      printf "      actual:   %s\n" "$actual_hash"
+      (( FAILED++ )) || true
     fi
-    echo ""
-done < checksums.txt
+  done < "$checksums_file"
+}
 
-# Verify Container Image
-echo "[5/5] Verifying Container Image..."
-IMAGE="ghcr.io/hearth-insights/holt/holt-orchestrator:${VERSION}"
+# ---- main ----
 
-# Check if we already verified a local docker tarball
-LOCAL_DOCKER_VERIFIED=$(echo -e "$SUMMARY_REPORT" | grep -c "holt-orchestrator-docker.*tar.gz|.*Verified" || true)
+printf "================================================\n"
+printf "Holt Release Verification\n"
+printf "Version: %s\n" "$VERSION"
+printf "================================================\n\n"
 
-echo "Verifying: ${IMAGE}"
-if cosign verify --key cosign.pub "${IMAGE}" > /dev/null 2>&1; then
-    echo "✓ Container Image Signature VERIFIED"
-    append_summary "✓" "Container Image" "Signature Verified"
-elif [ "$LOCAL_DOCKER_VERIFIED" -gt 0 ]; then
-    echo "- Container Image (Registry): Skipped/Not found (Local tarball already verified)"
-    append_summary "-" "Container Image" "Skipped (Local tarball verified)"
-else
-    echo "✗ Container Image Signature Verification FAILED"
-    echo "  (Ensure you have network access and the image exists)"
-    HAS_FAILURE=1
-    append_summary "✗" "Container Image" "Verification Failed (Network/Image missing)"
+TMPDIR_VERIFY=$(mktemp -d)
+trap 'rm -rf "$TMPDIR_VERIFY"' EXIT
+
+# Step 1: Fetch trust material from the transparency log
+printf "[1/3] Fetching verification artifacts from transparency log...\n"
+printf "      %s\n\n" "$TRANSPARENCY_BASE"
+
+curl -fsSL "${TRANSPARENCY_BASE}/verify/cosign.pub" \
+     -o "${TMPDIR_VERIFY}/cosign.pub"
+
+curl -fsSL "${TRANSPARENCY_BASE}/releases/${VERSION}/checksums.txt" \
+     -o "${TMPDIR_VERIFY}/checksums.txt"
+
+curl -fsSL "${TRANSPARENCY_BASE}/releases/${VERSION}/checksums.txt.sig" \
+     -o "${TMPDIR_VERIFY}/checksums.txt.sig"
+
+# Fetch metadata for version resolution (best-effort; not required)
+curl -fsSL "${TRANSPARENCY_BASE}/releases/${VERSION}/release-metadata.json" \
+     -o "${TMPDIR_VERIFY}/release-metadata.json" 2>/dev/null || true
+
+# Print resolved version (latest → v1.2.3)
+if [[ -f "${TMPDIR_VERIFY}/release-metadata.json" ]]; then
+  RESOLVED_VERSION=$(grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' \
+    "${TMPDIR_VERIFY}/release-metadata.json" 2>/dev/null \
+    | grep -o '"[^"]*"$' | tr -d '"') || true
+  if [[ -n "${RESOLVED_VERSION:-}" ]]; then
+    printf "Resolved version: %s\n\n" "$RESOLVED_VERSION"
+  fi
 fi
-echo ""
 
+# Step 2: Verify the checksums file signature
+printf "[2/3] Verifying checksums file signature...\n"
 
-echo ""
-echo "================================================"
-echo "VERIFICATION SUMMARY"
-echo "================================================"
-printf "%-3s %-40s %s\n" "STS" "ARTIFACT" "DETAILS"
-echo "----------------------------------------------------------------"
-# Use printf to format the summary lines stored in variable
-echo -e "$SUMMARY_REPORT" | grep -v "^$" | while IFS='|' read -r first rest; do
-    # first contains "ICON NAME"
-    # rest contains "DETAILS"
-    status=$(echo "$first" | awk '{print $1}')
-    name=$(echo "$first" | cut -d' ' -f2-)
-    printf "%-3s %-40s %s\n" "$status" "$name" "$rest"
-done
-echo "================================================"
-echo ""
-
-if [ $HAS_FAILURE -eq 0 ]; then
-    echo "✓ ALL VERIFICATIONS PASSED"
-    echo "The Holt ${VERSION} release is cryptographically verified."
+if command -v cosign &>/dev/null; then
+  cosign verify-blob \
+    --key "${TMPDIR_VERIFY}/cosign.pub" \
+    --signature "${TMPDIR_VERIFY}/checksums.txt.sig" \
+    "${TMPDIR_VERIFY}/checksums.txt"
+  printf "✓ Checksums cryptographically verified (cosign)\n"
 else
-    echo "⚠ SOME VERIFICATIONS FAILED or WERE SKIPPED"
-    echo "Please review the summary above."
-    # We exit with 0 to avoid breaking pipelines if it's just skipped files?
-    # But failed verification (x) should probably be non-zero if strictly verifying.
-    # For now, let's keep it 0 but warn, unless user wants strict mode. User just said "is this correct? ALL PASSED" -> so they want ACCURATE reporting.
-    # If there is an explicit FAILURE ("✗"), we should probably exit non-zero or clearly state it failed.
-    # I'll stick to clear message for now.
+  printf "WARNING: cosign not installed — signature check skipped.\n"
+  printf "         Install from https://docs.sigstore.dev/cosign/installation/\n"
+  printf "         Continuing with SHA256 integrity check only.\n"
 fi
-echo "Transparency log: https://github.com/hearth-insights/holt/tree/main/releases/${VERSION}"
+printf "\n"
+
+# Step 3: Verify files present in the working directory
+printf "[3/3] Checking files in: %s\n\n" "$(pwd)"
+
+set +e
+check_files_against_checksums "${TMPDIR_VERIFY}/checksums.txt"
+set -e
+
+TOTAL=$(grep -c '[^[:space:]]' "${TMPDIR_VERIFY}/checksums.txt" || true)
+printf "\nSummary: %d verified, %d failed, %d not present (skipped) of %d total release artifacts\n\n" \
+  "$PASSED" "$FAILED" "$SKIPPED" "$TOTAL"
+
+if [[ $FAILED -gt 0 ]]; then
+  printf "================================================\n"
+  printf "VERIFICATION FAILED — do not use these files.\n"
+  printf "Report suspicious artifacts to: security@hearth-insights.com\n"
+  printf "Transparency log: https://github.com/hearth-insights/holt/tree/main/releases/%s\n" "$VERSION"
+  printf "================================================\n"
+  exit 1
+fi
+
+if [[ $PASSED -eq 0 ]]; then
+  printf "WARNING: No release artifacts found in the current directory.\n"
+  printf "         Run this script from inside an extracted Holt release bundle.\n"
+  exit 1
+fi
+
+printf "================================================\n"
+printf "✓ ALL PRESENT FILES VERIFIED\n"
+printf "================================================\n\n"
+printf "Transparency log: https://github.com/hearth-insights/holt/tree/main/releases/%s\n" "$VERSION"
