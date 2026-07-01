@@ -1,0 +1,9 @@
+{
+  "version": "v0.9.2",
+  "commit": "61a4b9d117e17d6f5e1ebffef73936652dd10951",
+  "build_date": "2026-07-01 19:10:23 UTC",
+  "docker_image": "ghcr.io/hearth-insights/holt-engine/holt-orchestrator:v0.9.2",
+  "docker_digest": "sha256:a682ec6ca77c54825d812ab68ae0a48dd18e8d5e8390049334601cee0dc86ad7",
+  "ref": "refs/tags/v0.9.2",
+  "workflow_run": "https://github.com/hearth-insights/holt-engine/actions/runs/28540835895"
+}
