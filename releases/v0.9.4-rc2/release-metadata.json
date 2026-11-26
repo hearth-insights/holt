@@ -1,0 +1,23 @@
+{
+  "version": "v0.9.4-rc2",
+  "commit": "f7df7b7686854476d889fb1e848b5b8eb03eb5f0",
+  "build_date": "2026-11-26 21:14:56 UTC",
+  "docker_image": "ghcr.io/hearth-insights/holt-engine/holt-orchestrator:v0.9.4-rc2",
+  "docker_digest": "sha256:af897c5d11c441f304c82fbe50a534ffb4fe2bdb71fe81ad4c7a3c2fdd1ead83",
+  "docker_images": {
+    "holt-orchestrator": {
+      "image": "ghcr.io/hearth-insights/holt-engine/holt-orchestrator:v0.9.4-rc2",
+      "digest": "sha256:af897c5d11c441f304c82fbe50a534ffb4fe2bdb71fe81ad4c7a3c2fdd1ead83"
+    },
+    "holt-api": {
+      "image": "ghcr.io/hearth-insights/holt-engine/holt-api:v0.9.4-rc2",
+      "digest": "sha256:e4849d01e35d6499bd72a27196046b04917632dc97ffb86a01353b0b8d7e02a1"
+    },
+    "holt-logd": {
+      "image": "ghcr.io/hearth-insights/holt-engine/holt-logd:v0.9.4-rc2",
+      "digest": "sha256:bd04c89c2a071645888a3491ddb517d3714a8289fa94f0ffcfd0c2ce0dfa6dec"
+    }
+  },
+  "ref": "refs/tags/v0.9.4-rc2",
+  "workflow_run": "https://github.com/hearth-insights/holt-engine/actions/runs/45894557445"
+}
